@@ -190,7 +190,20 @@ Newest first.
 
 ### The estimate's page
 
-The header shows the number, the title, the {{project|lower}}, the contract it became, and its status.
+The estimate fills the screen as **one panel that scrolls inside itself**. The bar along its top and the rail down its left never move, however far down an eighty-line takeoff you are.
+
+**The bar along the top.**
+
+| What is there | What it is |
+| --- | --- |
+| {key:‹} | Back to this {{project|lower}}'s estimates. |
+| The title | The estimate's **title**, or its number when it has no title yet, with its status beside it as a chip — {chip:Draft|pending}, {chip:Sent|info}, {chip:Accepted|good}. |
+| The line under it | `EST-2 · sent 2 Sep · valid to 2 Oct · {{project}} 24-108 · 118 Oak Row`. Only the parts this estimate has. |
+| `MARGIN` | What the job leaves you, as a percentage and an amount. **Red if it has gone negative.** |
+| `THE CLIENT PAYS` | The total, and deliberately the largest thing on the screen. It is the number you are working towards; everything else on the page is how you got to it. |
+| The save state | See below. |
+| {button:Save|outline} | Saves now, rather than waiting the second. |
+| {button:Send to client|primary} | **Saves first, then does the sending.** With no link out yet it makes one and copies it to your clipboard, ready to paste into an email. With one already open it takes you to it, under **Proposal and the client's link**, so you can copy it again or see how many times it has been opened. |
 
 **It saves itself.** About a second after you stop typing, whatever you have changed is saved — you do not have to remember to. Beside the {button:Save|primary} button a line tells you where you stand:
 
@@ -201,64 +214,119 @@ The header shows the number, the title, the {{project|lower}}, the contract it b
 | `Saving…` | it is going now |
 | `Not saved — try Save` | something went wrong and **your changes are still only on this screen**. The message above it says what; press {button:Save|primary} once you have dealt with it. |
 
-{button:Save|primary} still works and does one thing the automatic save does not: it refreshes the figures beside the editor — **By cost code** and the panels on the {{project|lower}}'s page. The automatic save deliberately leaves the page alone so nothing moves under your cursor while you are typing.
+{button:Save|outline} still works and does one thing the automatic save does not: it refreshes the figures that come from what is *saved* — **By cost code**, and the panels on the {{project|lower}}'s page. The automatic save deliberately leaves the page alone so nothing moves under your cursor while you are typing.
 
 Two things worth knowing. Anything you type *while* a save is in flight is not in that save — it is picked up by the next one, and the line will say `Unsaved changes` until it is. And if you leave the page while it still says `Unsaved changes`, those changes are lost, so give it a second or press {button:Save|primary}.
 
-**The top block.**
+**The rail down the left.** Three blocks, and they are the answer to "where is the money and where did the total come from".
+
+- **`WHERE THE MONEY IS`** — a single bar split by item, then one line per item: a coloured dot, its name, and **its share of what the client pays** as a whole percentage. **Click one and the lines jump to that item.** The item you are currently scrolled inside is shown in bold. The last row is **`Not in an item`**, the lines that belong to no item. The shares do not add to 100% and should not: overhead and profit are part of the total and belong to no item, and the block underneath shows exactly how much.
+- **`HOW THE TOTAL IS BUILT`** — `Cost`, `Markup`, `Overhead`, `Profit` and then `Total`, in that order, so you can read down it. `Markup` is what you are adding to your cost on the lines — the step that was missing before and made the old footer hard to follow. When any item is priced by hand a sentence says how much: *$8,400.00 of this you priced by hand, so it takes no overhead or profit again.*
+- **`WHEN THE CLIENT SAYS YES`** — {button:Use as budget|outline}, {button:Schedule of values|outline} and {button:Accept onto a contract|primary}, each described further down. **Owners only**; if you do not see them, you are not an owner of this workspace.
+
+**The folded sections.** Four of them, shut by default so the lines have the screen. Each says what is inside it while it is shut, so you rarely need to open one just to look:
+
+| Section | Shut, it reads | What is inside |
+| --- | --- | --- |
+| **`Details`** | `EST-2 · 2 Sep → 2 Oct` | `Number`, `Title`, `Sent`, `Valid until`, `Status`, `Decided` and `Notes`. |
+| **`Rates`** | `15 · 10 · 10%` | The three rates. |
+| **`Proposal and the client's link`** | `A brochure · By item` and, when a link is out, {chip:opened 3 times|good} | What the client is sent, and the link itself. |
+| **`By cost code`** | `5 codes · $19,539.00 cost` | What the saved lines add up to per code. |
+
+**It remembers which ones you left open**, per estimate, in this browser. A brand-new estimate opens `Details` for you, because it has no number yet; an estimate a client has signed opens the proposal section, because that signature is why you opened the page.
+
+**`Details`.**
 
 - **`Number`** and **`Title`**.
-- **`Status`** — `Draft`, `Sent`, `Declined` or `Superseded`. `Accepted` is not on the list: accepting is a button of its own, below. Picking `Sent` fills **`Sent`** with today; picking `Declined` fills **`Decided`**.
-- **`Sent`**, **`Valid until`**, **`Decided`** — dates, all optional.
-- **`Markup on cost, %`** — the rate every line sells at unless the line says otherwise. `15`.
-- **`Overhead, %`** — on the lines' price. `10`.
-- **`Profit, %`** — on the price plus overhead. `10`. Leave both at nothing if you price everything on the lines; leave the markup at nothing if you sell at cost and take it all below. Either way it is the same estimate, and the margin at the bottom is the same number.
+- **`Sent`**, **`Valid until`**, **`Decided`** — dates, all optional. `Decided` only appears once there is a decision to date.
+- **`Status`** — `Draft`, `Sent`, `Declined` or `Superseded`. `Accepted` is not on the list: accepting is a button of its own, on the rail. Picking `Sent` fills **`Sent`** with today; picking `Declined` fills **`Decided`**.
+- **`Notes`** — anything the estimate should remember that the client does not see. It is in **`Details`**, at the top of the page.
+
+**`Rates`.** Three lines, each a label and a box with a `%` beside it.
+
+- **`Markup on cost`** — the rate every line sells at unless the line says otherwise. `15`.
+- **`Overhead`** — on the lines' price. `10`.
+- **`Profit`** — on the price plus overhead. `10`. Leave both at nothing if you price everything on the lines; leave the markup at nothing if you sell at cost and take it all below. Either way it is the same estimate, and the margin at the top is the same number.
+
+**`Hints`** — the chip on the **Lines** header. On, you get the short explanations: the sentence under the rates, the examples under the type-a-line box, the note under **By cost code**. Off, they go away and stay away until you turn them back on. Everything that is a *rule about a box you are typing in* stays either way.
 
 **Items — what the client buys.** A client does not buy "320 sf of tile at $4.20, 320 sf of tile labour at $3.50, two bags of thinset". A client buys **tile flooring**, at one price. An **item** is that: a name in the client's own words, with the lines that build it up underneath it. The proposal shows the item and its price; the build-up behind it is yours.
 
-{button:Add item|ghost} adds one. An item is a shaded row across the table with its lines beneath it, and a second row under its name for the sentence the client reads:
+{button:Add item|outline|folder-plus} on the **Lines** header adds one. An item is a shaded bar across the lines with its own lines beneath it, and **it stays stuck to the top of the list while you scroll through it**, so you always know which item you are inside.
 
-| On the item's row | What it is |
+| On the item's bar | What it is |
 | --- | --- |
+| The grip | Drag the item — and everything under it — somewhere else in the list. |
+| Its number | `1`, `2`, `3`. **Type a different number and the item moves there.** See *Putting them in order*, below. |
+| {key:⌄} | Hides this item's lines, so you can see the shape of a long estimate. The bar and its price stay; nothing is deleted. |
+| The dot | The colour this item has on the rail. |
 | `Item name` | What the client reads — `Tile flooring, master and hall baths`. Required: **an item with no name is ignored when you save**, the way a line with no description is, and its lines are saved as ordinary loose lines. |
-| How it is priced | `Add up the lines` or `Price it myself`. See below. |
-| The price | Only when you chose `Price it myself`: what the client pays for this item. Otherwise the cell reads *Its lines add up*. |
-| `Cost` | What the lines under it cost you. |
-| `Price` | What the client is asked for it, with the margin and its percentage underneath — this is the number that tells you whether a round price was a safe one. |
+| The price chip | {chip:Lines add up|outline} or {chip:Priced by hand|good}. **Click it to swap.** See below. |
+| The margin | `10.7% margin` — what this item leaves you. **Red if it is negative.** This is the number that tells you whether a round price was a safe one, and it is here because here is where you decide to move it. |
+| The price | What the client is asked for this item. A box you can type in when it is priced by hand; otherwise the sum of its lines. |
+| {button:Save item as an assembly|ghost|package} | Keeps this item and its lines for the next job. See *Assemblies*. |
 | The bin | **Removes the item and leaves its lines.** They become ordinary lines again with their pricing untouched; nothing you typed is thrown away. |
-| The sentence below | One line the client reads under this item on the proposal — *Porcelain tile, master and hall baths, as selected.* Optional, and it prints only on the by-item and line-by-line proposals. |
+
+With **Client wording** on, a second line appears under the bar for the sentence the client reads — *Porcelain tile, master and hall baths, as selected.* Optional, and it prints only on the by-item and line-by-line proposals.
 
 **The two ways to price an item.**
 
-- **`Add up the lines`** — the item is worth what its lines are worth, and each line takes the markup, the overhead and the profit exactly as any line does. This is the ordinary case.
-- **`Price it myself`** — you type what the client pays and **that is the number that prints**. Overhead and profit are *not* added to it again: typing $8,400 means the client is asked $8,400, and the margin beside it shows what that leaves you against the $6,950 behind it. Use it when you sell round numbers, or when the build-up is yours alone.
+- **{chip:Lines add up|outline}** — the item is worth what its lines are worth, and each line takes the markup, the overhead and the profit exactly as any line does. This is the ordinary case.
+- **{chip:Priced by hand|good}** — you type what the client pays and **that is the number that prints**. Overhead and profit are *not* added to it again: typing $8,400 means the client is asked $8,400, and the margin beside it shows what that leaves you against the $6,950 behind it. Use it when you sell round numbers, or when the build-up is yours alone. Every line inside such an item reads *in the item* in place of its own price, because that line's price never reaches the client.
 
 If you want a lump you have *costed* — "the plumbing subcontract is $12,000 and I mark it up like everything else" — that is a **line** with a blank quantity, not an item priced by hand.
 
-**When every item is priced by hand** there is nothing left for overhead and profit to be taken on, and the total is simply the sum of the prices you typed. The page says so under the figures. That is how a typed price works; if you meant the rates to apply, let the item's lines add up instead.
+**When every item is priced by hand** there is nothing left for overhead and profit to be taken on, and the total is simply the sum of the prices you typed. The rail says so. That is how a typed price works; if you meant the rates to apply, let the item's lines add up instead.
 
-**{button:Add line|ghost} at the top** adds a line in no item. Each item has its own {button:Add line to …|ghost} underneath it. A line's first cell — **`Item`** — is which item it belongs to, and `Not in an item` moves it out; **that column is not there at all until the estimate has an item**, so an estimate of plain lines looks exactly as it always did. Lines in no item are listed last, under **Not in an item**.
+**{button:Add a line here|ghost|plus}** sits at the foot of every item, and at the foot of **`Not in an item`** for a line that belongs to none. Lines in no item are listed last, under that heading, with their own total.
 
 Once the estimate is accepted its items are fixed with its lines and its rates.
 
-**Lines.** One row per thing you are pricing. The bin at the end of a row removes it (the last row stays).
+**Lines.** One row per thing you are pricing. Five things are on the row itself and the rest is one click away — the row is quiet on purpose, because an estimate of eighty lines showing every box at once is the thing nobody could read.
 
-| Column | What it is |
+| On the row | What it is |
 | --- | --- |
-| `Item` | Which item this line builds up, or `Not in an item`. Only shown once the estimate has an item. With **Client wording** on, a `Show it` tick appears under it for a line inside an item — see below. |
-| `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. **A cost code is yours and is not on the proposal** unless you choose to show the price by code. |
-| `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. Write it for **yourself** — where the price came from, what the scope excludes, which quote it is off. With **Client wording** on, a second smaller box appears underneath for what the client reads instead. |
-| `Qty` | Blank is one — a lump sum. `120`. |
-| `Unit` | `cy`, `sf`, `ea`, `ls` — yours. |
+| The grip | Drag the line anywhere in the list, including into another item. |
+| Its number | `2.1` — item 2, first line. **Type a different one and the line moves there.** See *Putting them in order*. |
+| {key:›} | Opens the rest of the line. |
+| `Description` | Required; a row with none is ignored when you save. `Slab, 4in, fibre mesh`. Write it for **yourself** — where the price came from, what the scope excludes, which quote it is off. A line you have kept off the proposal says *off the proposal* underneath. |
+| `Qty` and the unit | One cell: `320` `sf`, so it reads the way you would say it. A blank quantity is one — a lump sum. |
 | `Unit cost` | What one unit costs you. `185.00`. |
-| `Markup %` | This line's markup, if it differs from the estimate's; the estimate's rate shows greyed as the placeholder. Greyed out once a unit price is typed, because the price then does not come from a markup. |
-| `Unit price` | Type a price per unit and the line sells at quantity times that, whatever the markup — a unit-price bid. Blank reads `by markup`. |
-| `Cost` | Quantity at the unit cost, as you type. |
-| `Price` | Quantity at the unit price if there is one, else the cost plus its markup. |
+| `Cost` | Quantity at the unit cost, as you type. On a narrow screen it is in the opened row instead. |
+| `Price` | Quantity at the unit price if there is one, else the cost plus its markup. For a line inside an item you priced by hand it reads *in the item*. |
+| The bin | Removes the row (the last row stays). |
+
+**Open a row** with the {key:›} and the rest of it is underneath, without losing your place in the box you were typing in:
+
+| In the opened row | What it is |
+| --- | --- |
+| `In item` | Which item this line builds up, or `Not in an item`. |
+| `Cost code` | Where the money lands in the budget, from the {{project|lower}}'s cost code list. `No code` is allowed and the line still prices; it is left out when the estimate becomes the budget. **A cost code is yours and is not on the proposal** unless you choose to show the price by code. |
+| `Markup` | This line's markup, if it differs from the estimate's; the estimate's rate shows greyed as the placeholder — `15% — the estimate's`. Greyed out once a price per unit is typed, because the price then does not come from a markup. |
+| `Price per unit` | Type a price per unit and the line sells at quantity times that, whatever the markup — a unit-price bid. Blank reads `by markup`. |
+| `What the client reads` | What the client sees in place of your description. Blank uses the description. |
+| `Shown on the proposal` | Only for a line **inside an item** — see *Client wording*, below. A line in no item says so, and is always shown. |
+| The margin | `margin $161.28 · 10.7%` for that one line. |
 
 Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
 
-**Typing a line as a sentence.** The box under the table is the fast way in, and it is what you will use for most of an estimate. Type one line, press **Enter**, and it appears in the table with the cursor still in the box ready for the next one.
+**Putting them in order.** The order here is the order on the proposal, so it matters. Two ways in, and they do the same thing:
+
+- **Drag it.** Take hold of the grip at the left of any line or item and drop it where it belongs. An item takes its lines with it. A line dropped on a row inside another item joins that item; dropped on that item's {button:Add a line here|ghost|plus} strip, it joins at the end.
+- **Type its number.** Every row shows one: items are `1`, `2`, `3`, and a line is its item's number and its place in it — `2.1`, `2.2`. **Type the number you want it to be and it goes there**, and everything renumbers.
+
+| Type this, over | And it |
+| --- | --- |
+| `3`, over an item's `10` | Moves that item to third; what was third and below moves down one. |
+| `1`, over a line's `2.4` | Moves the line to the top of its own item. |
+| `3.2`, over a line's `1.1` | Moves the line **into item 3**, second. This is how a line changes items without a mouse. |
+| `4.1`, with three items | Takes the line **out of its item**: `Not in an item` is the section after the last one, so it has a number too. |
+
+A number past the end puts the row last. **Anything it cannot read puts the old number straight back** and moves nothing — a row that quietly went somewhere you did not ask for is worse than one that did not move. {key:Esc} changes your mind before you leave the box.
+
+Reordering saves itself like everything else. On a phone there are no grips — the screen is too narrow to drag on usefully — but the numbers are there, and they do the whole job.
+
+**Typing a line as a sentence.** The box along the bottom is the fast way in, and it is what you will use for most of an estimate. Type one line, press **Enter**, and it appears in the list with the cursor still in the box ready for the next one.
 
 | Type this | You get |
 | --- | --- |
@@ -282,9 +350,11 @@ Prices take a `$` and commas if you like them: `2 ea door @ 1,250` and `@ $4.20`
 - **Check the date.** The hint always says how long ago, because that is what tells you whether to trust it. A price from last week is worth taking; one from two years ago is worth looking up.
 - **A lump shows no rate** — `12,000.00 · 24-109 · last week` — because there is no unit to put it over.
 
-**Where a typed line lands.** Once the estimate has items, a select beside the box says which item the next line goes in, and **it stays where you put it** — you are usually typing one item's lines together. Set it back to `Not in an item` for loose lines.
+**The type-a-line bar never scrolls away.** It is pinned to the bottom of the panel, so on a long estimate you can be looking at line seventy and still type line seventy-one without scrolling anywhere.
 
-**{button:Paste lines|outline|clipboard-paste}** takes a whole block at once: one line each, in the same words, or straight out of a spreadsheet. Every line is shown in a preview before anything is added — quantity, unit and unit cost as they were read — and any line it could not read is marked in red and counted on the button, which reads *Add 4 lines, leave out 1*. Nothing is added until you press it, and the lines land in the item the select names. **A pasted takeoff is priced from memory too**: any line that came with no price and that you have priced before is filled in, and the dialog says how many — *12 priced from what you charged last time. Check them — a price can be a year old.* This is the point of it: a takeoff off a spreadsheet is descriptions and quantities, and the prices are what you would otherwise type forty times.
+**Where a typed line lands.** Once the estimate has items, **`Into:`** beside the box says which item the next line goes in, and **it stays where you put it** — you are usually typing one item's lines together. Set it back to `Not in an item` for loose lines.
+
+**{button:Paste a takeoff|outline|clipboard-paste}** takes a whole block at once: one line each, in the same words, or straight out of a spreadsheet. Every line is shown in a preview before anything is added — quantity, unit and unit cost as they were read — and any line it could not read is marked in red and counted on the button, which reads *Add 4 lines, leave out 1*. Nothing is added until you press it, and the lines land in the item the select names. **A pasted takeoff is priced from memory too**: any line that came with no price and that you have priced before is filled in, and the dialog says how many — *12 priced from what you charged last time. Check them — a price can be a year old.* This is the point of it: a takeoff off a spreadsheet is descriptions and quantities, and the prices are what you would otherwise type forty times.
 
 **{key:Ctrl+D}** while the cursor is in a row copies that row directly beneath it. Most lines in a takeoff are a small change from the line above, so this is usually quicker than typing another sentence.
 
@@ -309,33 +379,35 @@ It saves the lines exactly as you priced them — descriptions, the client's wor
 - **It is a starting point, not a quote.** Check the quantities after you drop one. The dialog tells you what one of them costs at the size it was saved, so you can see straight away whether it is the right thing.
 - **{button:Take it out of the library|ghost}** removes an assembly you no longer want. **Lines it has already made are untouched** — those belong to the {{project|plural|lower}} they are on.
 - Assemblies belong to your business, not to a {{project|lower}}: every {{project|lower}} you estimate from now on can use them.
-**Moving around the table with the keyboard.** A takeoff is usually typed down one column — forty quantities, then forty costs — so the arrows work the way they do in a spreadsheet.
+**Moving around the lines with the keyboard.** A takeoff is usually typed down one column — forty quantities, then forty costs — so the arrows work the way they do in a spreadsheet.
 
 | Key | What it does |
 | --- | --- |
-| {key:↓} / {key:↑} | The same box one row down or up. What is in it is selected, so you can just type over it. |
+| {key:↓} / {key:↑} | The same box one row down or up. What is in it is selected, so you can just type over it. A box the pinned headers would be sitting over is scrolled out from under them first. |
 | {key:Enter} | The same box one row down. **On the last row it makes a new line** and puts you in the same box on it, so you can keep going without reaching for the mouse. The new line goes in the same item as the row you were on. |
 | {key:Tab} | The next box across, as it always has. {key:Shift+Tab} goes back. |
 | {key:←} / {key:→} | Move the cursor inside the box you are in. They never change rows — you need them to fix a typo in the middle of a price. |
 
 {key:↓} on the very last row does nothing: only {key:Enter} makes a line, so you cannot add rows by holding an arrow down.
 
-**Client wording.** The tick beside {button:Add item|ghost} on the **Lines** header. Off by default, because writing the client's words is a pass of its own and you do not want a second box on every row while you are typing a takeoff. It comes up already on for an estimate that has client wording or a hidden line. With it on, every line gets two more controls:
+**Client wording.** The {button:Client wording|outline} chip on the **Lines** header. It shows each item's own sentence as a line under its bar — the one the client reads under that item on the proposal. Off by default, because writing the client's words is a pass of its own and you do not want a second box on every item while you are typing a takeoff. It comes up already on for an estimate that has client wording or a hidden line.
+
+A **line's** own client wording is in the opened row, whether the chip is on or not:
 
 | Control | What it does |
 | --- | --- |
-| The second description box | What the client reads in place of your line. You keep `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`; the client reads `Porcelain tile flooring`. **Leave it blank and the client reads your line as written** — so only fill it in where your own wording would not do. It is used on the proposal *and* on the schedule of values, because the schedule becomes the invoice the client receives. |
-| `Show it` | Only on a line **inside an item**. Untick it and the line is not a row on the proposal at all — contingency, supervision, an allowance carry, cleanup you price but will not itemise. **The money does not change**: it is still in the item's price, the cost, the total, the margin and the budget. It simply is not printed. |
+| `What the client reads` | What the client sees in place of your line. You keep `Tile — mud set, Schluter, mtl only, per AJ quote 8/14`; the client reads `Porcelain tile flooring`. **Leave it blank and the client reads your line as written** — so only fill it in where your own wording would not do. It is used on the proposal *and* on the schedule of values, because the schedule becomes the invoice the client receives. |
+| `Shown on the proposal` | Only for a line **inside an item**. Untick it and the line is not a row on the proposal at all — contingency, supervision, an allowance carry, cleanup you price but will not itemise. **The money does not change**: it is still in the item's price, the cost, the total, the margin and the budget. It simply is not printed. |
 
-A line you have hidden reads **Not on the proposal** in its row whether the tick box is showing or not, so you cannot lose track of it.
+A line you have hidden reads **off the proposal** on its row whether it is open or shut, so you cannot lose track of it.
 
 **A line can only be hidden inside an item**, and that is not fussiness: hidden money has to have somewhere to hide. On a line-by-line proposal a hidden loose line would be money with no row, and the page would stop adding up. The item is that somewhere — and **an item that hides any of its lines prints as one row at its price**, exactly as an item you priced yourself does, so the client never sees half a build-up.
 
 Hiding a line keeps it off the *list*; it is not a way to make money untraceable. A hidden line's cost still lands in its cost code, so if you show the price **By cost code** its amount is inside one of those sums. If you need the money itself not to be followable, price the item yourself.
 
-**The six figures.** `Cost` (every line at cost — every line, whether it sits in an item or not), `Price` (what the client is asked for the lines and the items, before overhead and profit; it also names how much of that was **priced by hand** when any item is), `Overhead`, `Profit`, `Total` (price plus overhead plus profit — what the client is asked for) and `Margin` (total less cost, with its percentage of the total).
+**Where the figures are.** The margin and the total are in the bar along the top; the build-up — `Cost`, `Markup`, `Overhead`, `Profit`, `Total` — is on the rail. `Cost` is every line at cost, whether it sits in an item or not. `Markup` is what you are adding to that cost on the lines. `Total` is what the client is asked for, and the margin above is that less your cost.
 
-**The proposal block.** What the client is sent, saved with the rest of the form.
+**`Proposal and the client's link`.** What the client is sent, saved with the rest of the form. Open the section and the words are on the left, the link on the right.
 
 - **`What it is`** — two documents, and this picks which one you get.
   - **`A letter`** — the default, and what a production job, a remodel or a repair sends: two or three pages on your letterhead with the facts, the scope, the price, the exclusions, the terms and a line to sign. {button:Print proposal|outline|file-text} gives you the PDF.
@@ -349,27 +421,27 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 - **`Scope of work`** — what the price covers, in the client's words. Every line you type is its own paragraph on the page.
 - **`Not included`** — one exclusion per line: *Permits and utility fees.* *Landscaping.*
 - **`Terms`** — the payment schedule, what a change costs, how long the price holds. A new estimate starts with the terms of the last one you wrote, so this is usually a read-through.
-- {button:Print proposal|outline|file-text} opens the proposal as a PDF in a new tab — **whichever document `What it is` names**, so you never have to think about it — and {button:Open brochure|outline|book-open} opens the same document on screen, where a {button:Print|primary} button in the corner prints it from your browser. Both show the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` beside the {button:Save|primary} button first.
+- {button:Print proposal|outline|file-text} opens the proposal as a PDF in a new tab — **whichever document `What it is` names**, so you never have to think about it — and {button:Open brochure|outline|book-open} opens the same document on screen, where a {button:Print|primary} button in the corner prints it from your browser. Both show the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` in the bar along the top first.
 - **A brochure's PDF takes a few seconds the first time after a quiet spell**, because a brochure is printed by a browser on the server rather than drawn like the letter. If it comes back with a page saying it could not be printed, the proposal itself is fine: {button:Open brochure|outline|book-open} and use the {button:Print|primary} button, choosing **Save as PDF** as the destination. Tell us, though — that page means something needs setting on our side, not yours.
 
-**The client's link — send the proposal instead of attaching it.** Under the proposal block, **`The client's link`**. Anybody on the team may make one.
+**The client's link — send the proposal instead of attaching it.** Down the right of **`Proposal and the client's link`**, and {button:Send to client|primary} at the top of the page is the short way to it. Anybody on the team may make one.
 
-{button:Make a link|outline|link-2} makes a private web address for this proposal and **copies it to your clipboard**, ready to paste into your own email. Your client opens it on a phone, a tablet or a laptop, with nothing to install and nobody to sign in as. They see exactly the document you would have attached — the brochure or the letter, whichever `What it is` says — with a {button:Print|primary} button for their own copy, and underneath it a card where they can **type their name and accept**.
+{button:Make a link|outline|link-2} — or {button:Send to client|primary} when nothing is out yet — makes a private web address for this proposal and **copies it to your clipboard**, ready to paste into your own email. Your client opens it on a phone, a tablet or a laptop, with nothing to install and nobody to sign in as. They see exactly the document you would have attached — the brochure or the letter, whichever `What it is` says — with a {button:Print|primary} button for their own copy, and underneath it a card where they can **type their name and accept**.
+
+**A live link is a block of its own**, so the one that is working is never buried in a list of ones that are not:
 
 | What you see | What it means |
 | --- | --- |
-| {chip:Open|secondary} | Live. The client can read it and accept it. |
-| {chip:Accepted|default} | They accepted. The name, the date and the price are above the list. |
-| {chip:Revoked|outline} | You took it back. It no longer opens. |
-| {chip:Expired|outline} | Past its date. It no longer opens. |
-| {chip:Estimate changed|outline} | It was accepted and then you edited the estimate, so it has stopped working. |
-| `Opened 4 times, last on 14 October` | How often it has been opened, so you know whether to chase. `Not opened yet` until they do. |
+| `One link open` | Live. The client can read it and accept it. |
+| `Opened 3 times, last 14 Sep · expires 2 Oct` | How often it has been opened, so you know whether to chase, and when it stops working. `Not opened yet` until they do. |
+| An acceptance, at the top | They accepted: the name, the date and the price they were looking at. |
+| `2 dead links: revoked, never opened · estimate changed, opened 5 times` | One quiet line for everything that no longer opens. **Revoked** you took back; **expired** is past its date; **estimate changed** was accepted and then the estimate was edited. |
 
 - **The link ends when your offer ends.** It stops working on the date in `Valid until`, or in thirty days when you have not set one. There is no such thing as a link that lives forever.
-- {button:Copy|ghost} copies an open link again, for when you need to re-send it. {button:Revoke|ghost} kills it immediately — use it the moment a proposal goes to the wrong address.
+- {button:Copy link|ghost|copy} copies an open link again, for when you need to re-send it. {button:Revoke|ghost} kills it immediately — use it the moment a proposal goes to the wrong address. {button:New link|ghost|link-2} makes another; the old one keeps working until you revoke it.
 - **It reads properly on a phone**, which is where most clients will open it: the page reflows to the screen instead of making them pinch and scroll sideways. What they print is still the full page, whatever they read it on.
 - **Anyone holding the link can open it**, so treat it like the proposal itself: it is private because the address is unguessable, not because it asks who you are. Send it to the person, not to a public channel.
-- **Accepting on the link does not accept the estimate here.** It records that they accepted — their name, the date, and the price they were looking at — and that is what you then act on with {button:Accept|primary} below, which is where you name the contract it becomes. Nothing about your books moves because a client pressed a button.
+- **Accepting on the link does not accept the estimate here.** It records that they accepted — their name, the date, and the price they were looking at — and that is what you then act on with {button:Accept onto a contract|primary} on the rail, which is where you name the contract it becomes. Nothing about your books moves because a client pressed a button.
 - **You are not notified yet.** The acceptance shows here, on the estimate, and you will see it next time you open it. Checking back is on you for now.
 - **If you edit the estimate after they accepted**, that link stops working — it cannot go on showing a document that is not the one they agreed to. Their acceptance stays on the record, against the version and price they saw. Make a new link for the revision.
 
@@ -396,17 +468,17 @@ What can stop a save: `Check the form and try again.` (a rate or a quantity that
 
 ### Accepting it
 
-The client said yes. {button:Accept|primary} (owners; greyed until the {{project|lower}} has a contract) asks for the **`Contract`** it priced and **`Accepted on`** (today). The estimate's total, as saved, becomes that contract's value; the estimate is marked `Accepted`, shows the contract in its header, and its rates and lines are fixed from here — shown, greyed, and not sent. `Estimate accepted`.
+The client said yes. {button:Accept onto a contract|primary} on the rail (owners; greyed until the {{project|lower}} has a contract) asks for the **`Contract`** it priced and **`Accepted on`** (today). The estimate's total, as saved, becomes that contract's value; the estimate is marked {chip:Accepted|good}, and its rates, its lines and the proposal's words are fixed from here — shown, greyed, and not sent. `Estimate accepted`.
 
 A **signed** contract's value moves by change order, not by accepting an estimate: `That contract is signed, so its value changes with a change order.` — unless the estimate's total is already the contract's value to the cent, which is accepted and touches nothing, or the signed contract has **no value recorded yet** (a cost-plus agreement usually has none), in which case the estimate fills it in: entry, not revision. A contract on another {{project|lower}} is refused: `That is on another job: …`. Accepting twice, or changing an accepted estimate's rates, lines or status, is refused: `That estimate is fixed: estimate EST-1 was accepted; revise it as a new one.` To revise, start a new estimate and set this one to `Superseded` — the one status an accepted estimate can move to; the title and the notes still move too.
 
 ### Making it the budget
 
-{button:Use as budget|outline} (owners). The dialog says the cost as saved and what happens: each cost code's **cost** on the estimate becomes that code's original budget on the {{project|lower}}, replacing what the code had, and lines with no cost code are left out. {button:Make it the budget|primary}. `Budget set on 2 codes — $1,500.00 on lines with no code left out`. From there the budget moves as it always does, by change order, and the **Job cost** tab reads it.
+{button:Use as budget|outline} on the rail (owners). The dialog says the cost as saved and what happens: each cost code's **cost** on the estimate becomes that code's original budget on the {{project|lower}}, replacing what the code had, and lines with no cost code are left out. {button:Make it the budget|primary}. `Budget set on 2 codes — $1,500.00 on lines with no code left out`. From there the budget moves as it always does, by change order, and the **Job cost** tab reads it.
 
 ### Making it the schedule of values
 
-{button:Use as schedule of values|outline} (owners; greyed until the {{project|lower}} has a contract). Pick the **`Contract`**, then — **once the estimate has items** — **`Written`**:
+{button:Schedule of values|outline} on the rail (owners; greyed until the {{project|lower}} has a contract). Pick the **`Contract`**, then — **once the estimate has items** — **`Written`**:
 
 - **`By item`**, the default: one schedule line per item and one for each line in no item. This is almost always what you want, because it is the schedule your client can read: it matches the proposal they signed, and every draw is measured against it. An item bills as a sum and carries its lines' cost code when they all share one.
 - **`Line by line`**: one schedule line per estimate line — the whole takeoff. Fine on a short estimate; on a two-hundred-line one it makes a schedule nobody will certify. An item you priced yourself has that price shared across its own lines, so the schedule still adds up to the total.
@@ -420,6 +492,8 @@ Then {button:Make it the schedule|primary}: each row at its **price**, with the 
 Neither button is automatic on accepting: a {{project|lower}} budgeted at cost and billed on a schedule of milestones is written from the estimate for one and by hand for the other.
 
 ### By cost code
+
+**It is the fourth folded section on the estimate**, under the proposal. Shut, it reads `5 codes · $19,539.00 cost`.
 
 Under the editor, once the estimate has lines: each code's cost and price from the saved lines — the cost is what **Use as budget** writes, the price is what the job cost report will compare it with once the {{project|lower}} is billed. `No cost code` is the last row. A line held by an item you priced yourself is shown at its **share of that price** rather than at its own markup, so the prices here still add up to the estimate's.
 

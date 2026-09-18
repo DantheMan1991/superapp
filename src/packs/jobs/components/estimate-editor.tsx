@@ -1,21 +1,59 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { useDroppable } from "@dnd-kit/core";
+import {
   BookOpen,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardPaste,
   Copy,
   CornerDownLeft,
+  Eye,
   EyeOff,
   FileText,
   FolderPlus,
+  GripVertical,
+  History,
   Link2,
   Package,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,7 +65,6 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -37,6 +74,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { StatusBadge, type StatusTone } from "./status-badge";
 import {
   acceptEstimateAction,
   applyEstimateToBudgetAction,
@@ -54,6 +93,17 @@ import { quantityStringToThousandths, thousandthsToQuantityString } from "../bil
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
 import { suggestDriver } from "../assembly-math";
+import {
+  dragTo,
+  dropInSection,
+  inVisualOrder,
+  lineNumber,
+  linesIn,
+  moveItem,
+  parseAddress,
+  placeLine,
+  sectionOf,
+} from "../estimate-order";
 import {
   fillFromMemory,
   howLongAgo,
@@ -73,8 +123,6 @@ import {
 import {
   ESTIMATE_STATUSES,
   ESTIMATE_STATUS_LABELS,
-  GROUP_PRICE_MODES,
-  GROUP_PRICE_MODE_LABELS,
   PROPOSAL_FORMATS,
   PROPOSAL_FORMAT_LABELS,
   PROPOSAL_PRESENTATIONS,
@@ -105,6 +153,101 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** 2 Sep, the way the header and the folded summaries say a date. */
+function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+/**
+ * THE ITEM COLOURS ON THE RAIL. Four steps down the MODULE's accent — which
+ * the jobs route sets — rather than N invented hues: a rail of twelve distinct
+ * colours is a chart nobody asked for, and the dot's whole job is to tie a row
+ * in the list to a header in the grid. Mixing towards `--card` rather than
+ * towards white is what makes the ramp work on the dark theme too.
+ */
+const RAIL_STEPS = [100, 74, 52, 34];
+const railColour = (i: number): string =>
+  `color-mix(in oklab, var(--module-accent) ${RAIL_STEPS[i % RAIL_STEPS.length]}%, var(--card))`;
+
+/**
+ * WHAT THIS BROWSER REMEMBERS about the screen — which sections are folded
+ * shut, whether the hints line is showing. The BROWSER's business, not the
+ * server's and not the estimate's, so it never reaches a payload.
+ *
+ * Read through `useSyncExternalStore` rather than an effect: the server
+ * renders the defaults, the client reads what was last chosen on the same
+ * commit, and nothing calls `setState` inside an effect — which is the
+ * cascading render the lint refuses, and it is right to.
+ *
+ * `session` is the fallback for a browser that refuses storage: the choice
+ * still holds for as long as the tab is open, it is simply not remembered.
+ */
+const REMEMBERED_EVENT = "yosher:estimate-view";
+const session = new Map<string, string>();
+
+function readRemembered(key: string): string {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw !== null) return raw;
+  } catch {
+    // Storage refused: what was clicked this session still holds.
+  }
+  return session.get(key) ?? "";
+}
+
+function subscribeRemembered(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(REMEMBERED_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(REMEMBERED_EVENT, onChange);
+  };
+}
+
+/** Never clears a key it did not write. */
+function writeRemembered(key: string, value: string) {
+  session.set(key, value);
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Not remembered, still applied.
+  }
+  window.dispatchEvent(new Event(REMEMBERED_EVENT));
+}
+
+function useRemembered(key: string): [string, (value: string) => void] {
+  const value = useSyncExternalStore(
+    subscribeRemembered,
+    () => readRemembered(key),
+    () => "",
+  );
+  return [value, (next: string) => writeRemembered(key, next)];
+}
+
+/**
+ * WHAT THE PINNED STACK COSTS. The card header is 60px and the column header
+ * 32.5, so an item header pins at 60 narrow and 93 wide — **measured, not
+ * rounded**, because `position: sticky` pushes an element DOWN to its `top`
+ * even when it has not been scrolled. A `top` larger than the stack floats
+ * every item header below its own first row, with a gap where the rows show
+ * through; a `top` smaller leaves it under the column header. Both look like
+ * the sticky is broken, and neither is.
+ *
+ * This constant is the same distance plus the column's 20px padding, for the
+ * two places that scroll something out from under the stack by hand.
+ */
+const STICKY_STACK = 116;
+
+const STATUS_TONES: Record<string, StatusTone> = {
+  accepted: "good",
+  sent: "info",
+  draft: "pending",
+  declined: "quiet",
+  superseded: "quiet",
+};
+
 /**
  * A CLIENT-FACING ITEM being edited (ADR 0079). `key` is what this item's
  * lines hold: its id once it has one, a local key until then, which is what
@@ -131,6 +274,14 @@ const emptyGroup = (): GroupDraft => ({
 
 interface LineDraft {
   id: string | null;
+  /**
+   * WHAT THIS ROW IS CALLED FOR AS LONG AS IT EXISTS — its id once it has one,
+   * a local key until then. React's key, dnd-kit's id and `focusRow` are all
+   * this, because the alternative (the row's index) changes the moment
+   * anything is reordered, and a Ctrl+D that copies the wrong row is worse
+   * than one that does nothing.
+   */
+  key: string;
   /** The item this line sits in; "" leaves it loose. */
   groupKey: string;
   costCodeId: string;
@@ -146,8 +297,10 @@ interface LineDraft {
   unitPrice: string;
 }
 
+let nextLineKey = 0;
 const emptyLine = (groupKey = ""): LineDraft => ({
   id: null,
+  key: `new-line-${(nextLineKey += 1)}`,
   groupKey,
   costCodeId: NONE,
   description: "",
@@ -288,22 +441,6 @@ export function NewEstimateDialog({ projectId, trigger }: { projectId: string; t
   );
 }
 
-/**
- * The estimate, whole: the header and its rates, the lines with cost and
- * price computed as they are typed, the totals, and — for an owner — the
- * three acts that make it money: accept it onto a contract, make it the
- * budget, make it a contract's schedule of values (ADR 0069).
- *
- * **COST AND PRICE ARE TWO NUMBERS ON EVERY LINE.** A line sells at a markup
- * on its cost — the line's own or the estimate's default — unless a price
- * per unit is typed, which is how a unit-price bid is written. The extended
- * figures are never typed; the same rule the change order and the schedule
- * of values keep.
- *
- * **AN ACCEPTED ESTIMATE IS FIXED.** Its money became a contract's value, a
- * budget or a schedule; the rates and lines are shown and not sent. Revise
- * by starting a new one and marking this one superseded.
- */
 /** A saved item in the picker: enough to choose by, never its lines. */
 export interface AssemblyOption {
   id: string;
@@ -326,8 +463,47 @@ export interface ShareView {
   signedTotalCents: number | null;
 }
 
+/** What the saved lines add up to per cost code, worked out on the server. */
+export interface ByCodeRow {
+  costCodeId: string | null;
+  codeLabel: string | null;
+  costCents: number;
+  priceCents: number;
+}
+
+/** Which folded sections are open. Kept per estimate in `localStorage`. */
+interface OpenSections {
+  details: boolean;
+  rates: boolean;
+  proposal: boolean;
+  codes: boolean;
+}
+
+/**
+ * THE ESTIMATE EDITOR — a working panel, not a page (E8).
+ *
+ * One panel with its own height: a header that always shows what the client
+ * pays, a rail that says where that money is and how it was built, and a work
+ * column whose orientation furniture — the column headers, the item you are
+ * inside, the entry bar — is pinned. On an estimate of eighty lines nothing
+ * you need to keep your place ever scrolls away.
+ *
+ * **COST AND PRICE ARE TWO NUMBERS ON EVERY LINE.** A line sells at a markup
+ * on its cost — the line's own or the estimate's default — unless a price per
+ * unit is typed, which is how a unit-price bid is written. The extended
+ * figures are never typed; the same rule the change order and the schedule of
+ * values keep.
+ *
+ * **AN ACCEPTED ESTIMATE IS FIXED.** Its money became a contract's value, a
+ * budget or a schedule; the rates and lines are shown and not sent. Revise by
+ * starting a new one and marking this one superseded.
+ *
+ * **EVERY ROW HAS A NUMBER AND THE NUMBER IS AN ADDRESS** (ADR 0087): drag it
+ * by the grip, or type where it should be. See `estimate-order.ts`.
+ */
 export function EstimateEditor({
   projectId,
+  projectLabel,
   estimate,
   codes,
   contracts,
@@ -338,8 +514,11 @@ export function EstimateEditor({
   shares,
   prices,
   assemblies,
+  byCode,
 }: {
   projectId: string;
+  /** "Job 24-118 · 118 Oak Row" — worded by the page, so the editor holds no vocabulary. */
+  projectLabel: string;
   estimate: EditableEstimate;
   /** Every unit this business has typed before, so the entry bar's grammar knows it. */
   units: string[];
@@ -353,6 +532,7 @@ export function EstimateEditor({
   isOwner: boolean;
   symbol: string | null;
   shares: ShareView[];
+  byCode: ByCodeRow[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -375,9 +555,10 @@ export function EstimateEditor({
   /** The version every guarded verb is handed; it advances with each save. */
   const [version, setVersion] = useState(estimate.version);
   /**
-   * Writing the client's words is a pass of its own, so the two controls that do
-   * it are behind one switch and off by default: the table is already wider than
-   * its box, and a second input on every row would slow down typing a takeoff.
+   * Writing the client's words is a pass of its own, so the item's own
+   * sentence is behind one switch and off by default: a second input under
+   * every item header would slow down typing a takeoff. A line's client
+   * wording lives in that line's expansion, which is opt-in already.
    */
   const [clientWording, setClientWording] = useState(
     estimate.lines.some((l) => l.clientDescription.trim() !== "" || !l.clientVisible),
@@ -389,6 +570,7 @@ export function EstimateEditor({
     estimate.lines.length > 0
       ? estimate.lines.map((l) => ({
           id: l.id,
+          key: l.id,
           groupKey: l.groupId ?? "",
           clientDescription: l.clientDescription,
           clientVisible: l.clientVisible,
@@ -439,6 +621,13 @@ export function EstimateEditor({
     terms.overheadPpm + terms.profitPpm > 0;
 
   /**
+   * The sections IN THE ORDER THEY ARE DRAWN — every item, named or not, and
+   * then the loose pile. `named` is what the arithmetic counts; this is what
+   * the screen shows and therefore what a dragged row is addressed against.
+   */
+  const sectionKeys = useMemo(() => groups.map((g) => g.key), [groups]);
+
+  /**
    * THE ENTRY BAR (ADR 0081). One field, one sentence, Enter, and the cursor
    * never leaves it. `into` is the item the next line lands in and it STAYS
    * where it was put, because a builder types an item's lines together.
@@ -449,8 +638,53 @@ export function EstimateEditor({
   const entryRef = useRef<HTMLInputElement>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
-  /** The row the cursor is in, so Ctrl+D knows what to copy. */
-  const [focusRow, setFocusRow] = useState<number | null>(null);
+  /** The row the cursor is in, BY KEY, so Ctrl+D knows what to copy after a reorder. */
+  const [focusRow, setFocusRow] = useState<string | null>(null);
+
+  /* ------------------------------------------------------- what is unfolded */
+
+  const isNew = estimate.number.trim() === "" || estimate.title.trim() === "";
+  const signedShare = shares.find((s) => s.signedAt !== null) ?? null;
+  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
+  const [collapsedItems, setCollapsedItems] = useState<Set<string>>(new Set());
+  const [pinnedItem, setPinnedItem] = useState<string | null>(null);
+
+  const foldKey = `estimate-sections:${estimate.id}`;
+  const [storedFolds, setStoredFolds] = useRemembered(foldKey);
+  const [storedHints, setStoredHints] = useRemembered("estimate-hints");
+  const showHints = storedHints !== "off";
+
+  /**
+   * Shut by default except Lines — but a BRAND-NEW estimate opens Details,
+   * because it has no number yet, and a SIGNED share force-opens the proposal,
+   * because that acceptance is the reason this page was opened. Both beat the
+   * remembered choice.
+   */
+  const open = useMemo<OpenSections>(() => {
+    const base: OpenSections = {
+      details: isNew,
+      rates: false,
+      proposal: signedShare !== null,
+      codes: false,
+    };
+    if (storedFolds === "") return base;
+    try {
+      const stored = JSON.parse(storedFolds) as Partial<OpenSections>;
+      return {
+        details: stored.details ?? base.details,
+        rates: stored.rates ?? base.rates,
+        proposal: (stored.proposal ?? false) || base.proposal,
+        codes: stored.codes ?? base.codes,
+      };
+    } catch {
+      return base;
+    }
+  }, [storedFolds, isNew, signedShare]);
+
+  const setOpenSections = (next: OpenSections) => setStoredFolds(JSON.stringify(next));
+  const toggleSection = (which: keyof OpenSections) =>
+    setOpenSections({ ...open, [which]: !open[which] });
+  const toggleHints = () => setStoredHints(showHints ? "off" : "on");
 
   /**
    * The trade's units, the ones this business has typed on other estimates, and
@@ -464,8 +698,8 @@ export function EstimateEditor({
   /** Built once from the rows the page shipped; the first for each key wins. */
   const priceBook = useMemo(() => priceBookFrom(prices), [prices]);
 
-  function setLine(i: number, patch: Partial<LineDraft>) {
-    setLines((prev) => prev.map((l, j) => (i === j ? { ...l, ...patch } : l)));
+  function setLine(key: string, patch: Partial<LineDraft>) {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
   /** A parsed sentence as a row of the table. */
   function draftOf(parsed: ParsedEstimateLine, groupKey: string): LineDraft {
@@ -515,14 +749,14 @@ export function EstimateEditor({
   function duplicateFocused() {
     if (focusRow === null) return;
     setLines((prev) => {
-      const source = prev[focusRow];
-      if (!source) return prev;
-      const copy = { ...source, id: null };
-      return [...prev.slice(0, focusRow + 1), copy, ...prev.slice(focusRow + 1)];
+      const at = prev.findIndex((l) => l.key === focusRow);
+      if (at < 0) return prev;
+      const copy = { ...prev[at], id: null, key: `new-line-${(nextLineKey += 1)}` };
+      return [...prev.slice(0, at + 1), copy, ...prev.slice(at + 1)];
     });
   }
-  function setGroup(i: number, patch: Partial<GroupDraft>) {
-    setGroups((prev) => prev.map((g, j) => (i === j ? { ...g, ...patch } : g)));
+  function setGroup(key: string, patch: Partial<GroupDraft>) {
+    setGroups((prev) => prev.map((g) => (g.key === key ? { ...g, ...patch } : g)));
   }
   /** Removing an item leaves its lines loose, never deletes what was priced. */
   function removeGroup(key: string) {
@@ -531,6 +765,93 @@ export function EstimateEditor({
   }
   function addLine(groupKey: string) {
     setLines((prev) => [...prev, emptyLine(groupKey)]);
+  }
+  function addItem() {
+    setGroups((prev) => [...prev, emptyGroup()]);
+  }
+
+  /* --------------------------------------------- the order of it (ADR 0087) */
+
+  /** Move an item to a 1-based place, from its number box or from a drag. */
+  function moveItemTo(key: string, position: number) {
+    setGroups((prev) => moveItem(prev, prev.findIndex((g) => g.key === key), position));
+  }
+
+  /**
+   * A TYPED NUMBER on a line. `3` is a place in its own item, `3.2` is item 3,
+   * place 2 — which is how a line leaves one item for another without a mouse.
+   * The loose pile is the section after the last item, so `4.1` on a
+   * three-item estimate takes the line out of its item.
+   */
+  function moveLineTo(key: string, address: { section: number | null; position: number }) {
+    setLines((prev) => {
+      const row = prev.find((l) => l.key === key);
+      if (!row) return prev;
+      const sections = [...sectionKeys, ""];
+      const here = sectionOf(row, sectionKeys);
+      const wanted =
+        address.section === null
+          ? here
+          : (sections[Math.min(address.section, sections.length) - 1] ?? "");
+      return placeLine(prev, sectionKeys, key, wanted, address.position);
+    });
+  }
+
+  const sensors = useSensors(
+    // 4px, so a click into a cell is never read as the beginning of a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+
+  /**
+   * A LINE IS NEVER DROPPED ON AN ITEM'S HEADER BY ACCIDENT. The item wrappers
+   * are droppables too — they have to be, or an item with no lines could not be
+   * dragged into — so collisions are resolved against the containers of the
+   * SAME KIND as what is being dragged, plus the per-section drop zones. Left
+   * to itself, `closestCenter` hands back the enclosing item every time,
+   * because an item's box is taller than any row inside it.
+   */
+  const collisions: CollisionDetection = useCallback((args) => {
+    const kind = String(args.active.id).split(":")[0];
+    const wanted =
+      kind === "item"
+        ? (id: string) => id.startsWith("item:")
+        : (id: string) => id.startsWith("line:") || id.startsWith("zone:");
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((c) => wanted(String(c.id))),
+    });
+  }, []);
+
+  function onDragStart(e: DragStartEvent) {
+    setDragging(String(e.active.id));
+    setDragOver(null);
+  }
+  function onDragOver(e: DragOverEvent) {
+    setDragOver(e.over ? String(e.over.id) : null);
+  }
+  function onDragEnd(e: DragEndEvent) {
+    setDragging(null);
+    setDragOver(null);
+    const active = String(e.active.id);
+    const over = e.over ? String(e.over.id) : null;
+    if (!over || over === active) return;
+    if (active.startsWith("item:") && over.startsWith("item:")) {
+      const to = groups.findIndex((g) => g.key === over.slice(5));
+      if (to >= 0) moveItemTo(active.slice(5), to + 1);
+      return;
+    }
+    if (!active.startsWith("line:")) return;
+    const key = active.slice(5);
+    if (over.startsWith("line:")) {
+      setLines((prev) => dragTo(prev, sectionKeys, key, over.slice(5)));
+      return;
+    }
+    if (over.startsWith("zone:")) {
+      setLines((prev) => dropInSection(prev, sectionKeys, key, over.slice(5)));
+    }
   }
 
   /* --------------------------------------------------- assemblies (E6) */
@@ -552,7 +873,6 @@ export function EstimateEditor({
   /** The lines of an item, as the library keeps them. */
   function assemblyLinesOf(groupKey: string) {
     return rowsOf(groupKey)
-      .map(({ l }) => l)
       .filter((l) => l.description.trim() !== "")
       .map((l, i) => {
         const f = figuresOf(l);
@@ -574,8 +894,8 @@ export function EstimateEditor({
 
   function openSaveAssembly(groupKey: string) {
     const group = groups.find((g) => g.key === groupKey);
-    const lines = assemblyLinesOf(groupKey);
-    const driver = suggestDriver(lines);
+    const rows = assemblyLinesOf(groupKey);
+    const driver = suggestDriver(rows);
     setSaveFor(groupKey);
     setAsmName(group?.name.trim() ?? "");
     setAsmPer(thousandthsToQuantityString(driver.quantityThousandths));
@@ -650,21 +970,78 @@ export function EstimateEditor({
   /**
    * A TAKEOFF IS TYPED DOWN A COLUMN, NOT ACROSS A ROW. Somebody putting in
    * forty quantities wants the next quantity, and Tab — which the browser
-   * already gives — walks sideways through description, unit, cost and markup
-   * to get there. **Up and Down move within the column**; Tab is left exactly
-   * as it was, because it is the one key a keyboard user must be able to
-   * trust.
+   * already gives — walks sideways through description, unit and cost to get
+   * there. **Up and Down move within the column**; Tab is left exactly as it
+   * was, because it is the one key a keyboard user must be able to trust.
    *
    * **Left and Right are deliberately NOT claimed.** They move the caret
    * inside the field, and a grid that stole them would make a price with a
    * typo in the middle of it unfixable.
    *
    * Movement is resolved in DOM ORDER, not by index into `lines`: rows are
-   * grouped under their items on screen, so the row below is a fact about the
-   * document rather than about the array, and asking the document costs
-   * nothing and cannot disagree with what somebody is looking at.
+   * grouped under their items on screen and can be dragged between them, so
+   * the row below is a fact about the document rather than about the array,
+   * and asking the document costs nothing and cannot disagree with what
+   * somebody is looking at.
    */
   const gridRef = useRef<HTMLDivElement>(null);
+  const workRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * THE PANEL FILLS WHAT IS LEFT OF THE WINDOW, MEASURED.
+   *
+   * A `calc(100dvh - <a number>)` cannot be right, because the chrome above it
+   * is not a number: the job's vitals strip is five cards that wrap to two rows
+   * on a narrower window, and the job's name wraps too. Tuned to a wide window
+   * the panel hangs 95px below the fold on a narrow one; tuned to a narrow one
+   * it wastes a hand's width of screen on every other.
+   *
+   * So it is measured here and written straight to the node — a DOM write in an
+   * effect, which is what effects are for, and no state to re-render. The CSS
+   * height in `className` is the first paint before this runs, and below `md`
+   * the panel has no height of its own at all.
+   */
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const fit = () => {
+      if (!window.matchMedia("(min-width: 768px)").matches) {
+        el.style.height = "";
+        return;
+      }
+      el.style.height = "";
+      const top = el.getBoundingClientRect().top;
+      el.style.height = `${Math.max(520, window.innerHeight - top - 16)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    // The chrome above it changes height on its own — the vitals strip wraps.
+    const watch = new ResizeObserver(fit);
+    if (el.parentElement) watch.observe(el.parentElement);
+    return () => {
+      window.removeEventListener("resize", fit);
+      watch.disconnect();
+    };
+  }, []);
+  /**
+   * WHICH BOX IS ACTUALLY SCROLLING. At `lg` and up the work column has its own
+   * overflow; below it the rail sits on top and the two share the body's. Asking
+   * rather than assuming is what keeps the rail's jump and the keyboard's
+   * scroll-out-from-under-the-header working at every width.
+   */
+  const scroller = useCallback((): HTMLElement | null => {
+    let el: HTMLElement | null = workRef.current;
+    while (el) {
+      const overflow = window.getComputedStyle(el).overflowY;
+      if ((overflow === "auto" || overflow === "scroll") && el.scrollHeight > el.clientHeight + 1) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return (document.scrollingElement as HTMLElement | null) ?? null;
+  }, []);
   /**
    * A cell to focus once React has rendered the row that holds it. A REF, not
    * state: there is nothing to re-render for, and clearing state from inside
@@ -675,21 +1052,35 @@ export function EstimateEditor({
   function cellsIn(col: string): HTMLInputElement[] {
     const root = gridRef.current;
     if (!root) return [];
-    return [...root.querySelectorAll<HTMLInputElement>(`input[data-cell="${col}"]`)];
+    return [...root.querySelectorAll<HTMLInputElement>(`input[data-cell="${col}"]`)].filter(
+      // A cell the layout has taken away at this width is not somewhere to go.
+      (el) => el.offsetParent !== null,
+    );
   }
 
   /** Focus and SELECT, the spreadsheet idiom: arriving at a cell means retyping it. */
-  function goTo(cell: HTMLInputElement | undefined) {
-    if (!cell || cell.disabled) return false;
-    cell.focus();
-    cell.select();
-    return true;
-  }
+  const goTo = useCallback(
+    (cell: HTMLInputElement | undefined) => {
+      if (!cell || cell.disabled) return false;
+      cell.focus();
+      cell.select();
+      // The column header and the item's header are pinned over the top of the
+      // column; a cell that arrives underneath them has been focused invisibly.
+      const column = scroller();
+      if (column) {
+        const over =
+          column.getBoundingClientRect().top + STICKY_STACK - cell.getBoundingClientRect().top;
+        if (over > 0) column.scrollTop -= over;
+      }
+      return true;
+    },
+    [scroller],
+  );
 
   function gridKeyDown(e: React.KeyboardEvent, groupKey: string) {
     const el = e.target as HTMLElement;
     const col = el.dataset?.cell;
-    // A select, a checkbox or the remove button is not a cell; leave them be.
+    // A select, a checkbox, the number box or the remove button is not a cell.
     if (!col || e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
 
@@ -730,10 +1121,11 @@ export function EstimateEditor({
     pendingCell.current = null;
     const root = gridRef.current;
     if (!root) return;
-    const rows = [...root.querySelectorAll<HTMLElement>(`tr[data-group="${want.group}"]`)];
+    const rows = [...root.querySelectorAll<HTMLElement>(`[data-row][data-group="${want.group}"]`)];
     const last = rows[rows.length - 1];
     goTo(last?.querySelector<HTMLInputElement>(`input[data-cell="${want.col}"]`) ?? undefined);
-  }, [lines.length]);
+  }, [lines.length, goTo]);
+
   /** An item's cost and price as the editor shows them, from the same pure arithmetic. */
   function groupMoney(g: GroupDraft) {
     const children = lines
@@ -794,7 +1186,8 @@ export function EstimateEditor({
                 fixedPriceCents: g.priceMode === "fixed" ? g.fixedPrice : "",
               })),
               // In the order shown: each item's lines beneath it, the loose ones last,
-              // so what comes back from the database is already grouped.
+              // so what comes back from the database is already grouped — and so the
+              // order somebody dragged them into is the order that is saved (ADR 0087).
               lines: [...named.map((g) => g.key), ""]
                 .flatMap((key) =>
                   lines.filter((l) => (keyOf(l) ?? "") === key && l.description.trim() !== ""),
@@ -881,16 +1274,51 @@ export function EstimateEditor({
     return () => clearTimeout(timer);
   }, [canEdit, unsaved, pending, payloadJson]);
 
+  /* ------------------------------------------------- the client's link, up here */
+
+  const liveShares = shares.filter((s) => s.standing === "open" || s.standing === "signed");
+  const linkRef = useRef<HTMLButtonElement>(null);
+
+  const copyLink = (url: string, note: string) => {
+    void navigator.clipboard.writeText(url).then(
+      () => toast.success(note),
+      // A clipboard a browser refused is not a failure worth hiding.
+      () => toast.message("Copy this link", { description: url }),
+    );
+  };
+
+  const makeLink = useCallback(() => {
+    startTransition(async () => {
+      const res = await createEstimateShareAction({ projectId, id: estimate.id });
+      if ("error" in res) return void toast.error(res.error);
+      copyLink(res.url, "Link made and copied — paste it into your email");
+      router.refresh();
+    });
+  }, [projectId, estimate.id, router]);
+
+  /**
+   * SEND TO CLIENT is the one button the header carries, and it does the one
+   * thing the screen exists for. It saves first — what goes out is what is
+   * saved, never what is on screen — and then either makes the link or takes
+   * you to the one that is already open.
+   */
+  function sendToClient() {
+    saveRef.current(false);
+    if (liveShares.length === 0) {
+      makeLink();
+      return;
+    }
+    setOpenSections({ ...open, proposal: true });
+    window.setTimeout(() => linkRef.current?.focus(), 60);
+  }
+
   /**
    * The rows an item holds, and the rows no item holds — by the item's local
    * key, so a line under an item whose name is still blank shows where it was
    * put even though the arithmetic counts it loose (a blank row is ignored).
    */
-  const rowsOf = (key: string) => lines.map((l, i) => ({ l, i })).filter(({ l }) => l.groupKey === key);
-  const loose = lines
-    .map((l, i) => ({ l, i }))
-    .filter(({ l }) => !groups.some((g) => g.key === l.groupKey));
-  const colCount = (hasGroups ? 1 : 0) + 9 + (editable ? 1 : 0);
+  const rowsOf = (key: string) => linesIn(lines, sectionKeys, key);
+  const loose = rowsOf("");
   /** The item a typed line lands in, or none once the item it named is gone. */
   const intoKey = named.some((g) => g.key === into) ? into : "";
   const pasted = useMemo(() => parseEstimateLines(pasteText, knownUnits), [pasteText, knownUnits]);
@@ -928,971 +1356,600 @@ export function EstimateEditor({
   );
   const rememberedCount = readable.filter((r) => r.remembered !== null).length;
 
-  /** One line's row. Its first cell is the item it sits in, once the estimate has any. */
-  function lineRow(l: LineDraft, i: number) {
-    const f = figuresOf(l);
-    const blank = l.description.trim() === "";
-    return (
-      <tr
-        key={l.id ?? `new-${i}`}
-        data-group={l.groupKey}
-        className="border-t border-border/50 align-top"
-        onFocus={() => setFocusRow(i)}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
-            e.preventDefault();
-            if (editable) duplicateFocused();
-            return;
-          }
-          gridKeyDown(e, l.groupKey);
-        }}
-      >
-        {hasGroups && (
-          <td className="px-1 py-1">
-            <Select
-              value={l.groupKey === "" ? NONE : l.groupKey}
-              onValueChange={(v) => setLine(i, { groupKey: v === NONE ? "" : v })}
-              disabled={!editable}
-            >
-              <SelectTrigger aria-label={`Item, line ${i + 1}`} className="h-8 w-36">
-                <SelectValue placeholder="Item" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not in an item</SelectItem>
-                {named.map((g) => (
-                  <SelectItem key={g.key} value={g.key}>
-                    {g.name.trim()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {/* Only a line IN an item may be kept off the proposal: hidden money needs
-                somewhere to hide, or the printed rows stop adding up (ADR 0080). */}
-            {clientWording && keyOf(l) !== null && (
-              <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 px-0.5 text-xs text-muted-foreground">
-                <Checkbox
-                  checked={l.clientVisible}
-                  onCheckedChange={(v) => setLine(i, { clientVisible: v === true })}
-                  aria-label={`Show line ${i + 1} on the proposal`}
-                  disabled={!editable}
-                />
-                Show it
-              </label>
-            )}
-          </td>
-        )}
-        <td className="px-1 py-1">
-          <Select value={l.costCodeId} onValueChange={(v) => setLine(i, { costCodeId: v })} disabled={!editable}>
-            <SelectTrigger aria-label={`Cost code, line ${i + 1}`} className="h-8 w-40">
-              <SelectValue placeholder="Code" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>No code</SelectItem>
-              {codes.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Description, line ${i + 1}`}
-            data-cell="description"
-            value={l.description}
-            onChange={(e) => setLine(i, { description: e.target.value })}
-            placeholder="Tile, master bath floor"
-            maxLength={300}
-            className="h-8 min-w-48"
-            disabled={!editable}
-          />
-          {clientWording && (
-            <Input
-              aria-label={`What the client reads, line ${i + 1}`}
-            data-cell="clientDescription"
-              value={l.clientDescription}
-              onChange={(e) => setLine(i, { clientDescription: e.target.value })}
-              placeholder="What the client reads. Blank uses the line above."
-              maxLength={300}
-              className="mt-1 h-7 min-w-48 text-xs"
-              disabled={!editable}
-            />
-          )}
-          {/* A line you cannot see is a line you will forget, so it says so with the switch off too. */}
-          {!l.clientVisible && keyOf(l) !== null && (
-            <p className="mt-1 flex items-center gap-1 px-0.5 text-xs text-muted-foreground">
-              <EyeOff className="size-3" /> Not on the proposal
-            </p>
-          )}
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Quantity, line ${i + 1}`}
-            data-cell="quantity"
-            value={l.quantity}
-            onChange={(e) => setLine(i, { quantity: e.target.value })}
-            placeholder="1"
-            inputMode="decimal"
-            className="h-8 w-20 text-right"
-            disabled={!editable}
-          />
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Unit, line ${i + 1}`}
-            data-cell="unit"
-            value={l.unit}
-            onChange={(e) => setLine(i, { unit: e.target.value })}
-            placeholder="ls"
-            maxLength={20}
-            className="h-8 w-16"
-            disabled={!editable}
-          />
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Unit cost, line ${i + 1}`}
-            data-cell="unitCost"
-            value={l.unitCost}
-            onChange={(e) => setLine(i, { unitCost: e.target.value })}
-            placeholder="0.00"
-            inputMode="decimal"
-            className="h-8 w-24 text-right"
-            disabled={!editable}
-          />
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Markup, line ${i + 1}`}
-            data-cell="markup"
-            value={l.markup}
-            onChange={(e) => setLine(i, { markup: e.target.value })}
-            placeholder={markup.trim() === "" ? "0" : markup}
-            inputMode="decimal"
-            className="h-8 w-20 text-right"
-            disabled={!editable || l.unitPrice.trim() !== ""}
-          />
-        </td>
-        <td className="px-1 py-1">
-          <Input
-            aria-label={`Unit price, line ${i + 1}`}
-            data-cell="unitPrice"
-            value={l.unitPrice}
-            onChange={(e) => setLine(i, { unitPrice: e.target.value })}
-            placeholder="by markup"
-            inputMode="decimal"
-            className="h-8 w-24 text-right"
-            disabled={!editable}
-          />
-        </td>
-        <td className="px-1 py-2 text-right tabular-nums text-muted-foreground">
-          {blank ? "—" : fmt(lineCostCents(f), symbol)}
-        </td>
-        <td className="px-1 py-2 text-right tabular-nums">
-          {blank ? "—" : fmt(linePriceCents(f, terms.markupPpm), symbol)}
-        </td>
-        {editable && (
-          <td className="px-1 py-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-8"
-              disabled={lines.length === 1}
-              onClick={() => setLines((prev) => prev.filter((_, j) => j !== i))}
-            >
-              <Trash2 className="size-4" />
-              <span className="sr-only">Remove line {i + 1}</span>
-            </Button>
-          </td>
-        )}
-      </tr>
-    );
+  /* ------------------------------------------------------------- the rail */
+
+  /** What each section is worth to the client, for the bar and the jump list. */
+  const railRows = useMemo(() => {
+    const rows = groups.map((g, i) => ({
+      key: g.key,
+      index: i,
+      name: g.name.trim() || `Item ${i + 1}`,
+      priceCents: groupMoney(g).priceCents,
+      colour: railColour(i),
+    }));
+    const loosePrice = lines
+      .filter((l) => sectionOf(l, sectionKeys) === "" && l.description.trim() !== "")
+      .reduce((sum, l) => sum + linePriceCents(figuresOf(l), terms.markupPpm), 0);
+    if (loosePrice !== 0 || (groups.length > 0 && loose.length > 0)) {
+      rows.push({
+        key: "",
+        index: groups.length,
+        name: "Not in an item",
+        priceCents: loosePrice,
+        colour: "var(--muted-foreground)",
+      });
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, lines, sectionKeys, terms.markupPpm, loose.length]);
+  const railWeight = railRows.reduce((sum, r) => sum + Math.max(0, r.priceCents), 0);
+
+  /** Which item's header is currently pinned, so the rail can mark it. */
+  const itemHeaderRefs = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    const column = scroller();
+    if (!column) return;
+    const read = () => {
+      const edge = column.getBoundingClientRect().top + STICKY_STACK;
+      let here: string | null = null;
+      for (const [key, el] of itemHeaderRefs.current) {
+        if (el.getBoundingClientRect().top <= edge + 4) here = key;
+      }
+      setPinnedItem(here);
+    };
+    read();
+    column.addEventListener("scroll", read, { passive: true });
+    return () => column.removeEventListener("scroll", read);
+  }, [groups.length, scroller]);
+
+  /** Jump the work column to a section. Never `scrollIntoView` — it moves the app shell. */
+  function jumpTo(key: string) {
+    const column = scroller();
+    const el = itemHeaderRefs.current.get(key);
+    if (!column || !el) return;
+    column.scrollTop += el.getBoundingClientRect().top - column.getBoundingClientRect().top - STICKY_STACK + 8;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border/60 p-4">
-        <div className="grid gap-3 sm:grid-cols-[8rem_1fr_10rem]">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-number">Number</Label>
-            <Input id="est-number" value={number} onChange={(e) => setNumber(e.target.value)} maxLength={40} disabled={!canEdit} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-title">Title</Label>
-            <Input id="est-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} disabled={!canEdit} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-status">Status</Label>
-            <Select value={status} onValueChange={changeStatus} disabled={!canEdit || locked}>
-              <SelectTrigger className="w-full" id="est-status">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ESTIMATE_STATUSES.filter((s) => s !== "accepted" || locked).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {ESTIMATE_STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-sent">Sent</Label>
-            <Input id="est-sent" type="date" value={sentOn} onChange={(e) => setSentOn(e.target.value)} disabled={!canEdit} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-valid">Valid until</Label>
-            <Input id="est-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} disabled={!canEdit} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-decided">Decided</Label>
-            <Input id="est-decided" type="date" value={decidedOn} onChange={(e) => setDecidedOn(e.target.value)} disabled={!canEdit} />
-          </div>
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-markup">Markup on cost, %</Label>
-            <Input id="est-markup" value={markup} onChange={(e) => setMarkup(e.target.value)} placeholder="0" inputMode="decimal" disabled={!editable} />
-            <p className="text-xs text-muted-foreground">Every line takes this unless it says otherwise.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-overhead">Overhead, %</Label>
-            <Input id="est-overhead" value={overhead} onChange={(e) => setOverhead(e.target.value)} placeholder="0" inputMode="decimal" disabled={!editable} />
-            <p className="text-xs text-muted-foreground">On the lines&apos; price.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-profit">Profit, %</Label>
-            <Input id="est-profit" value={profit} onChange={(e) => setProfit(e.target.value)} placeholder="0" inputMode="decimal" disabled={!editable} />
-            <p className="text-xs text-muted-foreground">On the price plus overhead.</p>
-          </div>
-        </div>
-        {locked && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Accepted, so the rates, the lines and the proposal&apos;s words are fixed. To revise, start a new estimate and mark this one superseded.
-          </p>
-        )}
-      </div>
+  /* --------------------------------------------------------------- pieces */
 
-      <div className="rounded-lg border border-border/60 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="font-heading text-sm font-medium tracking-heading">Lines</h2>
-          {editable && (
-            <div className="flex items-center gap-1">
-              <label className="mr-2 flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-                <Checkbox
-                  checked={clientWording}
-                  onCheckedChange={(v) => setClientWording(v === true)}
-                  aria-label="Show the client wording on every line"
-                />
-                Client wording
-              </label>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setGroups((prev) => [...prev, emptyGroup()])}>
-                <FolderPlus className="mr-1.5 size-4" /> Add item
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => addLine("")}>
-                <Plus className="mr-1.5 size-4" /> Add line
-              </Button>
-            </div>
-          )}
-        </div>
-        {/*
-          `relative` is load-bearing, not decoration. The row buttons carry
-          `sr-only` labels, which Tailwind makes `position: absolute` — so
-          without a positioned ancestor here their containing block is the PAGE,
-          they sit at their static x (past 1,200px on this table) and they
-          stretch the DOCUMENT's scroll width even though the table itself is
-          clipped. That is what made this screen scroll sideways by 276px:
-          `overflow-x-auto` never clipped them, because it was not their
-          containing block. One word fixes it and the table still scrolls in its
-          own box.
-        */}
-        <div ref={gridRef} className="relative overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                {hasGroups && <th className="px-1 py-1.5 text-left">Item</th>}
-                <th className="px-1 py-1.5 text-left">Cost code</th>
-                <th className="px-1 py-1.5 text-left">Description</th>
-                <th className="px-1 py-1.5 text-right">Qty</th>
-                <th className="px-1 py-1.5 text-left">Unit</th>
-                <th className="px-1 py-1.5 text-right">Unit cost</th>
-                <th className="px-1 py-1.5 text-right">Markup %</th>
-                <th className="px-1 py-1.5 text-right">Unit price</th>
-                <th className="px-1 py-1.5 text-right">Cost</th>
-                <th className="px-1 py-1.5 text-right">Price</th>
-                {editable && <th className="w-8" />}
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((g, gi) => {
-                const money = groupMoney(g);
-                const own = rowsOf(g.key);
-                return (
-                  <Fragment key={g.key}>
-                    <tr className="border-t-2 border-border bg-muted/30 align-top">
-                      <td className="px-1 py-1.5" colSpan={3}>
-                        <Input
-                          aria-label={`Item name, item ${gi + 1}`}
-                          value={g.name}
-                          onChange={(e) => setGroup(gi, { name: e.target.value })}
-                          placeholder="Tile flooring, master and hall baths"
-                          maxLength={200}
-                          className="h-8 min-w-48 font-medium"
-                          disabled={!editable}
-                        />
-                        {/*
-                          The item's money lives UNDER ITS NAME, not in the Cost and Price
-                          columns where it would line up with its lines: the table is wider
-                          than the page and those columns are the first thing to go off the
-                          right edge — and an item's margin is the number that says whether
-                          a round price was a safe one. It has to be readable without
-                          scrolling anything.
-                        */}
-                        {/* The price and the margin FIRST: on a phone this line is cut off at the
-                            right edge, and the last thing to lose is what the client pays and
-                            what it leaves. */}
-                        <p className="mt-1 px-0.5 text-xs text-muted-foreground tabular-nums">
-                          {fmt(money.priceCents, symbol)} to the client
-                          {money.priceCents > 0 && (
-                            <>
-                              {" · "}
-                              <span className="font-medium text-foreground">
-                                {fmt(money.marginCents, symbol)} margin
-                              </span>{" "}
-                              · {((money.marginCents / money.priceCents) * 100).toFixed(1)}%
-                            </>
-                          )}
-                          {" · "}
-                          {fmt(money.costCents, symbol)} cost
-                          {money.lineCount === 0 && " · no lines under it yet"}
-                        </p>
-                      </td>
-                      <td className="px-1 py-1.5" colSpan={3}>
-                        <Select
-                          value={g.priceMode}
-                          onValueChange={(v) => setGroup(gi, { priceMode: v as GroupPriceMode })}
-                          disabled={!editable}
-                        >
-                          <SelectTrigger aria-label={`How item ${gi + 1} is priced`} className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {GROUP_PRICE_MODES.map((m) => (
-                              <SelectItem key={m} value={m}>
-                                {GROUP_PRICE_MODE_LABELS[m]}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-1 py-1.5" colSpan={2}>
-                        {g.priceMode === "fixed" ? (
-                          <Input
-                            aria-label={`Price the client pays, item ${gi + 1}`}
-                            value={g.fixedPrice}
-                            onChange={(e) => setGroup(gi, { fixedPrice: e.target.value })}
-                            placeholder="0.00"
-                            inputMode="decimal"
-                            className="ml-auto h-8 w-28 text-right"
-                            disabled={!editable}
-                          />
-                        ) : (
-                          <span className="block text-right text-xs text-muted-foreground">Its lines add up</span>
-                        )}
-                      </td>
-                      <td colSpan={2} />
-                      {editable && (
-                        <td className="whitespace-nowrap px-1 py-1">
-                          {/* An assembly is this item, saved — E6, ADR 0086. */}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => openSaveAssembly(g.key)}
-                            disabled={rowsOf(g.key).every((r) => r.l.description.trim() === "")}
-                          >
-                            <Package className="size-4" />
-                            <span className="sr-only">Save item {gi + 1} as an assembly</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => removeGroup(g.key)}
-                          >
-                            <Trash2 className="size-4" />
-                            <span className="sr-only">Remove item {gi + 1}; its lines stay, on their own</span>
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                    <tr>
-                      <td colSpan={colCount} className="px-1 pb-1">
-                        <Input
-                          aria-label={`What the client reads under item ${gi + 1}`}
-                          value={g.clientNote}
-                          onChange={(e) => setGroup(gi, { clientNote: e.target.value })}
-                          placeholder="One sentence the client reads under this item on the proposal. Optional."
-                          maxLength={4000}
-                          className="h-8 w-full"
-                          disabled={!editable}
-                        />
-                      </td>
-                    </tr>
-                    {own.map(({ l, i }) => lineRow(l, i))}
-                    {editable && (
-                      <tr>
-                        <td colSpan={colCount} className="px-1 pb-2">
-                          <Button type="button" variant="ghost" size="sm" onClick={() => addLine(g.key)}>
-                            <Plus className="mr-1.5 size-4" /> Add line to {g.name.trim() || `item ${gi + 1}`}
-                          </Button>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {hasGroups && loose.length > 0 && (
-                <tr>
-                  <td
-                    colSpan={colCount}
-                    className="px-1 pt-3 text-xs uppercase tracking-wide text-muted-foreground"
-                  >
-                    Not in an item
-                  </td>
-                </tr>
-              )}
-              {loose.map(({ l, i }) => lineRow(l, i))}
-            </tbody>
-          </table>
-        </div>
-        {editable && (
-          <div className="mt-3 space-y-1.5 border-t border-border/50 pt-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <Input
-                  ref={entryRef}
-                  aria-label="Type a line"
-                  value={entry}
-                  onChange={(e) => {
-                    setEntry(e.target.value);
-                    setEntryError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitEntry();
-                      return;
-                    }
-                    /**
-                     * Tab takes the remembered price — and ONLY when one is
-                     * showing, so Tab still moves focus the rest of the time
-                     * and nobody is trapped in the field.
-                     */
-                    if (e.key === "Tab" && !e.shiftKey && entryMemory) {
-                      e.preventDefault();
-                      commitEntry(true);
-                    }
-                  }}
-                  placeholder="320 sf tile @ 4.20"
-                  maxLength={400}
-                  className="h-9 pr-9"
-                />
-                <CornerDownLeft className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              </div>
-              {hasGroups && (
-                <Select value={intoKey === "" ? NONE : intoKey} onValueChange={(v) => setInto(v === NONE ? "" : v)}>
-                  <SelectTrigger aria-label="The item a typed line lands in" className="h-9 w-48">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>Not in an item</SelectItem>
-                    {named.map((g) => (
-                      <SelectItem key={g.key} value={g.key}>
-                        {g.name.trim()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
-                <ClipboardPaste className="mr-1.5 size-4" /> Paste lines
-              </Button>
-              {assemblies.length > 0 && (
-                <Button type="button" variant="outline" size="sm" onClick={() => setDropOpen(true)}>
-                  <Package className="mr-1.5 size-4" /> Add an assembly
-                </Button>
-              )}
-            </div>
-            {entryError === null && entryMemory ? (
-              <p className="text-xs">
-                <span className="text-muted-foreground">Last priced</span>{" "}
-                <span className="font-medium tabular-nums text-foreground">
-                  {priceHint(entryMemory, fmt(entryMemory.unitCostCents, symbol), today())}
-                </span>{" "}
-                <span className="text-muted-foreground">
-                  — <strong className="text-foreground">Tab</strong> to use it, Enter to leave it blank
-                </span>
-              </p>
-            ) : entryError === null ? (
-              <p className="text-xs text-muted-foreground">
-                Type a line and press Enter. <code className="text-foreground">320 sf tile @ 4.20</code>
-                {" · "}
-                <code className="text-foreground">tile labour 320 sf @ 3.50</code>
-                {" · "}
-                <code className="text-foreground">plumbing rough 12000</code> for a lump sum. The{" "}
-                <code className="text-foreground">@</code> is optional. <strong>Ctrl+D</strong> in a row copies it.
-              </p>
-            ) : (
-              <p className="text-xs text-destructive">{entryError}</p>
-            )}
-          </div>
-        )}
+  const money = (cents: number) => fmt(cents, symbol);
+  const marginPercent = totals.marginPpm === null ? null : totals.marginPpm / 10_000;
 
-        <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Paste lines</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                One line each, in the same words the box under the table takes — or straight out of a spreadsheet,
-                columns and all. Every line is shown below before anything is added
-                {hasGroups && intoKey !== "" ? `, and they land in ${named.find((g) => g.key === intoKey)?.name.trim() ?? "the item"}` : ""}.
-              </p>
-              <Textarea
-                aria-label="The lines to add"
-                value={pasteText}
-                onChange={(e) => setPasteText(e.target.value)}
-                rows={6}
-                placeholder={"320 sf tile @ 4.20\ntile labour 320 sf @ 3.50\nplumbing rough 12000"}
-                className="font-mono text-xs"
-              />
-              {pasted.length > 0 && (
-                <div className="max-h-64 overflow-y-auto rounded-md border border-border/60">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
-                      <tr>
-                        <th className="px-2 py-1.5 text-left">Description</th>
-                        <th className="px-2 py-1.5 text-right">Qty</th>
-                        <th className="px-2 py-1.5 text-left">Unit</th>
-                        <th className="px-2 py-1.5 text-right">Unit cost</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewRows.map((r, i) => (
-                        <tr key={i} className="border-t border-border/50">
-                          {r.line === null ? (
-                            <td colSpan={4} className="px-2 py-1.5 text-destructive">
-                              Could not read <span className="font-mono">{r.input}</span> — it will be left out
-                            </td>
-                          ) : (
-                            <>
-                              <td className="px-2 py-1.5">
-                                {r.line.description}
-                                {r.remembered && (
-                                  <span className="block text-muted-foreground">
-                                    priced from {r.remembered.projectNumber},{" "}
-                                    {howLongAgo(r.remembered.pricedOn, today())}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-2 py-1.5 text-right tabular-nums">
-                                {r.line.quantityThousandths === 1000 && r.line.unit === ""
-                                  ? "—"
-                                  : thousandthsToQuantityString(r.line.quantityThousandths)}
-                              </td>
-                              <td className="px-2 py-1.5">{r.line.unit || "—"}</td>
-                              <td
-                                className={`px-2 py-1.5 text-right tabular-nums${
-                                  r.remembered ? " font-medium" : ""
-                                }`}
-                              >
-                                {fmt(r.line.unitCostCents, symbol)}
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-            <DialogFooter className="sm:justify-between">
-              {rememberedCount > 0 ? (
-                <p className="text-xs text-muted-foreground sm:self-center">
-                  <span className="font-medium text-foreground">{rememberedCount}</span> priced from what you
-                  charged last time. Check them — a price can be a year old.
-                </p>
-              ) : (
-                <span />
-              )}
-              <Button
-                type="button"
-                disabled={readable.length === 0}
-                onClick={() => {
-                  setLines((prev) => [...prev, ...readable.map((r) => draftOf(r.line, intoKey))]);
-                  setPasteText("");
-                  setPasteOpen(false);
-                }}
-              >
-                Add {readable.length} {readable.length === 1 ? "line" : "lines"}
-                {pasted.length > readable.length ? `, leave out ${pasted.length - readable.length}` : ""}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+  const statusTone = STATUS_TONES[status] ?? "quiet";
+  const statusLabel =
+    status in ESTIMATE_STATUS_LABELS
+      ? ESTIMATE_STATUS_LABELS[status as keyof typeof ESTIMATE_STATUS_LABELS]
+      : status;
 
-        {/* Save this item as an assembly (E6, ADR 0086). */}
-        <Dialog open={saveFor !== null} onOpenChange={(o) => !o && setSaveFor(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Save this item as an assembly</DialogTitle>
-              <DialogDescription>
-                Its lines, their quantities and their cost codes, kept so the next job can have them. It goes in
-                at the size you say it is per, and scales from there.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="asm-name">Call it</Label>
-                <Input
-                  id="asm-name"
-                  value={asmName}
-                  onChange={(e) => setAsmName(e.target.value)}
-                  placeholder="Tile flooring"
-                  maxLength={160}
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[8rem_8rem]">
-                <div className="space-y-1.5">
-                  <Label htmlFor="asm-per">It is per</Label>
-                  <Input
-                    id="asm-per"
-                    value={asmPer}
-                    onChange={(e) => setAsmPer(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="320"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="asm-unit">Of</Label>
-                  <Input
-                    id="asm-unit"
-                    value={asmUnit}
-                    onChange={(e) => setAsmUnit(e.target.value)}
-                    maxLength={20}
-                    placeholder="sf"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Guessed from the lines themselves. Drop it at 500 sf later and every quantity scales with it —
-                <strong> the costs and markups do not</strong>, because they are already per unit.
-              </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="asm-notes">A note to yourself</Label>
-                <Textarea
-                  id="asm-notes"
-                  value={asmNotes}
-                  onChange={(e) => setAsmNotes(e.target.value)}
-                  rows={2}
-                  maxLength={2000}
-                  placeholder="What is in it, what it assumes. Never printed."
-                />
-              </div>
-              {saveFor !== null && (
-                <p className="text-xs text-muted-foreground">
-                  <strong>{assemblyLinesOf(saveFor).length}</strong> lines will be saved.
-                </p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button type="button" onClick={commitSaveAssembly} disabled={pending || asmName.trim() === ""}>
-                {pending ? "Saving…" : "Save the assembly"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+  /** The estimate's coordinates, under its title: only the parts it has. */
+  const coordinates = [
+    number.trim(),
+    status === "sent" && sentOn ? `sent ${shortDate(sentOn)}` : null,
+    validUntil ? `valid to ${shortDate(validUntil)}` : null,
+    projectLabel,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
-        {/* Drop one in: it arrives as a new item with its lines under it. */}
-        <Dialog open={dropOpen} onOpenChange={setDropOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add an assembly</DialogTitle>
-              <DialogDescription>
-                It comes in as an item with its lines underneath, priced as you saved it, with the cost codes
-                matched against the code list this estimate uses. A code that list has not got is left blank.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="drop-which">Which one</Label>
-                <Select value={dropId} onValueChange={setDropId}>
-                  <SelectTrigger id="drop-which" className="w-full">
-                    <SelectValue placeholder="Choose an assembly" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assemblies.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name} · {a.per} · {a.lineCount} {a.lineCount === 1 ? "line" : "lines"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="drop-qty">How many</Label>
-                <Input
-                  id="drop-qty"
-                  value={dropQty}
-                  onChange={(e) => setDropQty(e.target.value)}
-                  inputMode="decimal"
-                  className="w-32"
-                  placeholder={assemblies.find((a) => a.id === dropId)?.per.replace(/^per /, "") ?? "500"}
+  /**
+   * THE WHOLE GRID'S COLUMN TEMPLATE, in one place so every row lines up — and
+   * measured against THE WORK COLUMN, not the window (`@container/work`).
+   *
+   * The window is the wrong ruler here and it is the bug the 1a layout had: a
+   * 1,200px window with the nav open and a 252px rail leaves the grid about
+   * 560px, and seven fixed tracks in 560px collapse `minmax(0,1fr)` to **zero**
+   * — the description column disappears rather than the table scrolling
+   * sideways. Asking the box that actually holds the rows is the only ruler
+   * that cannot be wrong.
+   *
+   * Narrow, the row is two lines — description and price up top, the quantity
+   * and the unit cost under them — rather than dropping a cell. Every input
+   * stays in the DOM at every width, because the keyboard grid walks the
+   * document and a cell that only exists at some widths is a column that
+   * sometimes goes nowhere.
+   */
+  const PAD = "px-2.5 @sm/work:px-[18px]";
+  const ROW_GRID =
+    `items-center gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)_78px] ` +
+    "@sm/work:grid-cols-[76px_minmax(0,1fr)_92px_34px] " +
+    "@3xl/work:grid-cols-[84px_minmax(0,1fr)_92px_100px_112px_34px] " +
+    "@5xl/work:grid-cols-[88px_minmax(0,1fr)_96px_104px_108px_116px_34px]";
+  const GUTTER_GRID =
+    `grid gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)] @sm/work:grid-cols-[76px_minmax(0,1fr)] ` +
+    "@3xl/work:grid-cols-[84px_minmax(0,1fr)] @5xl/work:grid-cols-[88px_minmax(0,1fr)]";
+  const AUTO = "@3xl/work:col-start-auto @3xl/work:row-start-auto";
+  const FIRST = `col-start-1 row-start-1 ${AUTO}`;
+  const CELL_DESC = `col-start-2 row-start-1 min-w-0 ${AUTO}`;
+  const CELL_QTY = `col-start-2 row-start-2 ${AUTO}`;
+  const CELL_UNITCOST = `col-start-3 row-start-2 ${AUTO}`;
+  const CELL_PRICE = `col-start-3 row-start-1 ${AUTO}`;
+  // On a phone there is no fourth track, so the bin sits under the row's number.
+  const CELL_LAST = `col-start-1 row-start-2 @sm/work:col-start-4 @sm/work:row-start-1 ${AUTO}`;
+  const BARE = "border-transparent bg-transparent hover:border-border dark:bg-transparent";
+
+  const lineIds = inVisualOrder(lines, sectionKeys).map((l) => `line:${l.key}`);
+  const sortableIds = [...groups.map((g) => `item:${g.key}`), ...lineIds];
+
+  /** One line's row, with its number, its grip and its expansion. */
+  function lineRow(l: LineDraft, sectionIndex: number, position: number) {
+    const f = figuresOf(l);
+    const blank = l.description.trim() === "";
+    const inItem = keyOf(l) !== null;
+    const group = groups.find((g) => g.key === l.groupKey);
+    const insideFixed = group?.priceMode === "fixed" && inItem;
+    const expanded = openRows.has(l.key);
+    const marginCents = linePriceCents(f, terms.markupPpm) - lineCostCents(f);
+    const priceCents = linePriceCents(f, terms.markupPpm);
+    return (
+      <SortableRow
+        key={l.key}
+        id={`line:${l.key}`}
+        disabled={!editable}
+        over={dragOver === `line:${l.key}` && dragging !== `line:${l.key}`}
+      >
+        {(grip) => (
+          <>
+            <div
+              data-row=""
+              data-group={l.groupKey}
+              className={cn("grid", ROW_GRID, "border-b border-divider py-[5px]")}
+              onFocus={() => setFocusRow(l.key)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+                  e.preventDefault();
+                  if (editable) duplicateFocused();
+                  return;
+                }
+                gridKeyDown(e, l.groupKey);
+              }}
+            >
+              <div className={cn(FIRST, "flex items-center gap-0.5")}>
+                {grip}
+                <RowNumber
+                  value={lineNumber(sectionIndex, position, groups.length > 0)}
+                  label={`Where line ${lineNumber(sectionIndex, position, groups.length > 0)} sits`}
+                  disabled={!editable}
+                  onCommit={(address) => moveLineTo(l.key, address)}
                 />
-              </div>
-              {dropId !== "" && (
-                <p className="text-xs text-muted-foreground">
-                  One of these costs{" "}
-                  <span className="tabular-nums">
-                    {fmt(assemblies.find((a) => a.id === dropId)?.costCents ?? 0, symbol)}
-                  </span>{" "}
-                  {" "}
-                  {assemblies.find((a) => a.id === dropId)?.per}. Check the quantities afterwards — an assembly
-                  is a starting point, not a quote.
-                </p>
-              )}
-            </div>
-            <DialogFooter className="sm:justify-between">
-              {/* A library you cannot take things out of fills up with mistakes. */}
-              {dropId !== "" ? (
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  disabled={pending}
-                  onClick={() => {
-                    const gone = assemblies.find((a) => a.id === dropId)?.name ?? "It";
-                    startTransition(async () => {
-                      const res = await deleteAssemblyAction({ projectId, id: dropId });
-                      if ("error" in res) return void toast.error(res.error);
-                      toast.success(`${gone} is out of your assemblies. Lines it already made are untouched.`);
-                      setDropId("");
-                      router.refresh();
-                    });
-                  }}
+                  size="icon"
+                  className="size-[26px] shrink-0 rounded-lg"
+                  aria-expanded={expanded}
+                  onClick={() =>
+                    setOpenRows((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(l.key)) next.delete(l.key);
+                      else next.add(l.key);
+                      return next;
+                    })
+                  }
                 >
-                  Take it out of the library
+                  {expanded ? (
+                    <ChevronDown className="size-[15px] text-subtle-foreground" />
+                  ) : (
+                    <ChevronRight className="size-[15px] text-subtle-foreground" />
+                  )}
+                  <span className="sr-only">The rest of this line</span>
                 </Button>
-              ) : (
-                <span />
-              )}
-              <Button
-                type="button"
-                onClick={commitDrop}
-                disabled={pending || dropId === "" || dropQty.trim() === ""}
-              >
-                {pending ? "Adding…" : "Add it"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </div>
 
-        <p className="mt-2 text-xs text-muted-foreground">
-          A line is a quantity of a unit at a cost — a blank quantity is one, a lump sum. It sells at the markup on its
-          cost, this line&apos;s or the estimate&apos;s, unless a price per unit is typed, which wins. A line with no
-          description is ignored.
-          {" "}
-          An <strong>item</strong> is what the client buys: name it in their words, put the lines that build it up
-          underneath, and the proposal shows the item and its price with the build-up nowhere. Let its lines add up, or
-          price it yourself — <strong>a price you type is the price that prints</strong>, so overhead and profit are not
-          added to it again. Removing an item leaves its lines; an item with no name is ignored, as a line with no
-          description is.
-        </p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-6">
-        {(
-          [
-            ["Cost", totals.costCents],
-            ["Price", totals.subtotalCents],
-            ["Overhead", totals.overheadCents],
-            ["Profit", totals.profitCents],
-            ["Total", totals.totalCents],
-            ["Margin", totals.marginCents],
-          ] as const
-        ).map(([label, cents]) => (
-          <div key={label} className="rounded-lg bg-muted/40 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">
-              {label}
-              {label === "Margin" && totals.marginPpm !== null && ` · ${(totals.marginPpm / 10_000).toFixed(1)}%`}
-              {label === "Price" && totals.fixedCents > 0 && ` · ${fmt(totals.fixedCents, symbol)} priced by hand`}
-            </dt>
-            <dd className="text-base font-medium tabular-nums">{fmt(cents, symbol)}</dd>
-          </div>
-        ))}
-      </div>
-
-      {ratesIdle && (
-        <p className="text-xs text-muted-foreground">
-          Every item is priced by hand, so overhead and profit have nothing left to be taken on and the total is the
-          sum of the prices you typed. That is how a typed price works — it is the price that prints — but if you meant
-          the rates to apply, let an item&apos;s lines add up instead.
-        </p>
-      )}
-
-      <div className="rounded-lg border border-border/60 p-4">
-        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-heading text-sm font-medium tracking-heading">Proposal</h2>
-          <div className="flex items-center gap-1">
-            {/* The brochure is the HTML document; the letter is the PDF ADR 0070 built. */}
-            <Button variant="outline" size="sm" asChild>
-              <a href={`/api/jobs/estimates/${estimate.id}/document`} target="_blank" rel="noopener noreferrer">
-                <BookOpen className="mr-1.5 size-4" /> Open {format === "brochure" ? "brochure" : "document"}
-              </a>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href={`/api/jobs/estimates/${estimate.id}/pdf`} target="_blank" rel="noopener noreferrer">
-                <FileText className="mr-1.5 size-4" /> Print proposal
-              </a>
-            </Button>
-          </div>
-        </div>
-        <ClientLinks projectId={projectId} estimateId={estimate.id} shares={shares} canEdit={canEdit} symbol={symbol} />
-        <p className="mb-3 text-xs text-muted-foreground">
-          What the client is sent: the price as saved, shown the way you choose, with the words below around it.
-          Cost, markup, overhead and profit never print — they are in the prices.
-        </p>
-        <div className="mb-3 grid gap-3 sm:grid-cols-[14rem_1fr]">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-format">What it is</Label>
-            <Select value={format} onValueChange={setFormat} disabled={!canEdit}>
-              <SelectTrigger className="w-full" id="est-format">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROPOSAL_FORMATS.map((f) => (
-                  <SelectItem key={f} value={f}>
-                    {PROPOSAL_FORMAT_LABELS[f]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-letter">
-              {format === "brochure" ? "The letter it opens with" : "A letter (printed on the brochure only)"}
-            </Label>
-            <Textarea
-              id="est-letter"
-              value={letterText}
-              onChange={(e) => setLetterText(e.target.value)}
-              rows={3}
-              maxLength={8000}
-              placeholder="Dear Mr and Mrs Shrock, thank you for asking us to price the house at 118 Oak Row…"
-              disabled={!editable}
-            />
-            <p className="text-xs text-muted-foreground">
-              {format === "brochure"
-                ? "In your own voice, over your name. Each line is its own paragraph; leave it blank and the page is left out."
-                : "A letterhead proposal has no page for this. Switch to a brochure and it opens with it."}
-            </p>
-          </div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-[14rem_1fr]">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-presentation">Show the price</Label>
-            <Select value={presentation} onValueChange={setPresentation} disabled={!canEdit}>
-              <SelectTrigger className="w-full" id="est-presentation">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROPOSAL_PRESENTATIONS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {PROPOSAL_PRESENTATION_LABELS[p]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Each item&apos;s price, every line, each cost code&apos;s sum, or one figure.
-            </p>
-            {presentation === "codes" && (
-              <label className="flex cursor-pointer items-start gap-2 text-xs text-muted-foreground">
-                <Checkbox
-                  checked={showCodeNumbers}
-                  onCheckedChange={(v) => setShowCodeNumbers(v === true)}
-                  aria-label="Print the cost code numbers on the proposal"
-                  disabled={!canEdit}
-                  className="mt-0.5"
+              <div className={CELL_DESC}>
+                <Input
+                  aria-label={`Description, line ${lineNumber(sectionIndex, position, groups.length > 0)}`}
+                  data-cell="description"
+                  value={l.description}
+                  onChange={(e) => setLine(l.key, { description: e.target.value })}
+                  placeholder="Tile, master bath floor"
+                  maxLength={300}
+                  className={cn("h-9 px-2 text-sm", BARE)}
+                  disabled={!editable}
                 />
-                <span>
-                  Print the code numbers too — <span className="tabular-nums">09 30 00 · Tiling</span> rather than{" "}
-                  Tiling. Leave it off unless the client is reading a trade breakdown.
-                </span>
-              </label>
+                {/* A line you cannot see is a line you will forget, so it says so. */}
+                {!l.clientVisible && inItem && (
+                  <p className="flex items-center gap-1 px-2 text-[11px] text-subtle-foreground">
+                    <EyeOff className="size-3" /> off the proposal
+                  </p>
+                )}
+              </div>
+
+              <div className={cn(CELL_QTY, "flex items-center justify-end gap-1")}>
+                <Input
+                  aria-label={`Quantity, line ${lineNumber(sectionIndex, position, groups.length > 0)}`}
+                  data-cell="quantity"
+                  value={l.quantity}
+                  onChange={(e) => setLine(l.key, { quantity: e.target.value })}
+                  placeholder="1"
+                  inputMode="decimal"
+                  className={cn("h-9 w-[54px] text-right tabular-nums", BARE)}
+                  disabled={!editable}
+                />
+                <Input
+                  aria-label={`Unit, line ${lineNumber(sectionIndex, position, groups.length > 0)}`}
+                  data-cell="unit"
+                  value={l.unit}
+                  onChange={(e) => setLine(l.key, { unit: e.target.value })}
+                  placeholder="ls"
+                  maxLength={20}
+                  className={cn("h-9 w-11 px-1.5 text-[13px] text-subtle-foreground", BARE)}
+                  disabled={!editable}
+                />
+              </div>
+
+              <div className={CELL_UNITCOST}>
+                <Input
+                  aria-label={`Unit cost, line ${lineNumber(sectionIndex, position, groups.length > 0)}`}
+                  data-cell="unitCost"
+                  value={l.unitCost}
+                  onChange={(e) => setLine(l.key, { unitCost: e.target.value })}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  className={cn("h-9 text-right tabular-nums", BARE)}
+                  disabled={!editable}
+                />
+              </div>
+
+              <div className="hidden text-right text-sm tabular-nums text-muted-foreground @5xl/work:block">
+                {blank ? "—" : money(lineCostCents(f))}
+              </div>
+
+              <div className={cn(CELL_PRICE, "text-right text-sm font-medium tabular-nums")}>
+                {insideFixed ? (
+                  <span className="text-[13px] font-normal text-subtle-foreground">in the item</span>
+                ) : blank ? (
+                  "—"
+                ) : (
+                  money(priceCents)
+                )}
+              </div>
+
+              <div className={CELL_LAST}>
+                {editable && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    disabled={lines.length === 1}
+                    onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                  >
+                    <Trash2 className="size-[15px]" />
+                    <span className="sr-only">
+                      Remove line {lineNumber(sectionIndex, position, groups.length > 0)}
+                    </span>
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {expanded && (
+              <div className="grid grid-cols-1 gap-3.5 border-b border-divider bg-background px-2.5 py-4 @sm/work:grid-cols-2 @sm/work:px-[18px] @sm/work:pl-14 @3xl/work:grid-cols-3 @5xl/work:grid-cols-5">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">In item</Label>
+                  <Select
+                    value={l.groupKey === "" ? NONE : l.groupKey}
+                    onValueChange={(v) => setLine(l.key, { groupKey: v === NONE ? "" : v })}
+                    disabled={!editable || groups.length === 0}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-[10px]">
+                      <SelectValue placeholder="Not in an item" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>Not in an item</SelectItem>
+                      {groups.map((g, gi) => (
+                        <SelectItem key={g.key} value={g.key}>
+                          {g.name.trim() || `Item ${gi + 1}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">Cost code</Label>
+                  <Select
+                    value={l.costCodeId}
+                    onValueChange={(v) => setLine(l.key, { costCodeId: v })}
+                    disabled={!editable}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-[10px]">
+                      <SelectValue placeholder="No code" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>No code</SelectItem>
+                      {codes.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">Markup</Label>
+                  <Input
+                    data-cell="markup"
+                    value={l.markup}
+                    onChange={(e) => setLine(l.key, { markup: e.target.value })}
+                    placeholder={markup.trim() === "" ? "0% — the estimate's" : `${markup}% — the estimate's`}
+                    inputMode="decimal"
+                    className="h-9 rounded-[10px] text-right tabular-nums"
+                    disabled={!editable || l.unitPrice.trim() !== ""}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">Price per unit</Label>
+                  <Input
+                    data-cell="unitPrice"
+                    value={l.unitPrice}
+                    onChange={(e) => setLine(l.key, { unitPrice: e.target.value })}
+                    placeholder="by markup"
+                    inputMode="decimal"
+                    className="h-9 rounded-[10px] text-right tabular-nums"
+                    disabled={!editable}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium text-muted-foreground">What the client reads</Label>
+                  <Input
+                    data-cell="clientDescription"
+                    value={l.clientDescription}
+                    onChange={(e) => setLine(l.key, { clientDescription: e.target.value })}
+                    placeholder="Blank uses the description"
+                    maxLength={300}
+                    className="h-9 rounded-[10px] text-sm"
+                    disabled={!editable}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 @sm/work:col-span-2 @3xl/work:col-span-3 @5xl/work:col-span-5">
+                  {/* Only a line IN an item may be kept off the proposal: hidden money
+                      needs somewhere to hide, or the printed rows stop adding up (ADR 0080). */}
+                  {inItem ? (
+                    <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted-foreground">
+                      <Checkbox
+                        checked={l.clientVisible}
+                        onCheckedChange={(v) => setLine(l.key, { clientVisible: v === true })}
+                        disabled={!editable}
+                      />
+                      {l.clientVisible ? <Eye className="size-[15px]" /> : <EyeOff className="size-[15px]" />}
+                      Shown on the proposal
+                    </label>
+                  ) : (
+                    <span className="text-xs text-subtle-foreground">
+                      A line in no item is always shown on the proposal.
+                    </span>
+                  )}
+                  {!blank && (
+                    <span className="text-xs tabular-nums text-subtle-foreground">
+                      margin {money(marginCents)}
+                      {priceCents > 0 && ` · ${((marginCents / priceCents) * 100).toFixed(1)}%`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </SortableRow>
+    );
+  }
+
+  /** The "Add a line here" row, which is also where a dragged line can land. */
+  function addLineRow(sectionKey: string) {
+    return (
+      <DropZone id={`zone:${sectionKey}`} over={dragOver === `zone:${sectionKey}`} disabled={!editable}>
+        <div className={cn(GUTTER_GRID, "border-b border-divider pb-2 pt-1")}>
+          <span />
+          {editable && (
+            <div>
+              <button
+                type="button"
+                onClick={() => addLine(sectionKey)}
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-full px-2 text-[13px] font-medium text-module-accent transition-colors hover:bg-module-accent/10"
+              >
+                <Plus className="size-3.5" /> Add a line here
+              </button>
+            </div>
+          )}
+        </div>
+      </DropZone>
+    );
+  }
+
+  const savedState = pending
+    ? "Saving…"
+    : failed
+      ? "Not saved — try Save"
+      : unsaved
+        ? "Unsaved changes"
+        : "Saved";
+
+  return (
+    <div
+      ref={panelRef}
+      className="flex flex-col rounded-3xl bg-card shadow-elevation-1 md:h-[calc(100dvh-320px)] md:min-h-[520px] md:overflow-hidden"
+    >
+      {/* ─────────────────────────────────────────────────────── the header bar */}
+      <div className="flex flex-none flex-wrap items-center gap-5 rounded-t-3xl border-b border-border bg-card px-6 py-3.5">
+        <Link
+          href={`/dashboard/m/jobs/${projectId}/estimates`}
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="size-[18px]" />
+          <span className="sr-only">Back to the estimates</span>
+        </Link>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-heading text-[19px] font-semibold tracking-heading">
+              {title.trim() || number.trim() || "Untitled estimate"}
+            </h1>
+            <StatusBadge tone={statusTone} className="h-5 px-2 text-[11px]">
+              {statusLabel}
+            </StatusBadge>
+          </div>
+          {coordinates && <p className="mt-0.5 text-xs text-subtle-foreground">{coordinates}</p>}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-4 lg:gap-6">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.04em] text-subtle-foreground">Margin</p>
+            <p
+              className={cn(
+                "text-[15px] font-medium tabular-nums",
+                totals.marginCents < 0 ? "text-destructive" : "text-success-foreground",
+              )}
+            >
+              {marginPercent === null ? "—" : `${marginPercent.toFixed(1)}%`}{" "}
+              <span className="font-normal text-subtle-foreground">{money(totals.marginCents)}</span>
+            </p>
+          </div>
+          <div className="hidden h-[34px] w-px bg-divider sm:block" />
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.04em] text-subtle-foreground">The client pays</p>
+            <p className="font-heading text-[26px] font-semibold tabular-nums tracking-heading">
+              {money(totals.totalCents)}
+            </p>
+          </div>
+          {canEdit && (
+            <span
+              className="flex items-center gap-1.5 text-xs text-subtle-foreground"
+              aria-live="polite"
+              data-testid="estimate-save-state"
+            >
+              {savedState === "Saved" && <Check className="size-3.5" />}
+              {savedState}
+            </span>
+          )}
+          {canEdit && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => saveRef.current(false)}
+              disabled={pending || number.trim() === ""}
+            >
+              {pending ? "Saving…" : "Save"}
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              type="button"
+              className="h-9 rounded-lg px-4"
+              onClick={sendToClient}
+              disabled={pending || number.trim() === ""}
+            >
+              Send to client
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* ───────────────────────────────────────── the body: rail + work column */}
+      <div
+        ref={bodyRef}
+        className="grid min-h-0 flex-1 grid-cols-1 md:overflow-y-auto lg:grid-cols-[252px_minmax(0,1fr)] lg:overflow-hidden"
+      >
+        {/* ── the rail ── */}
+        <div className="flex flex-col gap-5 border-b border-border py-5 pl-6 pr-[18px] lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-subtle-foreground">
+              Where the money is
+            </p>
+            <div className="mt-2.5 flex h-2 gap-[0.6%] overflow-hidden rounded-full bg-divider">
+              {railWeight > 0 &&
+                railRows.map((r) => (
+                  <span
+                    key={r.key || "loose"}
+                    style={{
+                      flexBasis: `${(Math.max(0, r.priceCents) / railWeight) * 100}%`,
+                      background: r.colour,
+                    }}
+                    className="h-full rounded-full"
+                  />
+                ))}
+            </div>
+            <div className="mt-2 flex flex-col">
+              {railRows.length === 0 ? (
+                <p className="px-2 py-[7px] text-[13px] text-subtle-foreground">
+                  Nothing priced yet. Type a line below and it appears here.
+                </p>
+              ) : (
+                railRows.map((r) => (
+                  <button
+                    key={r.key || "loose"}
+                    type="button"
+                    onClick={() => jumpTo(r.key)}
+                    className="flex items-start gap-2 rounded-[10px] px-2 py-[7px] text-left transition-colors hover:bg-muted"
+                  >
+                    <span
+                      style={{ background: r.colour }}
+                      className="mt-[6px] size-1.5 shrink-0 rounded-full"
+                    />
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 text-[13px] leading-[1.35]",
+                        pinnedItem === r.key && "font-medium",
+                      )}
+                    >
+                      {r.name}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
+                      {totals.totalCents > 0
+                        ? `${Math.round((r.priceCents / totals.totalCents) * 100)}%`
+                        : "—"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-divider pt-[18px]">
+            <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-subtle-foreground">
+              How the total is built
+            </p>
+            {(
+              [
+                ["Cost", totals.costCents],
+                ["Markup", totals.subtotalCents - totals.costCents],
+                ["Overhead", totals.overheadCents],
+                ["Profit", totals.profitCents],
+              ] as const
+            ).map(([label, cents]) => (
+              <div key={label} className="flex items-baseline justify-between gap-3">
+                <span className="text-[13px] text-muted-foreground">{label}</span>
+                <span className="text-[13px] tabular-nums">{money(cents)}</span>
+              </div>
+            ))}
+            <div className="flex items-baseline justify-between gap-3 border-t border-divider pt-2">
+              <span className="text-[13px] font-medium">Total</span>
+              <span className="text-[15px] font-semibold tabular-nums">{money(totals.totalCents)}</span>
+            </div>
+            {totals.fixedCents > 0 && (
+              <p className="text-xs text-subtle-foreground">
+                {money(totals.fixedCents)} of this you priced by hand, so it takes no overhead or profit
+                again.
+              </p>
+            )}
+            {ratesIdle && (
+              <p className="text-xs text-subtle-foreground">
+                Every item is priced by hand, so overhead and profit have nothing left to be taken on. If
+                you meant the rates to apply, let an item&apos;s lines add up instead.
+              </p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-scope">Scope of work</Label>
-            <Textarea
-              id="est-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value)}
-              rows={3}
-              maxLength={8000}
-              disabled={!editable}
-              placeholder="What the price covers, in the client's words."
-            />
-          </div>
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="est-exclusions">Not included</Label>
-            <Textarea
-              id="est-exclusions"
-              value={exclusions}
-              onChange={(e) => setExclusions(e.target.value)}
-              rows={4}
-              maxLength={8000}
-              disabled={!editable}
-              placeholder="Permits and utility fees. Landscaping. Anything not listed above."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="est-terms">Terms</Label>
-            <Textarea
-              id="est-terms"
-              value={termsText}
-              onChange={(e) => setTermsText(e.target.value)}
-              rows={4}
-              maxLength={8000}
-              disabled={!editable}
-              placeholder="The payment schedule, what a change costs, how long the price holds."
-            />
-            <p className="text-xs text-muted-foreground">A new estimate starts with the terms of the last one you wrote.</p>
-          </div>
-        </div>
-      </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="est-notes">Notes</Label>
-        <Textarea id="est-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} maxLength={4000} disabled={!canEdit} />
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
           {isOwner && (
-            <>
-              <ApplyToBudgetButton projectId={projectId} estimateId={estimate.id} costCents={totals.costCents} symbol={symbol} />
+            <div className="mt-auto flex flex-col gap-2 border-t border-divider pt-[18px]">
+              <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-subtle-foreground">
+                When the client says yes
+              </p>
+              <ApplyToBudgetButton
+                projectId={projectId}
+                estimateId={estimate.id}
+                costCents={totals.costCents}
+                symbol={symbol}
+              />
               <ApplyToScheduleDialog
                 projectId={projectId}
                 estimateId={estimate.id}
@@ -1911,30 +1968,1278 @@ export function EstimateEditor({
                   symbol={symbol}
                 />
               )}
-            </>
+            </div>
           )}
         </div>
-        {canEdit && (
-          <span
-            className="mr-3 text-xs text-muted-foreground"
-            aria-live="polite"
-            data-testid="estimate-save-state"
+
+        {/* ── the work column ── */}
+        <div
+          ref={workRef}
+          className="@container/work flex min-w-0 flex-col gap-3 px-6 lg:overflow-y-auto"
+        >
+          {/* Every direct child is `flex-none`, or the column's children shrink to
+              fit its height and it never overflows — which clips the grid with no
+              way to scroll to it. The two spacers are the column's padding: real
+              padding on a scroll container is a gap nothing pinned inside it can
+              cover, and rows scroll up through it. */}
+          <div className="h-5 flex-none" />
+
+          {/* ── 3a. Details and Rates ── */}
+          <div className="grid flex-none gap-3 @3xl/work:grid-cols-2">
+            <FoldedCard
+              title="Details"
+              summary={[number.trim(), sentOn ? shortDate(sentOn) : null, validUntil ? `→ ${shortDate(validUntil)}` : null]
+                .filter(Boolean)
+                .join(" · ")}
+              open={open.details}
+              onToggle={() => toggleSection("details")}
+            >
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-[7rem_1fr]">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-number" className="text-xs font-medium text-muted-foreground">
+                      Number
+                    </Label>
+                    <Input
+                      id="est-number"
+                      value={number}
+                      onChange={(e) => setNumber(e.target.value)}
+                      maxLength={40}
+                      className="h-10"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-title" className="text-xs font-medium text-muted-foreground">
+                      Title
+                    </Label>
+                    <Input
+                      id="est-title"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      maxLength={200}
+                      className="h-10"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-sent" className="text-xs font-medium text-muted-foreground">
+                      Sent
+                    </Label>
+                    <Input
+                      id="est-sent"
+                      type="date"
+                      value={sentOn}
+                      onChange={(e) => setSentOn(e.target.value)}
+                      className="h-10"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-valid" className="text-xs font-medium text-muted-foreground">
+                      Valid until
+                    </Label>
+                    <Input
+                      id="est-valid"
+                      type="date"
+                      value={validUntil}
+                      onChange={(e) => setValidUntil(e.target.value)}
+                      className="h-10"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="est-status" className="text-xs font-medium text-muted-foreground">
+                    Status
+                  </Label>
+                  <Select value={status} onValueChange={changeStatus} disabled={!canEdit || locked}>
+                    <SelectTrigger className="h-10 w-full" id="est-status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ESTIMATE_STATUSES.filter((s) => s !== "accepted" || locked).map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {ESTIMATE_STATUS_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(decidedOn !== "" || status === "declined" || locked) && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-decided" className="text-xs font-medium text-muted-foreground">
+                      Decided
+                    </Label>
+                    <Input
+                      id="est-decided"
+                      type="date"
+                      value={decidedOn}
+                      onChange={(e) => setDecidedOn(e.target.value)}
+                      className="h-10"
+                      disabled={!canEdit}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="est-notes" className="text-xs font-medium text-muted-foreground">
+                    Notes
+                  </Label>
+                  <Textarea
+                    id="est-notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={2}
+                    maxLength={4000}
+                    className="rounded-xl p-3 text-[13px]"
+                    placeholder="Anything this estimate should remember that the client does not see."
+                    disabled={!canEdit}
+                  />
+                </div>
+                {locked && (
+                  <p className="text-xs text-subtle-foreground">
+                    Accepted, so the rates, the lines and the proposal&apos;s words are fixed. To revise,
+                    start a new estimate and mark this one superseded.
+                  </p>
+                )}
+              </div>
+            </FoldedCard>
+
+            <FoldedCard
+              title="Rates"
+              summary={`${markup.trim() || "0"} · ${overhead.trim() || "0"} · ${profit.trim() || "0"}%`}
+              open={open.rates}
+              onToggle={() => toggleSection("rates")}
+            >
+              <div className="space-y-3">
+                {(
+                  [
+                    ["Markup on cost", markup, setMarkup, "est-markup"],
+                    ["Overhead", overhead, setOverhead, "est-overhead"],
+                    ["Profit", profit, setProfit, "est-profit"],
+                  ] as const
+                ).map(([label, value, set, id]) => (
+                  <div key={id} className="flex items-center justify-between gap-3">
+                    <Label htmlFor={id} className="text-[13px] font-medium">
+                      {label}
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        id={id}
+                        value={value}
+                        onChange={(e) => set(e.target.value)}
+                        placeholder="0"
+                        inputMode="decimal"
+                        className="h-[38px] w-[76px] text-right text-[15px] tabular-nums"
+                        disabled={!editable}
+                      />
+                      <span className="text-[13px] text-muted-foreground">%</span>
+                    </div>
+                  </div>
+                ))}
+                {showHints && (
+                  <p className="text-xs text-subtle-foreground">
+                    Markup is on a line&apos;s cost. Overhead, then profit, are taken on the priced lines —
+                    never again on an item you priced yourself.
+                  </p>
+                )}
+                {ratesIdle && (
+                  <p className="text-xs text-warning-foreground">
+                    Every item is priced by hand, so these two have nothing left to be taken on.
+                  </p>
+                )}
+              </div>
+            </FoldedCard>
+          </div>
+
+          {/* ── 3b. Lines ── */}
+          {/*
+            `relative` is load-bearing, not decoration. The row buttons carry
+            `sr-only` labels, which Tailwind makes `position: absolute` — so
+            without a positioned ancestor their containing block is the PAGE,
+            they sit at their static x and they stretch the DOCUMENT's scroll
+            width. That is what made this screen scroll sideways by 276px.
+
+            And NOT `overflow-hidden`: a clipping ancestor becomes the
+            containing block for `position: sticky` and silently disables every
+            pinned row inside. The corners are rounded on the header and the
+            entry bar instead.
+          */}
+          <div ref={gridRef} className="relative flex-none rounded-xl bg-card shadow-elevation-1">
+            <DndContext
+              id="estimate-rows"
+              sensors={sensors}
+              collisionDetection={collisions}
+              onDragStart={onDragStart}
+              onDragOver={onDragOver}
+              onDragEnd={onDragEnd}
+              onDragCancel={() => {
+                setDragging(null);
+                setDragOver(null);
+              }}
+            >
+              <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+                {/* the card header, pinned */}
+                <div className={cn("sticky top-0 z-30 flex flex-wrap items-center gap-3 rounded-t-xl bg-card py-3.5", PAD)}>
+                  <span className="text-[15px] font-medium">Lines</span>
+                  <span className="text-[13px] text-subtle-foreground">
+                    {named.length > 0 && `${named.length} ${named.length === 1 ? "item" : "items"} · `}
+                    {lines.filter((l) => l.description.trim() !== "").length} lines
+                  </span>
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Pill onClick={toggleHints} pressed={showHints}>
+                      {showHints ? <Check className="size-3.5" /> : <Plus className="size-3.5" />} Hints
+                    </Pill>
+                    {editable && (
+                      <>
+                        <Pill onClick={() => setClientWording((v) => !v)} pressed={clientWording}>
+                          {clientWording ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}{" "}
+                          Client wording
+                        </Pill>
+                        <Pill onClick={addItem}>
+                          <FolderPlus className="size-3.5" /> Add item
+                        </Pill>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* the column header, pinned under it */}
+                <div
+                  className={cn(
+                    ROW_GRID,
+                    "sticky top-[60px] z-30 hidden border-y border-divider bg-background py-[7px] text-[11px] font-medium uppercase tracking-[0.04em] text-subtle-foreground @3xl/work:grid",
+                  )}
+                >
+                  <span>#</span>
+                  <span>Description</span>
+                  <span className="text-right">Qty</span>
+                  <span className="text-right">Unit cost</span>
+                  <span className="hidden text-right @5xl/work:block">Cost</span>
+                  <span className="text-right">Price</span>
+                  <span />
+                </div>
+
+                {groups.map((g, gi) => {
+                  const m = groupMoney(g);
+                  const own = rowsOf(g.key);
+                  const collapsed = collapsedItems.has(g.key);
+                  return (
+                    <SortableRow
+                      key={g.key}
+                      id={`item:${g.key}`}
+                      disabled={!editable}
+                      over={dragOver === `item:${g.key}` && dragging !== `item:${g.key}`}
+                    >
+                      {(grip) => (
+                        <>
+                          <div
+                            ref={(el) => {
+                              if (el) itemHeaderRefs.current.set(g.key, el);
+                              else itemHeaderRefs.current.delete(g.key);
+                            }}
+                            className={cn(
+                              "sticky top-[60px] z-20 flex flex-wrap items-center gap-2 border-b border-divider bg-muted/92 py-2.5 backdrop-blur-[6px] @3xl/work:top-[93px]",
+                              PAD,
+                            )}
+                          >
+                            <div className="flex items-center gap-0.5">
+                              {grip}
+                              <RowNumber
+                                value={String(gi + 1)}
+                                label={`Where item ${gi + 1} sits`}
+                                disabled={!editable}
+                                onCommit={(address) => {
+                                  // An item has no section of its own: `2.1` is not an
+                                  // address it can be at, so the number goes back.
+                                  if (address.section === null) moveItemTo(g.key, address.position);
+                                }}
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-[26px] shrink-0 rounded-lg"
+                                aria-expanded={!collapsed}
+                                onClick={() =>
+                                  setCollapsedItems((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(g.key)) next.delete(g.key);
+                                    else next.add(g.key);
+                                    return next;
+                                  })
+                                }
+                              >
+                                {collapsed ? (
+                                  <ChevronRight className="size-[15px] text-subtle-foreground" />
+                                ) : (
+                                  <ChevronDown className="size-[15px] text-subtle-foreground" />
+                                )}
+                                <span className="sr-only">
+                                  {collapsed ? "Show" : "Hide"} the lines under item {gi + 1}
+                                </span>
+                              </Button>
+                            </div>
+                            <span
+                              style={{ background: railColour(gi) }}
+                              className="size-1.5 shrink-0 rounded-full"
+                            />
+                            <Input
+                              aria-label={`Item name, item ${gi + 1}`}
+                              value={g.name}
+                              onChange={(e) => setGroup(g.key, { name: e.target.value })}
+                              placeholder="Tile flooring, master and hall baths"
+                              maxLength={200}
+                              className={cn(
+                                "h-[34px] min-w-[140px] flex-1 text-[15px] font-medium",
+                                BARE,
+                              )}
+                              disabled={!editable}
+                            />
+                            {/* The two modes are a binary; a chip switches faster than a select. */}
+                            <button
+                              type="button"
+                              disabled={!editable}
+                              onClick={() =>
+                                setGroup(g.key, {
+                                  priceMode: g.priceMode === "fixed" ? "rollup" : "fixed",
+                                })
+                              }
+                              aria-label={`How item ${gi + 1} is priced`}
+                              className={cn(
+                                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors disabled:opacity-60",
+                                g.priceMode === "fixed"
+                                  ? "bg-module-accent/12 text-module-accent"
+                                  : "border border-border text-muted-foreground hover:bg-muted",
+                              )}
+                            >
+                              {g.priceMode === "fixed" ? (
+                                <>
+                                  <Pencil className="size-3" /> Priced by hand
+                                </>
+                              ) : (
+                                "Lines add up"
+                              )}
+                            </button>
+                            {m.priceCents !== 0 && (
+                              <span
+                                className={cn(
+                                  "hidden shrink-0 text-xs tabular-nums @xl/work:inline",
+                                  m.marginCents < 0 ? "text-destructive" : "text-success-foreground",
+                                )}
+                              >
+                                {((m.marginCents / m.priceCents) * 100).toFixed(1)}% margin
+                              </span>
+                            )}
+                            {g.priceMode === "fixed" ? (
+                              <Input
+                                aria-label={`Price the client pays, item ${gi + 1}`}
+                                value={g.fixedPrice}
+                                onChange={(e) => setGroup(g.key, { fixedPrice: e.target.value })}
+                                placeholder="0.00"
+                                inputMode="decimal"
+                                className="h-[34px] w-[108px] shrink-0 text-right text-[15px] font-semibold tabular-nums"
+                                disabled={!editable}
+                              />
+                            ) : (
+                              <span className="min-w-24 shrink-0 text-right text-[15px] font-semibold tabular-nums">
+                                {money(m.priceCents)}
+                              </span>
+                            )}
+                            {editable && (
+                              <div className="flex shrink-0 items-center">
+                                {/* An assembly is this item, saved — E6, ADR 0086. */}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7"
+                                  onClick={() => openSaveAssembly(g.key)}
+                                  disabled={own.every((l) => l.description.trim() === "")}
+                                >
+                                  <Package className="size-[15px]" />
+                                  <span className="sr-only">Save item {gi + 1} as an assembly</span>
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7"
+                                  onClick={() => removeGroup(g.key)}
+                                >
+                                  <Trash2 className="size-[15px]" />
+                                  <span className="sr-only">
+                                    Remove item {gi + 1}; its lines stay, on their own
+                                  </span>
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+
+                          {clientWording && (
+                            <div className={cn(GUTTER_GRID, "border-b border-divider pb-2 pt-0.5")}>
+                              <span />
+                              <Input
+                                aria-label={`What the client reads under item ${gi + 1}`}
+                                value={g.clientNote}
+                                onChange={(e) => setGroup(g.key, { clientNote: e.target.value })}
+                                placeholder="One sentence the client reads under this item on the proposal. Optional."
+                                maxLength={4000}
+                                className={cn("h-8 text-[13px] text-muted-foreground", BARE)}
+                                disabled={!editable}
+                              />
+                            </div>
+                          )}
+
+                          {collapsed ? (
+                            <div className={cn(GUTTER_GRID, "border-b border-divider py-2")}>
+                              <span />
+                              <span className="text-[13px] text-subtle-foreground">
+                                {own.length} {own.length === 1 ? "line" : "lines"} hidden ·{" "}
+                                {money(m.costCents)} cost
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              {own.map((l, li) => lineRow(l, gi, li + 1))}
+                              {addLineRow(g.key)}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </SortableRow>
+                  );
+                })}
+
+                {/* ── the loose pile ── */}
+                {groups.length > 0 && (
+                  <div
+                    ref={(el) => {
+                      if (el) itemHeaderRefs.current.set("", el);
+                      else itemHeaderRefs.current.delete("");
+                    }}
+                    className={cn(
+                      "sticky top-[60px] z-20 flex flex-wrap items-center gap-3 border-b border-divider bg-muted/92 py-2.5 backdrop-blur-[6px] @3xl/work:top-[93px]",
+                      PAD,
+                    )}
+                  >
+                    <span className="w-[64px] text-[13px] tabular-nums text-subtle-foreground @sm/work:w-[76px] @3xl/work:w-[84px] @5xl/work:w-[88px]">
+                      {groups.length + 1}
+                    </span>
+                    <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
+                    <span className="flex-1 text-[13px] font-medium text-muted-foreground">
+                      Not in an item
+                    </span>
+                    <span className="text-[15px] font-semibold tabular-nums">
+                      {money(
+                        loose
+                          .filter((l) => l.description.trim() !== "")
+                          .reduce((sum, l) => sum + linePriceCents(figuresOf(l), terms.markupPpm), 0),
+                      )}
+                    </span>
+                  </div>
+                )}
+                {loose.map((l, li) => lineRow(l, groups.length, li + 1))}
+                {addLineRow("")}
+
+                {/* ── the entry bar, pinned ── */}
+                {editable && (
+                  <div className={cn("sticky bottom-0 z-30 flex flex-col gap-2 rounded-b-xl border-t border-border bg-card py-3.5", PAD)}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative min-w-0 flex-1 basis-[240px]">
+                        <Plus className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-subtle-foreground" />
+                        <Input
+                          ref={entryRef}
+                          aria-label="Type a line"
+                          value={entry}
+                          onChange={(e) => {
+                            setEntry(e.target.value);
+                            setEntryError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitEntry();
+                              return;
+                            }
+                            /**
+                             * Tab takes the remembered price — and ONLY when one is
+                             * showing, so Tab still moves focus the rest of the time
+                             * and nobody is trapped in the field.
+                             */
+                            if (e.key === "Tab" && !e.shiftKey && entryMemory) {
+                              e.preventDefault();
+                              commitEntry(true);
+                            }
+                          }}
+                          placeholder="320 sf tile @ 4.20"
+                          maxLength={400}
+                          className="h-11 rounded-full pl-10 pr-[100px] text-[15px]"
+                        />
+                        <span className="pointer-events-none absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-xs text-subtle-foreground">
+                          Enter <CornerDownLeft className="size-3.5" />
+                        </span>
+                      </div>
+                      {hasGroups && (
+                        <Select
+                          value={intoKey === "" ? NONE : intoKey}
+                          onValueChange={(v) => setInto(v === NONE ? "" : v)}
+                        >
+                          <SelectTrigger
+                            aria-label="The item a typed line lands in"
+                            className="h-11 rounded-full px-4 text-[13px]"
+                          >
+                            <span className="text-subtle-foreground">Into:</span>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={NONE}>Not in an item</SelectItem>
+                            {named.map((g) => (
+                              <SelectItem key={g.key} value={g.key}>
+                                {g.name.trim()}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setPasteOpen(true)}
+                        className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-4 text-[13px] font-medium transition-colors hover:bg-muted"
+                      >
+                        <ClipboardPaste className="size-[15px]" /> Paste a takeoff
+                      </button>
+                      {assemblies.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setDropOpen(true)}
+                          className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-4 text-[13px] font-medium transition-colors hover:bg-muted"
+                        >
+                          <Package className="size-[15px]" /> Add an assembly
+                        </button>
+                      )}
+                    </div>
+                    {entryError !== null ? (
+                      <p className="text-xs text-destructive">{entryError}</p>
+                    ) : entryMemory ? (
+                      <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                        <History className="size-3.5 text-module-accent" />
+                        Last priced{" "}
+                        <span className="font-medium tabular-nums text-foreground">
+                          {priceHint(entryMemory, fmt(entryMemory.unitCostCents, symbol), today())}
+                        </span>{" "}
+                        — <strong className="font-medium text-foreground">Tab</strong> to use it
+                      </p>
+                    ) : showHints ? (
+                      <p className="text-xs text-subtle-foreground">
+                        <code className="text-foreground">320 sf tile @ 4.20</code> ·{" "}
+                        <code className="text-foreground">plumbing rough 12000</code> for a lump sum ·{" "}
+                        <strong className="font-medium">↑↓</strong> walks a column ·{" "}
+                        <strong className="font-medium">Ctrl+D</strong> copies a row · type a row&apos;s
+                        number to move it
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </SortableContext>
+
+              <DragOverlay dropAnimation={null}>
+                {dragging && <DragChip label={dragLabel(dragging, groups, lines)} />}
+              </DragOverlay>
+            </DndContext>
+          </div>
+
+          {/* ── 3c. Proposal and the client's link ── */}
+          <FoldedCard
+            className="flex-none"
+            title="Proposal and the client's link"
+            summary={
+              <span className="flex items-center gap-2">
+                {PROPOSAL_FORMAT_LABELS[format as keyof typeof PROPOSAL_FORMAT_LABELS] ?? format} ·{" "}
+                {PROPOSAL_PRESENTATION_LABELS[presentation as keyof typeof PROPOSAL_PRESENTATION_LABELS] ??
+                  presentation}
+                {liveShares.length > 0 && (
+                  <span className="inline-flex h-[22px] items-center gap-1 rounded-full bg-success/15 px-[9px] text-xs font-medium text-success-foreground">
+                    <Link2 className="size-3" />
+                    {liveShares[0].viewCount === 0
+                      ? "not opened"
+                      : `opened ${liveShares[0].viewCount} ${liveShares[0].viewCount === 1 ? "time" : "times"}`}
+                  </span>
+                )}
+              </span>
+            }
+            open={open.proposal}
+            onToggle={() => toggleSection("proposal")}
+            bodyClassName="p-[18px]"
           >
-            {pending
-              ? "Saving…"
-              : failed
-                ? "Not saved — try Save"
-                : unsaved
-                  ? "Unsaved changes"
-                  : "Saved"}
-          </span>
-        )}
-        {canEdit && (
-          <Button onClick={() => saveRef.current(false)} disabled={pending || number.trim() === ""}>
-            {pending ? "Saving…" : "Save"}
-          </Button>
-        )}
+            <div className="grid gap-5 @5xl/work:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-format" className="text-xs font-medium text-muted-foreground">
+                      What it is
+                    </Label>
+                    <Select value={format} onValueChange={setFormat} disabled={!canEdit}>
+                      <SelectTrigger className="h-10 w-full" id="est-format">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROPOSAL_FORMATS.map((f) => (
+                          <SelectItem key={f} value={f}>
+                            {PROPOSAL_FORMAT_LABELS[f]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-presentation" className="text-xs font-medium text-muted-foreground">
+                      Show the price
+                    </Label>
+                    <Select value={presentation} onValueChange={setPresentation} disabled={!canEdit}>
+                      <SelectTrigger className="h-10 w-full" id="est-presentation">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROPOSAL_PRESENTATIONS.map((p) => (
+                          <SelectItem key={p} value={p}>
+                            {PROPOSAL_PRESENTATION_LABELS[p]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {presentation === "codes" && (
+                      <label className="flex cursor-pointer items-start gap-2 pt-1 text-xs text-muted-foreground">
+                        <Checkbox
+                          checked={showCodeNumbers}
+                          onCheckedChange={(v) => setShowCodeNumbers(v === true)}
+                          aria-label="Print the cost code numbers on the proposal"
+                          disabled={!canEdit}
+                          className="mt-0.5"
+                        />
+                        <span>
+                          Print the code numbers too —{" "}
+                          <span className="tabular-nums">09 30 00 · Tiling</span> rather than Tiling.
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-letter" className="text-xs font-medium text-muted-foreground">
+                      {format === "brochure" ? "The letter it opens with" : "A letter (brochure only)"}
+                    </Label>
+                    <Textarea
+                      id="est-letter"
+                      value={letterText}
+                      onChange={(e) => setLetterText(e.target.value)}
+                      rows={4}
+                      maxLength={8000}
+                      placeholder="Dear Mr and Mrs Shrock, thank you for asking us to price the house at 118 Oak Row…"
+                      className="rounded-xl p-3 text-[13px]"
+                      disabled={!editable}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-scope" className="text-xs font-medium text-muted-foreground">
+                      Scope of work
+                    </Label>
+                    <Textarea
+                      id="est-scope"
+                      value={scope}
+                      onChange={(e) => setScope(e.target.value)}
+                      rows={4}
+                      maxLength={8000}
+                      className="rounded-xl p-3 text-[13px]"
+                      placeholder="What the price covers, in the client's words."
+                      disabled={!editable}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-exclusions" className="text-xs font-medium text-muted-foreground">
+                      Not included
+                    </Label>
+                    <Textarea
+                      id="est-exclusions"
+                      value={exclusions}
+                      onChange={(e) => setExclusions(e.target.value)}
+                      rows={3}
+                      maxLength={8000}
+                      className="rounded-xl p-3 text-[13px]"
+                      placeholder="Permits and utility fees. Landscaping. Anything not listed above."
+                      disabled={!editable}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="est-terms" className="text-xs font-medium text-muted-foreground">
+                      Terms
+                    </Label>
+                    <Textarea
+                      id="est-terms"
+                      value={termsText}
+                      onChange={(e) => setTermsText(e.target.value)}
+                      rows={3}
+                      maxLength={8000}
+                      className="rounded-xl p-3 text-[13px]"
+                      placeholder="The payment schedule, what a change costs, how long the price holds."
+                      disabled={!editable}
+                    />
+                    {showHints && (
+                      <p className="text-xs text-subtle-foreground">
+                        A new estimate starts with the terms of the last one you wrote.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <ClientLinks
+                projectId={projectId}
+                estimateId={estimate.id}
+                shares={shares}
+                canEdit={canEdit}
+                symbol={symbol}
+                format={format}
+                pending={pending}
+                copyRef={linkRef}
+                onMake={makeLink}
+                onCopy={copyLink}
+              />
+            </div>
+          </FoldedCard>
+
+          {/* ── 3d. By cost code ── */}
+          {byCode.length > 0 && (
+            <FoldedCard
+              className="flex-none"
+              title="By cost code"
+              summary={`${byCode.length} ${byCode.length === 1 ? "code" : "codes"} · ${money(
+                byCode.reduce((sum, c) => sum + c.costCents, 0),
+              )} cost`}
+              open={open.codes}
+              onToggle={() => toggleSection("codes")}
+            >
+              {showHints && (
+                <p className="mb-3 text-xs text-subtle-foreground">
+                  What the <strong>saved</strong> lines add up to per code: the cost is what{" "}
+                  <em>Use as budget</em> writes, the price is what the job cost report will compare it with
+                  once the job is billed.
+                </p>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-[11px] font-medium uppercase tracking-[0.04em] text-subtle-foreground">
+                    <tr>
+                      <th className="py-1.5 text-left">Cost code</th>
+                      <th className="py-1.5 text-right">Cost</th>
+                      <th className="py-1.5 text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byCode.map((c) => (
+                      <tr key={c.costCodeId ?? "none"} className="border-t border-divider">
+                        <td className={cn("py-1.5", c.costCodeId ? "" : "text-muted-foreground")}>
+                          {c.codeLabel ?? "No cost code"}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">{money(c.costCents)}</td>
+                        <td className="py-1.5 text-right tabular-nums">{money(c.priceCents)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </FoldedCard>
+          )}
+          <div className="h-6 flex-none" />
+        </div>
       </div>
+
+      {/* ───────────────────────────────────────────────────────────── dialogs */}
+
+      <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Paste a takeoff</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              One line each, in the same words the box under the lines takes — or straight out of a
+              spreadsheet, columns and all. Every line is shown below before anything is added
+              {hasGroups && intoKey !== ""
+                ? `, and they land in ${named.find((g) => g.key === intoKey)?.name.trim() ?? "the item"}`
+                : ""}
+              .
+            </p>
+            <Textarea
+              aria-label="The lines to add"
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={6}
+              placeholder={"320 sf tile @ 4.20\ntile labour 320 sf @ 3.50\nplumbing rough 12000"}
+              className="rounded-xl font-mono text-xs"
+            />
+            {pasted.length > 0 && (
+              <div className="max-h-64 overflow-y-auto rounded-xl border border-border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">Description</th>
+                      <th className="px-2 py-1.5 text-right">Qty</th>
+                      <th className="px-2 py-1.5 text-left">Unit</th>
+                      <th className="px-2 py-1.5 text-right">Unit cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((r, i) => (
+                      <tr key={i} className="border-t border-divider">
+                        {r.line === null ? (
+                          <td colSpan={4} className="px-2 py-1.5 text-destructive">
+                            Could not read <span className="font-mono">{r.input}</span> — it will be left out
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-2 py-1.5">
+                              {r.line.description}
+                              {r.remembered && (
+                                <span className="block text-muted-foreground">
+                                  priced from {r.remembered.projectNumber},{" "}
+                                  {howLongAgo(r.remembered.pricedOn, today())}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">
+                              {r.line.quantityThousandths === 1000 && r.line.unit === ""
+                                ? "—"
+                                : thousandthsToQuantityString(r.line.quantityThousandths)}
+                            </td>
+                            <td className="px-2 py-1.5">{r.line.unit || "—"}</td>
+                            <td
+                              className={cn(
+                                "px-2 py-1.5 text-right tabular-nums",
+                                r.remembered && "font-medium",
+                              )}
+                            >
+                              {fmt(r.line.unitCostCents, symbol)}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="sm:justify-between">
+            {rememberedCount > 0 ? (
+              <p className="text-xs text-muted-foreground sm:self-center">
+                <span className="font-medium text-foreground">{rememberedCount}</span> priced from what you
+                charged last time. Check them — a price can be a year old.
+              </p>
+            ) : (
+              <span />
+            )}
+            <Button
+              type="button"
+              disabled={readable.length === 0}
+              onClick={() => {
+                setLines((prev) => [...prev, ...readable.map((r) => draftOf(r.line, intoKey))]);
+                setPasteText("");
+                setPasteOpen(false);
+              }}
+            >
+              Add {readable.length} {readable.length === 1 ? "line" : "lines"}
+              {pasted.length > readable.length ? `, leave out ${pasted.length - readable.length}` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save this item as an assembly (E6, ADR 0086). */}
+      <Dialog open={saveFor !== null} onOpenChange={(o) => !o && setSaveFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save this item as an assembly</DialogTitle>
+            <DialogDescription>
+              Its lines, their quantities and their cost codes, kept so the next job can have them. It goes
+              in at the size you say it is per, and scales from there.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="asm-name">Call it</Label>
+              <Input
+                id="asm-name"
+                value={asmName}
+                onChange={(e) => setAsmName(e.target.value)}
+                placeholder="Tile flooring"
+                maxLength={160}
+                className="h-10"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[8rem_8rem]">
+              <div className="space-y-1.5">
+                <Label htmlFor="asm-per">It is per</Label>
+                <Input
+                  id="asm-per"
+                  value={asmPer}
+                  onChange={(e) => setAsmPer(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="320"
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="asm-unit">Of</Label>
+                <Input
+                  id="asm-unit"
+                  value={asmUnit}
+                  onChange={(e) => setAsmUnit(e.target.value)}
+                  maxLength={20}
+                  placeholder="sf"
+                  className="h-10"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Guessed from the lines themselves. Drop it at 500 sf later and every quantity scales with it —
+              <strong> the costs and markups do not</strong>, because they are already per unit.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="asm-notes">A note to yourself</Label>
+              <Textarea
+                id="asm-notes"
+                value={asmNotes}
+                onChange={(e) => setAsmNotes(e.target.value)}
+                rows={2}
+                maxLength={2000}
+                className="rounded-xl p-3 text-[13px]"
+                placeholder="What is in it, what it assumes. Never printed."
+              />
+            </div>
+            {saveFor !== null && (
+              <p className="text-xs text-muted-foreground">
+                <strong>{assemblyLinesOf(saveFor).length}</strong> lines will be saved.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={commitSaveAssembly} disabled={pending || asmName.trim() === ""}>
+              {pending ? "Saving…" : "Save the assembly"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Drop one in: it arrives as a new item with its lines under it. */}
+      <Dialog open={dropOpen} onOpenChange={setDropOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add an assembly</DialogTitle>
+            <DialogDescription>
+              It comes in as an item with its lines underneath, priced as you saved it, with the cost codes
+              matched against the code list this estimate uses. A code that list has not got is left blank.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="drop-which">Which one</Label>
+              <Select value={dropId} onValueChange={setDropId}>
+                <SelectTrigger id="drop-which" className="h-10 w-full">
+                  <SelectValue placeholder="Choose an assembly" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assemblies.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name} · {a.per} · {a.lineCount} {a.lineCount === 1 ? "line" : "lines"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="drop-qty">How many</Label>
+              <Input
+                id="drop-qty"
+                value={dropQty}
+                onChange={(e) => setDropQty(e.target.value)}
+                inputMode="decimal"
+                className="h-10 w-32"
+                placeholder={assemblies.find((a) => a.id === dropId)?.per.replace(/^per /, "") ?? "500"}
+              />
+            </div>
+            {dropId !== "" && (
+              <p className="text-xs text-muted-foreground">
+                One of these costs{" "}
+                <span className="tabular-nums">
+                  {fmt(assemblies.find((a) => a.id === dropId)?.costCents ?? 0, symbol)}
+                </span>{" "}
+                {assemblies.find((a) => a.id === dropId)?.per}. Check the quantities afterwards — an
+                assembly is a starting point, not a quote.
+              </p>
+            )}
+          </div>
+          <DialogFooter className="sm:justify-between">
+            {/* A library you cannot take things out of fills up with mistakes. */}
+            {dropId !== "" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  const gone = assemblies.find((a) => a.id === dropId)?.name ?? "It";
+                  startTransition(async () => {
+                    const res = await deleteAssemblyAction({ projectId, id: dropId });
+                    if ("error" in res) return void toast.error(res.error);
+                    toast.success(`${gone} is out of your assemblies. Lines it already made are untouched.`);
+                    setDropId("");
+                    router.refresh();
+                  });
+                }}
+              >
+                Take it out of the library
+              </Button>
+            ) : (
+              <span />
+            )}
+            <Button
+              type="button"
+              onClick={commitDrop}
+              disabled={pending || dropId === "" || dropQty.trim() === ""}
+            >
+              {pending ? "Adding…" : "Add it"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════ the pieces */
+
+/**
+ * A ROW'S NUMBER, WHICH IS ALSO WHERE IT GOES (ADR 0087). Type over it and
+ * press Enter — or leave the box — and the row moves there. Escape puts the
+ * number back, and so does anything the address grammar cannot read: a box
+ * that quietly did nothing is better than one that moved a row somewhere
+ * nobody asked for.
+ */
+function RowNumber({
+  value,
+  label,
+  disabled,
+  onCommit,
+}: {
+  value: string;
+  label: string;
+  disabled: boolean;
+  onCommit: (address: { section: number | null; position: number }) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value;
+  const commit = () => {
+    if (draft === null) return;
+    const address = parseAddress(draft);
+    setDraft(null);
+    if (address && draft.trim() !== value) onCommit(address);
+  };
+  if (disabled) {
+    return (
+      <span className="w-9 shrink-0 text-right text-xs tabular-nums text-subtle-foreground">{value}</span>
+    );
+  }
+  return (
+    <input
+      aria-label={label}
+      value={shown}
+      inputMode="decimal"
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          commit();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") {
+          setDraft(null);
+          e.currentTarget.blur();
+        }
+      }}
+      className="w-9 shrink-0 rounded border border-transparent bg-transparent px-1 py-0.5 text-right text-xs tabular-nums text-subtle-foreground outline-none transition-colors hover:border-border focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+    />
+  );
+}
+
+/**
+ * A SORTABLE BLOCK — an item and everything under it, or one line and its
+ * expansion.
+ *
+ * The transform dnd-kit offers is deliberately NOT applied: an ancestor with a
+ * transform becomes the containing block for `position: sticky`, and every
+ * header on this screen is pinned. The dragged row is shown in a `DragOverlay`
+ * instead, and where it will land is drawn as a rule across the row under the
+ * cursor.
+ */
+function SortableRow({
+  id,
+  disabled,
+  over,
+  children,
+}: {
+  id: string;
+  disabled: boolean;
+  over: boolean;
+  children: (grip: ReactNode) => ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useSortable({
+    id,
+    disabled,
+  });
+  const grip = disabled ? (
+    <span className="hidden w-[18px] shrink-0 @sm/work:block" />
+  ) : (
+    <button
+      type="button"
+      ref={setActivatorNodeRef}
+      className="hidden w-[18px] shrink-0 cursor-grab touch-none text-transparent transition-colors hover:text-muted-foreground group-hover/row:text-subtle-foreground @sm/work:block"
+      {...attributes}
+      {...listeners}
+    >
+      <GripVertical className="size-[18px]" />
+      <span className="sr-only">Drag to move, or type its number</span>
+    </button>
+  );
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "group/row",
+        isDragging && "opacity-40",
+        over && "shadow-[inset_0_2px_0_0_var(--module-accent)]",
+      )}
+    >
+      {children(grip)}
+    </div>
+  );
+}
+
+/** A section's own landing strip: where a line dropped on nothing in particular goes. */
+function DropZone({
+  id,
+  over,
+  disabled,
+  children,
+}: {
+  id: string;
+  over: boolean;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const { setNodeRef } = useDroppable({ id, disabled });
+  return (
+    <div ref={setNodeRef} className={cn(over && "bg-module-accent/8")}>
+      {children}
+    </div>
+  );
+}
+
+/** What is being dragged, under the cursor. */
+function DragChip({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none max-w-[280px] truncate rounded-lg bg-card px-3 py-1.5 text-[13px] font-medium shadow-elevation-1">
+      {label}
+    </div>
+  );
+}
+
+function dragLabel(
+  id: string,
+  groups: Array<{ key: string; name: string }>,
+  lines: Array<{ key: string; description: string }>,
+): string {
+  if (id.startsWith("item:")) {
+    const g = groups.find((x) => x.key === id.slice(5));
+    return g?.name.trim() || "An item";
+  }
+  const l = lines.find((x) => x.key === id.slice(5));
+  return l?.description.trim() || "A line";
+}
+
+/** A pill in the Lines header. */
+function Pill({
+  children,
+  onClick,
+  pressed,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  pressed?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      className={cn(
+        "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors",
+        pressed
+          ? "border-module-accent/30 bg-module-accent/10 text-module-accent"
+          : "border-border bg-card text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A FOLDED SECTION. Shut, it says what is inside it in one line of figures —
+ * which is the whole point of folding it: the estimate's number and dates, the
+ * three rates, what the proposal is set to. Everything that used to be a
+ * paragraph of explanation now lives in the guide behind the `?`.
+ */
+function FoldedCard({
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+  className,
+  bodyClassName,
+}: {
+  title: string;
+  summary: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}) {
+  return (
+    <div className={cn("rounded-xl bg-card shadow-elevation-1", className)}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 px-4 py-3.5 text-left"
+      >
+        {open ? (
+          <ChevronDown className="size-[15px] shrink-0 text-subtle-foreground" />
+        ) : (
+          <ChevronRight className="size-[15px] shrink-0 text-subtle-foreground" />
+        )}
+        <span className="text-sm font-medium">{title}</span>
+        <span className="ml-auto truncate text-xs tabular-nums text-subtle-foreground">{summary}</span>
+      </button>
+      {open && <div className={cn("border-t border-divider p-4", bodyClassName)}>{children}</div>}
     </div>
   );
 }
@@ -1955,9 +3260,13 @@ function ApplyToBudgetButton({
   const [pending, startTransition] = useTransition();
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="h-[34px] rounded-lg border border-border bg-card px-3 text-[13px] font-medium transition-colors hover:bg-muted"
+      >
         Use as budget
-      </Button>
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2022,9 +3331,14 @@ function ApplyToScheduleDialog({
   const [shape, setShape] = useState<"group" | "line">(itemCount > 0 ? "group" : "line");
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={contracts.length === 0}>
-        Use as schedule of values
-      </Button>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={contracts.length === 0}
+        className="h-[34px] rounded-lg border border-border bg-card px-3 text-[13px] font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+      >
+        Schedule of values
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2124,9 +3438,14 @@ function AcceptEstimateDialog({
   const [decidedOn, setDecidedOn] = useState(today());
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)} disabled={contracts.length === 0}>
-        Accept
-      </Button>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={contracts.length === 0}
+        className="h-[34px] rounded-lg bg-success/15 px-3 text-center text-[13px] font-semibold text-success-foreground transition-colors hover:bg-success/25 disabled:pointer-events-none disabled:opacity-50"
+      >
+        Accept onto a contract
+      </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2190,8 +3509,11 @@ function AcceptEstimateDialog({
  * and — the one that matters — **who accepted, when, and at what price**.
  *
  * The acceptance is evidence, not a state change: the estimate is still
- * accepted by an owner, onto a contract, from the button above. This block is
- * the reason to press it.
+ * accepted by an owner, onto a contract, from the rail's own button. This
+ * block is the reason to press it.
+ *
+ * A LIVE LINK IS ONE BLOCK; DEAD ONES ARE ONE LINE. A column of five rows, four
+ * of them expired, buries the one that is working.
  */
 function ClientLinks({
   projectId,
@@ -2199,40 +3521,35 @@ function ClientLinks({
   shares,
   canEdit,
   symbol,
+  format,
+  pending,
+  copyRef,
+  onMake,
+  onCopy,
 }: {
   projectId: string;
   estimateId: string;
   shares: ShareView[];
   canEdit: boolean;
   symbol: string | null;
+  format: string;
+  pending: boolean;
+  copyRef: React.RefObject<HTMLButtonElement | null>;
+  onMake: () => void;
+  onCopy: (url: string, note: string) => void;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [busy, startTransition] = useTransition();
   const signed = shares.find((s) => s.signedAt !== null);
   const live = shares.filter((s) => s.standing === "open" || s.standing === "signed");
-
-  const copy = (url: string, note: string) => {
-    void navigator.clipboard.writeText(url).then(
-      () => toast.success(note),
-      // A clipboard a browser refused is not a failure worth hiding.
-      () => toast.message("Copy this link", { description: url }),
-    );
-  };
-
-  const make = () => {
-    startTransition(async () => {
-      const res = await createEstimateShareAction({ projectId, id: estimateId });
-      if ("error" in res) return void toast.error(res.error);
-      copy(res.url, "Link made and copied — paste it into your email");
-      router.refresh();
-    });
-  };
+  const dead = shares.filter((s) => s.standing !== "open" && s.standing !== "signed");
+  const working = pending || busy;
 
   const reveal = (shareId: string) => {
     startTransition(async () => {
       const res = await revealEstimateShareTokenAction({ projectId, id: estimateId, shareId });
       if ("error" in res) return void toast.error(res.error);
-      copy(res.url, "Link copied");
+      onCopy(res.url, "Link copied");
     });
   };
 
@@ -2246,72 +3563,119 @@ function ClientLinks({
   };
 
   return (
-    <div className="mb-3 rounded-lg border border-border/60 p-3">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">The client&apos;s link</h3>
-        {canEdit && (
-          <Button variant="outline" size="sm" onClick={make} disabled={pending}>
-            <Link2 className="mr-1.5 size-4" /> {live.length > 0 ? "New link" : "Make a link"}
-          </Button>
-        )}
-      </div>
-
+    <div className="space-y-3">
       {signed && signed.signedAt && (
-        <div className="mb-2 rounded-md border border-emerald-600/30 bg-emerald-600/10 p-2.5 text-sm">
+        <div className="rounded-xl bg-success/10 p-3 text-sm text-foreground">
           <span className="font-medium">{signed.signedName}</span> accepted this proposal on{" "}
           {new Date(signed.signedAt).toLocaleDateString()}
           {signed.signedTotalCents !== null && <> at {fmt(signed.signedTotalCents, symbol)}</>}.
           <p className="mt-1 text-xs text-muted-foreground">
-            That is their acceptance on the record. The estimate itself is still accepted here, onto the contract it
-            priced — the button below.
+            That is their acceptance on the record. The estimate itself is still accepted here, onto the
+            contract it priced — the button on the left.
           </p>
         </div>
       )}
 
-      {shares.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          Send the client a link instead of an attachment: they read the proposal on any device and accept it by
-          typing their name. The link stops working on{" "}
-          <span className="tabular-nums">the date the proposal is valid until</span>, or in thirty days when there is
-          no date.
-        </p>
+      {live.length === 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs text-subtle-foreground">
+            Send the client a link instead of an attachment: they read the proposal on any device and accept
+            it by typing their name. It stops working on the date the proposal is valid until, or in thirty
+            days when there is no date.
+          </p>
+          {canEdit && (
+            <Button ref={copyRef} variant="outline" size="sm" onClick={onMake} disabled={working}>
+              <Link2 className="mr-1.5 size-4" /> Make a link
+            </Button>
+          )}
+        </div>
       ) : (
-        <ul className="space-y-1.5">
-          {shares.map((s) => (
-            <li key={s.id} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant={s.standing === "signed" ? "default" : s.standing === "open" ? "secondary" : "outline"}>
-                {SHARE_STANDING_LABELS[s.standing]}
-              </Badge>
-              <span className="text-muted-foreground">
-                {s.viewCount === 0
-                  ? "Not opened yet"
-                  : `Opened ${s.viewCount} ${s.viewCount === 1 ? "time" : "times"}`}
-                {s.lastViewedAt && `, last on ${new Date(s.lastViewedAt).toLocaleDateString()}`}
+        live.map((s, i) => (
+          <div key={s.id} className="rounded-xl bg-success/8 px-3.5 py-3">
+            <div className="flex items-center gap-1.5">
+              <Link2 className="size-[15px] text-success-foreground" />
+              <span className="text-[13px] font-medium">
+                {live.length === 1 ? "One link open" : SHARE_STANDING_LABELS[s.standing]}
               </span>
-              <span className="text-muted-foreground">
-                · {s.standing === "expired" ? "Expired" : "Expires"} {new Date(s.expiresAt).toLocaleDateString()}
-              </span>
-              {canEdit && s.standing === "open" && (
-                <>
-                  <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => reveal(s.id)} disabled={pending}>
-                    <Copy className="mr-1 size-3.5" /> Copy
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => revoke(s.id)} disabled={pending}>
-                    Revoke
-                  </Button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {s.viewCount === 0
+                ? "Not opened yet"
+                : `Opened ${s.viewCount} ${s.viewCount === 1 ? "time" : "times"}`}
+              {s.lastViewedAt && `, last ${new Date(s.lastViewedAt).toLocaleDateString()}`} · expires{" "}
+              {new Date(s.expiresAt).toLocaleDateString()}
+            </p>
+            {canEdit && s.standing === "open" && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  ref={i === 0 ? copyRef : undefined}
+                  onClick={() => reveal(s.id)}
+                  disabled={working}
+                  className="inline-flex h-[30px] items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  <Copy className="size-3" /> Copy link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => revoke(s.id)}
+                  disabled={working}
+                  className="inline-flex h-[30px] items-center rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  Revoke
+                </button>
+              </div>
+            )}
+          </div>
+        ))
       )}
-      {shares.some((s) => s.standing === "superseded") && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          A link reading <span className="font-medium">Estimate changed</span> was accepted and then the estimate was
-          edited, so it has stopped working — it cannot go on showing a document that is not the one that was signed.
-          The acceptance stands, at the version it names. Make a new link for the revision.
+
+      {canEdit && live.length > 0 && (
+        <Button variant="ghost" size="sm" onClick={onMake} disabled={working} className="h-7 px-2 text-xs">
+          <Link2 className="mr-1.5 size-3.5" /> New link
+        </Button>
+      )}
+
+      {/* Four expired links in four rows bury the one that is working, so the
+          dead ones are one quiet line between them. */}
+      {dead.length > 0 && (
+        <p className="text-xs text-subtle-foreground">
+          {dead.length === 1 ? "One dead link" : `${dead.length} dead links`}:{" "}
+          {dead
+            .map(
+              (s) =>
+                `${SHARE_STANDING_LABELS[s.standing].toLowerCase()}, ${
+                  s.viewCount === 0
+                    ? "never opened"
+                    : `opened ${s.viewCount === 1 ? "once" : `${s.viewCount} times`}`
+                }`,
+            )
+            .join(" · ")}
+          .
         </p>
       )}
+
+      {shares.some((s) => s.standing === "superseded") && (
+        <p className="text-xs text-subtle-foreground">
+          A link reading <span className="font-medium">Estimate changed</span> was accepted and then the
+          estimate was edited, so it has stopped working — it cannot go on showing a document that is not
+          the one that was signed. The acceptance stands, at the version it names. Make a new link for the
+          revision.
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button variant="outline" size="sm" className="h-9" asChild>
+          <a href={`/api/jobs/estimates/${estimateId}/document`} target="_blank" rel="noopener noreferrer">
+            <BookOpen className="mr-1.5 size-4" /> Open {format === "brochure" ? "brochure" : "document"}
+          </a>
+        </Button>
+        <Button variant="outline" size="sm" className="h-9" asChild>
+          <a href={`/api/jobs/estimates/${estimateId}/pdf`} target="_blank" rel="noopener noreferrer">
+            <FileText className="mr-1.5 size-4" /> Print proposal
+          </a>
+        </Button>
+      </div>
     </div>
   );
 }

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
 import { getEstimate, unitsInUse } from "@/packs/jobs/estimating-ops";
+import { listEstimateShares } from "@/packs/jobs/estimate-shares";
 import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
 import { ESTIMATE_STATUS_LABELS, PACK, isEstimateStatus, slugLabel } from "@/packs/jobs/vocabulary";
 
@@ -47,7 +48,10 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
         // What the entry bar's grammar should recognise as a unit (ADR 0081).
         unitsInUse(tx, ctx.tenant.id),
       ]);
-      return { project, row, contracts, codes, labels: pack.labels, units };
+      // The client links on this estimate, each standing read off the facts
+      // against the version the estimate is at right now (E5c, ADR 0085).
+      const shares = await listEstimateShares(tx, ctx.tenant.id, estimateId, row.estimate.version);
+      return { project, row, contracts, codes, labels: pack.labels, units, shares };
     },
     { role: ctx.role },
   );
@@ -91,6 +95,16 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
         <EstimateEditor
           key={`${row.estimate.id}:${row.estimate.version}`}
           projectId={project.id}
+          shares={data.shares.map((s) => ({
+            id: s.share.id,
+            standing: s.standing,
+            expiresAt: s.share.expiresAt.toISOString(),
+            viewCount: s.share.viewCount,
+            lastViewedAt: s.share.lastViewedAt?.toISOString() ?? null,
+            signedName: s.share.signedName,
+            signedAt: s.share.signedAt?.toISOString() ?? null,
+            signedTotalCents: s.share.signedTotalCents,
+          }))}
           estimate={{
             id: row.estimate.id,
             version: row.estimate.version,

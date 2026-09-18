@@ -2640,6 +2640,20 @@
       "when": 1789679813244,
       "tag": "0376_estimate_format_and_letter",
       "breakpoints": true
+    },
+    {
+      "idx": 377,
+      "version": "7",
+      "when": 1789689348888,
+      "tag": "0377_job_estimate_shares",
+      "breakpoints": true
+    },
+    {
+      "idx": 378,
+      "version": "7",
+      "when": 1789689349888,
+      "tag": "0378_job_estimate_shares_rls",
+      "breakpoints": true
     }
   ]
 }

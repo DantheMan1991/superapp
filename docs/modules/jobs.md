@@ -74,7 +74,7 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 | E4 | **Price memory** | Every `job_estimate_line` across the tenant already IS a price history: type a description, get *"last priced $4.20 on 24-108, three weeks ago"*, Tab accepts. Then the half nobody else can do, because the actuals are in the same database: *"you estimated $4.20 — you actually paid $4.65 on the last three jobs"* (the `Spent` column per code). Before assemblies, because it is what tells us what an assembly should look like. |
 | **E5a** | ~~**The proposal as sections, and the brochure**~~ **SHIPPED 2026-09-17** ([ADR 0083](../decisions/0083-a-proposal-is-an-ordered-list-of-sections-a-brochure-is-a-page-order-over-facts-the-pack-already-holds-and-the-document-is-html.md)) | `format` (letter / brochure) split from `presentation`; the proposal as `ProposalSection[]`; the brochure's pages read from the items, the selections and the phases; the document served as HTML from a GET route — the same URL E5b prints and E5c shares. The letter's PDF path untouched. |
 | **E5b** | ~~**The brochure's PDF**~~ **SHIPPED 2026-09-17** ([ADR 0084](../decisions/0084-the-brochures-pdf-is-a-headless-print-of-the-document-itself-and-the-format-picks-the-engine.md)) | The format picks the engine at one URL: a letter is react-pdf, a brochure is a headless Chromium print of **the very string the document route serves**. `pressFor` decides where the browser comes from, and `-min` keeps the ~50MB Chromium out of the function. Killed the live defect that printed the letter whatever the format said, and found the running footer printing through the text. `npm run print:probe` is what measures it. |
-| E5c | **The client link, with Accept** | A tokenised link that serves the same document with no session, and an Accept the client presses. A security design of its own: what a token is, what it may read, what pressing Accept writes. |
+| **E5c** | ~~**The client link, with Accept**~~ **SHIPPED 2026-09-17** ([ADR 0085](../decisions/0085-a-client-link-is-a-tokenised-copy-of-the-proposal-and-accepting-on-it-records-a-signature-rather-than-accepting-the-estimate.md)) | `/proposal/<token>`: the same document with no session, `document_shares`' credentials verbatim, `withSystem` doing the token → tenant hop and nothing else, and every failure the same unbranded sentence. **Accepting records a SIGNATURE, it does not accept the estimate** — `acceptEstimate` needs an owner and the contract, and a client has neither. The version shown is checked not trusted; a link is signed once; the standing is derived, and `superseded` kills a link whose estimate moved after it was signed. |
 | ~~E5~~ | ~~**The proposal as sections, the HTML document, and the client link**~~ — split into E5a/b/c above | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
 | E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
 | E7 | **The rest** | Bid alternates and options ("upgrade to quartz: +$4,200") as items outside the total until chosen; copy an estimate / a plan template, which is a production builder's whole workflow and nearly free because the rows exist; the tenant-level unit cost book, once E4 has shown what it should hold. |
@@ -83,6 +83,119 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-17 — The client's link, and the signature on it (`claude/estimate-client-link`, ADR 0085)
+
+Slice **E5c** of [the estimate program](#the-estimate-program-open-started-2026-09-16),
+and the fourth of the founder's four decisions: "the client gets a link with
+Accept". One table (`job_estimate_shares`, migrations `0377`/`0378`, **live on
+dev and prod before the merge, 229 tables verified on each**).
+
+**THE DESIGN QUESTION ANSWERED ITSELF IN THE CODE.** What should pressing
+Accept do? `acceptEstimate` takes `requireWrite(ctx, "owner")` and a
+`contractId`, checks that contract is on the job, and rewrites its value to
+the estimate's total. A client is not an owner and does not know which of a
+job's several agreements their proposal priced — so **a client cannot accept
+an estimate**, and the only honest thing an anonymous Accept can be is a
+RECORD that somebody holding the link put a name to this proposal. Same shape
+as a lien waiver (ADR 0066) and a back-charge (ADR 0077): record the fact,
+derive the standing. The business still accepts it, as an owner, onto the
+contract — with the signature in front of them as the reason to.
+
+**The credentials are `document_shares`', verbatim**, because that table is
+the platform's existing answer to letting a stranger read one tenant's thing
+and a second answer would be a second thing to get wrong: a 256-bit token,
+stored only as a keyed HMAC (globally unique — the public lookup has no tenant
+to scope by) and as AES-GCM ciphertext so the builder can copy the link again.
+Fail closed without `SHARE_SECRET`.
+
+**`withSystem` does the token → tenant hop and NOTHING else**, in a file of
+its own (`proposal-share.ts`) so it can be read in one sitting. Its only input
+is 43 characters of base64url; everything after it runs under `withTenant` at
+role staff. The RLS migration says so where a reader will find it, because
+widening that lookup is the most dangerous change anyone can make here.
+
+**Every failure is the same unbranded sentence** — unknown, revoked, expired,
+already accepted, estimate revised, pack off, business churned — so a visitor
+learns nothing, not even that the business exists. The builder is told which it
+is on their own screen. Two audiences, two amounts of truth.
+
+**Five things that make the signature evidence rather than a click.** The
+version the client was SHOWN is checked, not trusted (a mismatch is refused
+with "this proposal was updated while you had it open" — `STALE_VERSION`
+pointed at the person with the most to lose). A link is signed once
+(`signed_at is null` in the WHERE). The name, time, hashed IP, version and
+total are stored as one fact or none, by CHECK, because half a signature is not
+evidence. The total is the one the document showed. And the link's expiry comes
+from the estimate's own `valid_until`, so a link ends when the offer does.
+
+**`superseded` is the standing worth knowing about.** A link that was signed
+and whose estimate then moved is dead: it cannot go on showing a document that
+is not the one that was signed, nor offer a second signature against different
+content. The signature stays, at the version it names, and the builder makes a
+new link for the revision. Derived, so nothing sweeps it and nothing is stale.
+
+**The reply card is screen-only, so the paper is the same paper.** With no
+link the document is byte-identical to what E5b printed; with one, the accept
+form and the accepted stamp sit outside the sheet, hidden by the same rule
+that hides the Print control. **And no server-printed PDF lives on the public
+link** — that route runs a browser, and an anonymous caller who could trigger
+it is an unbounded CPU and egress amplifier for anyone holding one leaked
+token. The client's PDF is the Print control, which is the second time that
+small addition has paid for itself.
+
+**DRIVEN END TO END, in a real browser, with no session at all** — which this
+is the one feature that allows. On the dev branch's Hilltop Farm, EST-ITEMS-1:
+
+- the link served the brochure (205KB) with `x-frame-options: DENY`,
+  `x-robots-tag: noindex`, `referrer-policy: no-referrer` and
+  `cache-control: private, no-store`, and the reply card carried the estimate's
+  real version, 12;
+- a bad token → **404**, one sentence, unbranded;
+- `version=3` → **400**, "This proposal was updated while you had it open";
+- a blank name → **400**, "Please type your full name";
+- accepting → **303** back to the document, and the record read back
+  `Dana Reeves · 19053753 · v12` — the exact total on the page;
+- a second acceptance → the page says accepted and **"Someone Else" was never
+  recorded**;
+- the estimate bumped to v13 → the signed link went **404** and its accept
+  endpoint too, while the builder's list still read
+  `superseded · Dana Reeves · v12`;
+- revoked → **404** on both, and revoking twice refused as `SHARE_CLOSED`;
+- reveal returned the 43-character token back out of the ciphertext;
+- and the whole client journey clicked through in the pane: read, type
+  *Marion Whitfield*, press Accept, card becomes **"Accepted — Marion
+  Whitfield accepted this proposal on 17 September 2026"**, zero forms left.
+
+One estimate ended the session showing three derived standings at once —
+`signed`, `revoked`, `superseded`.
+
+**NOT DRIVEN:** the builder's own `The client's link` block in the editor
+(Make a link / Copy / Revoke). It typechecks, lints and builds, and all four
+ops behind it were driven by script, but the buttons themselves need a Clerk
+session the browser pane has not had since 2026-09-09. Say so rather than
+imply otherwise.
+
+**Traps.**
+
+- **`/p/<token>` was already taken** — it is the site preview link (ADR 0046),
+  and dropping a `route.ts` into it collided with its optional catch-all:
+  *"You cannot define a route with the same specificity as an optional
+  catch-all route"*. Only `npm run build` catches it; `tsc` and the suite are
+  blind. Check `src/app/` for the letter before claiming a public path.
+- **A pack may not reach into a module for a security control.** `recordAttempt`
+  lived in `modules/documents/shares/limits.ts`; it moved to
+  `src/lib/public-limits.ts` when this became the second anonymous surface —
+  the same move the PDF fonts made. Duplicating a cap would have been two
+  things to tune and one to forget.
+- **CRLF again.** A `node -e` script matching a multi-line anchor fails after a
+  branch checkout converts the working copy; and `\\n` inside a `node -e`
+  template literal became a REAL newline in the written file, breaking a string
+  literal. Use the editing tools for multi-line changes.
+- **An over-reaching assertion passes for the wrong reason, or fails for one.**
+  `expect(plain).not.toContain("accept")` failed because the stylesheet always
+  carries the `.accept` rules and the acceptance section's own words contain
+  the word. The claim worth making was about the ELEMENT.
 
 ### 2026-09-17 — The brochure's PDF: a headless print of the document itself (`claude/estimate-brochure-pdf`, ADR 0084)
 
@@ -4080,7 +4193,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) and `0376_estimate_format_and_letter.sql` (E5a, ADR 0083; two columns and a CHECK on `job_estimates`, so no RLS migration — **generated clean, with no stray foreign key to repair**, because 0375's snapshot recorded the item key's intent) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) and `0376_estimate_format_and_letter.sql` (E5a, ADR 0083; two columns and a CHECK on `job_estimates`, so no RLS migration — **generated clean, with no stray foreign key to repair**, because 0375's snapshot recorded the item key's intent) and `0377_job_estimate_shares.sql` / `0378_job_estimate_shares_rls.sql` (E5c, ADR 0085; one new table referencing an existing one, as generated and renamed off drizzle's own tag — **its `token_hash` index is UNIQUE GLOBALLY with no tenant prefix**, because the public lookup has no tenant context to scope by) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **220 tables**, all enabled, forced and with
 policies, on both.
@@ -4133,6 +4246,21 @@ ordering only bites when two new tables reference each other in one file.
   message naming what to set — a local browser WINS over a pack); `print-html.ts`
   is `server-only` and lazily imports `puppeteer-core`, so no route that does not
   print pays for it. `npm run print:probe` measures what only paper shows.
+- `src/packs/jobs/proposal-share.ts` — **the token → tenant hop, and the most
+  dangerous function in the pack** (E5c, ADR 0085), in a file of its own so it
+  can be read in one sitting. `withSystem` resolves one globally unique
+  `token_hash` and does NOTHING else; everything after runs under `withTenant`
+  at role staff. Every failure returns `{ ok: false }` — the caller cannot tell
+  the reasons apart, and neither can a visitor.
+- `src/packs/jobs/estimate-share-status.ts` + `estimate-shares.ts` — the pure
+  standing (`shareStanding`: open / signed / revoked / expired / **superseded**,
+  the last being the only one that is a fact about two rows) and the builder's
+  ops. `signEstimateShare` is the one write a stranger may make and it is a
+  RECORD, not a state change: `acceptEstimate` still wants an owner and the
+  contract. The link's expiry comes from the estimate's own `valid_until`.
+- `src/lib/public-limits.ts` — the per-IP caps for every anonymous surface,
+  moved out of the documents module when the client link became the second one.
+  A pack may not reach into a module for a security control.
 - `src/packs/jobs/estimate-parse.ts` — **one typed sentence into one estimate
   line** (E3a, ADR 0081), pure and table-tested: `parseEstimateLine`,
   `parseEstimateLines`, `COMMON_UNITS`, `unitsFor`. The entry bar, the paste
@@ -4507,11 +4635,23 @@ ordering only bites when two new tables reference each other in one file.
   accept it on a screen of their own (10b, ADR 0070).** Mail's seam is there
   for the sending when somebody asks, and since E5b there are bytes to attach:
   `proposalPdf` returns them for either format. **The client link WITH an
-  Accept button is E5c**, chosen by the founder on 2026-09-16 along with a
-  magazine-grade brochure for luxury work — and it serves the same URL the
-  brochure and its PDF already come from, so it is a security design rather
-  than a document one: what a token is, what it may read, what pressing Accept
-  writes.
+  Accept button SHIPPED as E5c** (ADR 0085): the client reads the proposal at
+  `/proposal/<token>` and accepts by typing their name. Today the link is
+  copied to the clipboard and pasted into the builder's own message.
+- **THE BUILDER IS NOT TOLD WHEN A CLIENT ACCEPTS.** They see it on the
+  estimate — the name, the date and the price — and nowhere else. A push or a
+  digest line wants **`jobs` to become an attention source**, which it is not
+  yet: it would be the pack's FIRST, and that is a slice of its own worth more
+  than this signature, because one source lights up every obligation the pack
+  has (proposals out for signature, expiring insurance, bonds near their limit,
+  waivers outstanding). `src/lib/attention-sources/types.ts` is the contract
+  and `registry.ts` the composition root. Until then the client's card
+  deliberately does not claim anyone was notified.
+- **The builder's own share block has never been clicked.** `The client's link`
+  in the estimate editor — Make a link, Copy, Revoke — typechecks, lints and
+  builds, and all four ops behind it were driven by script, but the buttons
+  need a Clerk session the browser pane has not had since 2026-09-09. The
+  CLIENT's half is fully driven, which is the half that carries the risk.
 - **The document is letter-width on a phone, and the client link is what will
   care.** At 375px the sheet is 8.5in wide, so it scrolls sideways and the
   cover's title is cut off — by design (ADR 0083: the screen is print on a grey
@@ -4527,14 +4667,15 @@ ordering only bites when two new tables reference each other in one file.
   **The serverless path is unverified until that is done** — E5b was driven
   against a real Chrome on a laptop, which proves the document and the press
   but not the function.
-- **The estimate program is open; E1, E2, E3a, E3b, E5a and E5b are shipped** —
+- **The estimate program is open; E1, E2, E3a, E3b, E5a, E5b and E5c are shipped** —
   see [the plan](#the-estimate-program-open-started-2026-09-16) for the rest,
   each with the founder's decision behind it. What is NOT built:
   **keyboard grid navigation** — arrows and Tab between cells, Enter on the
   last row making another (E3c); the **price memory**, including the
-  estimated-versus-actual read the pack already has the data for (E4); the
-  **client link with Accept** (E5c); and **assemblies**, which are a saved
-  item (E6).
+  estimated-versus-actual read the pack already has the data for (E4);
+  **assemblies**, which are a saved item (E6); and **bid alternates, copying an
+  estimate and the tenant unit cost book** (E7). The whole of row 10 — the
+  estimate, its proposal, both formats, the PDF and the client link — is done.
 - ~~**THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.**~~ — **closed
   2026-09-16 (E3a, ADR 0081)**, and the cause was not the table's width:
   the row buttons' `sr-only` labels are `position: absolute`, so with no

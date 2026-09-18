@@ -313,6 +313,26 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 - {button:Print proposal|outline|file-text} opens the proposal as a PDF in a new tab — **whichever document `What it is` names**, so you never have to think about it — and {button:Open brochure|outline|book-open} opens the same document on screen, where a {button:Print|primary} button in the corner prints it from your browser. Both show the estimate **as saved**; it saves itself about a second after you stop typing, so watch for `Saved` beside the {button:Save|primary} button first.
 - **A brochure's PDF takes a few seconds the first time after a quiet spell**, because a brochure is printed by a browser on the server rather than drawn like the letter. If it comes back with a page saying it could not be printed, the proposal itself is fine: {button:Open brochure|outline|book-open} and use the {button:Print|primary} button, choosing **Save as PDF** as the destination. Tell us, though — that page means something needs setting on our side, not yours.
 
+**The client's link — send the proposal instead of attaching it.** Under the proposal block, **`The client's link`**. Anybody on the team may make one.
+
+{button:Make a link|outline|link-2} makes a private web address for this proposal and **copies it to your clipboard**, ready to paste into your own email. Your client opens it on a phone, a tablet or a laptop, with nothing to install and nobody to sign in as. They see exactly the document you would have attached — the brochure or the letter, whichever `What it is` says — with a {button:Print|primary} button for their own copy, and underneath it a card where they can **type their name and accept**.
+
+| What you see | What it means |
+| --- | --- |
+| {chip:Open|secondary} | Live. The client can read it and accept it. |
+| {chip:Accepted|default} | They accepted. The name, the date and the price are above the list. |
+| {chip:Revoked|outline} | You took it back. It no longer opens. |
+| {chip:Expired|outline} | Past its date. It no longer opens. |
+| {chip:Estimate changed|outline} | It was accepted and then you edited the estimate, so it has stopped working. |
+| `Opened 4 times, last on 14 October` | How often it has been opened, so you know whether to chase. `Not opened yet` until they do. |
+
+- **The link ends when your offer ends.** It stops working on the date in `Valid until`, or in thirty days when you have not set one. There is no such thing as a link that lives forever.
+- {button:Copy|ghost} copies an open link again, for when you need to re-send it. {button:Revoke|ghost} kills it immediately — use it the moment a proposal goes to the wrong address.
+- **Anyone holding the link can open it**, so treat it like the proposal itself: it is private because the address is unguessable, not because it asks who you are. Send it to the person, not to a public channel.
+- **Accepting on the link does not accept the estimate here.** It records that they accepted — their name, the date, and the price they were looking at — and that is what you then act on with {button:Accept|primary} below, which is where you name the contract it becomes. Nothing about your books moves because a client pressed a button.
+- **You are not notified yet.** The acceptance shows here, on the estimate, and you will see it next time you open it. Checking back is on you for now.
+- **If you edit the estimate after they accepted**, that link stops working — it cannot go on showing a document that is not the one they agreed to. Their acceptance stays on the record, against the version and price they saw. Make a new link for the revision.
+
 **What the brochure puts on each page, and where it comes from.** Nothing here is typed twice — every page reads something the {{project|lower}} already holds, which is why filling in the rest of the {{project|lower}} makes the proposal better on its own.
 
 | Page | What is on it | Where it comes from |
@@ -1439,7 +1459,7 @@ Worth knowing so you are not looking for it:
 - **The schedule counts calendar days, and a phase waits only for the one it follows.** No working-day calendar or holidays yet, no start-to-start dependencies, no baseline to measure slip against, and nothing tells the trade — the phase names them, and the company calendar and the feed are how they hear. A schedule is typed per {{project|lower}}; a template that fills a new one is next.
 - **A markup is drawn once.** A cloud, an arrow, a note, a pin or a measurement cannot be moved or resized after the fact — rub it out and draw it again — there is no freehand pen, nothing carries a markup onto a reissued sheet, and a marked-up sheet is not printed or sent with its markups on it. No overlay of one issue on another, and the cover sheet's index is not read to fill titles.
 - **The takeoff pushes one way.** A measurement puts its quantity on an estimate line and remembers the line; the estimate does not point back at the sheets, an opening is not deducted from an area, nothing measures a volume, and a total across sheets is added up by you. The scale is set by hand — from a known dimension or the title block — never read from the PDF.
-- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. Both proposals print, as a PDF and on screen, but neither is **sent** from here and the client cannot accept one on a screen of their own — the signed page comes back the way it always has.
+- **An estimate is lines you type.** No assemblies (a bundle of lines dropped in as one), no unit cost book that remembers what concrete cost last time, no takeoff from the drawings. A supplier's quote cannot be attached to an estimate yet. Both proposals print, as a PDF and on screen, and a client can accept one on a link — but neither is **sent** from here (you paste the link or attach the PDF to your own email), and nothing tells you when a client accepts: it shows on the estimate and you have to look.
 - **A subcontractor out of standing is not stopped.** An order can be issued and a bill paid while a certificate is missing or expired; the Subcontractors page and the order's page say so in red, and the decision is yours. Which kinds are required is set in the module's configuration for now, not on a screen.
 - **The option book is per job.** The same selections with the same choices on every plan are entered on each job for now; a book that seeds a new job is next. Nothing here lets the client choose for themselves; the office records what they said.
 - **A back-charge is not a change order.** Money you deduct from a subcontractor's payment for something you paid on their behalf reduces the payment, not the scope; a deductive change order reduces the scope. Record a back-charge as a credit in Accounting for now.

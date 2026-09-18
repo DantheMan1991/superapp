@@ -852,7 +852,23 @@ Worth understanding before handing addresses out:
 
 ---
 
-## Document share links (`/s/...`)
+## Links that work without signing in (`/s/...` and `/proposal/...`)
+
+**Two features share this setup and one secret.** Documents hands out a link to
+a file or a job folder (`/s/<token>`); the `jobs` pack hands a client their
+proposal to read and accept (`/proposal/<token>`, ADR 0085). Both mint tokens
+the same way, store them the same way, count abuse the same way and fail closed
+the same way — so **`SHARE_SECRET` turns both on, and rotating it invalidates
+both at once.**
+
+A proposal link differs in three ways, all of them narrower: no passcode (it is
+sent to a named client and the token is 256 bits), no egress budget (it serves
+one HTML document and never a file — and deliberately no server-printed PDF,
+which would let one leaked link run a browser at our expense), and one extra
+per-IP cap of its own, 10 acceptance posts an hour. Its expiry comes from the
+estimate's own `Valid until` rather than a setting.
+
+### Documents' file and folder links
 
 The Documents module can hand out a link that lets a client, subcontractor or
 inspector open a file or a job folder **without signing in**. Setup:

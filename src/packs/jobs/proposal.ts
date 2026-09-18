@@ -4,7 +4,7 @@ import { printHtmlToPdf } from "@/lib/pdf/print-html";
 import { loadInvoiceBrand, withLogoBytes } from "@/modules/accounting/invoicing/invoice-brand";
 import type { CertificateBrand } from "./certificate-model";
 import { proposalData, type ProposalData } from "./estimating-ops";
-import { renderProposalHtml } from "./proposal-html";
+import { renderProposalHtml, type ProposalAcceptView } from "./proposal-html";
 import type { ProposalInput } from "./proposal-model";
 import { renderProposalPdf } from "./proposal-pdf";
 import { listSelections } from "./selections-ops";
@@ -173,8 +173,12 @@ async function brandFor(loaded: LoadedProposal): Promise<CertificateBrand & { bu
   };
 }
 
-function htmlOf(loaded: LoadedProposal, brand: CertificateBrand & { businessName: string }): string {
-  return renderProposalHtml(proposalDocumentFrom(loaded.data, brand, loaded.extras), brand);
+function htmlOf(
+  loaded: LoadedProposal,
+  brand: CertificateBrand & { businessName: string },
+  accept?: ProposalAcceptView,
+): string {
+  return renderProposalHtml(proposalDocumentFrom(loaded.data, brand, loaded.extras), brand, accept);
 }
 
 function proposalFilename(data: ProposalData): string {
@@ -182,9 +186,18 @@ function proposalFilename(data: ProposalData): string {
   return `proposal-${safe(data.row.estimate.number)}-${safe(data.project.number)}.pdf`;
 }
 
-/** The document as the page a browser opens, and what the press is handed. */
-export async function proposalHtml(loaded: LoadedProposal): Promise<string> {
-  return htmlOf(loaded, await brandFor(loaded));
+/**
+ * The document as the page a browser opens, and what the press is handed.
+ *
+ * `accept` is the client link's reply card (E5c, ADR 0085) and is the ONLY
+ * thing that differs between the three doors. It is screen-only, so the
+ * document itself — and therefore any PDF of it — is the same whoever asks.
+ */
+export async function proposalHtml(
+  loaded: LoadedProposal,
+  accept?: ProposalAcceptView,
+): Promise<string> {
+  return htmlOf(loaded, await brandFor(loaded), accept);
 }
 
 /**

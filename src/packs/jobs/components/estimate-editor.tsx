@@ -50,6 +50,7 @@ import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLin
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
 import {
   fillFromMemory,
+  howLongAgo,
   priceBookFrom,
   priceHint,
   recall,
@@ -679,21 +680,30 @@ export function EstimateEditor({
    * it, and the preview says how many — because a number that appeared without
    * being typed has to be accounted for out loud.
    */
-  const readable = useMemo(
+  /**
+   * ONE LIST FOR THE PREVIEW AND THE BUTTON, so the table cannot show a
+   * different price from the one that will land. It kept the unreadable rows
+   * (`line: null`) because the preview has to mark them, and the first version
+   * of this filtered them out first — which made the indices disagree and the
+   * table print $0.00 under a footer saying three had been priced.
+   */
+  const previewRows = useMemo(
     () =>
-      pasted
-        .map((r) => r.parsed)
-        .filter((p): p is ParsedEstimateLine => p !== null)
-        .map((p) => {
-          const remembered = fillFromMemory(priceBook, p);
-          return remembered
-            ? {
-                line: { ...p, unitCostCents: remembered.unitCostCents, unit: p.unit || remembered.unit },
-                remembered,
-              }
-            : { line: p, remembered: null };
-        }),
+      pasted.map((r) => {
+        if (r.parsed === null) return { input: r.input, line: null, remembered: null };
+        const remembered = fillFromMemory(priceBook, r.parsed);
+        return {
+          input: r.input,
+          line: remembered
+            ? { ...r.parsed, unitCostCents: remembered.unitCostCents, unit: r.parsed.unit || remembered.unit }
+            : r.parsed,
+          remembered,
+        };
+      }),
     [pasted, priceBook],
+  );
+  const readable = previewRows.filter(
+    (r): r is { input: string; line: ParsedEstimateLine; remembered: RememberedPrice | null } => r.line !== null,
   );
   const rememberedCount = readable.filter((r) => r.remembered !== null).length;
 
@@ -1228,23 +1238,35 @@ export function EstimateEditor({
                       </tr>
                     </thead>
                     <tbody>
-                      {pasted.map((r, i) => (
+                      {previewRows.map((r, i) => (
                         <tr key={i} className="border-t border-border/50">
-                          {r.parsed === null ? (
+                          {r.line === null ? (
                             <td colSpan={4} className="px-2 py-1.5 text-destructive">
                               Could not read <span className="font-mono">{r.input}</span> — it will be left out
                             </td>
                           ) : (
                             <>
-                              <td className="px-2 py-1.5">{r.parsed.description}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums">
-                                {r.parsed.quantityThousandths === 1000 && r.parsed.unit === ""
-                                  ? "—"
-                                  : thousandthsToQuantityString(r.parsed.quantityThousandths)}
+                              <td className="px-2 py-1.5">
+                                {r.line.description}
+                                {r.remembered && (
+                                  <span className="block text-muted-foreground">
+                                    priced from {r.remembered.projectNumber},{" "}
+                                    {howLongAgo(r.remembered.pricedOn, today())}
+                                  </span>
+                                )}
                               </td>
-                              <td className="px-2 py-1.5">{r.parsed.unit || "—"}</td>
                               <td className="px-2 py-1.5 text-right tabular-nums">
-                                {fmt(r.parsed.unitCostCents, symbol)}
+                                {r.line.quantityThousandths === 1000 && r.line.unit === ""
+                                  ? "—"
+                                  : thousandthsToQuantityString(r.line.quantityThousandths)}
+                              </td>
+                              <td className="px-2 py-1.5">{r.line.unit || "—"}</td>
+                              <td
+                                className={`px-2 py-1.5 text-right tabular-nums${
+                                  r.remembered ? " font-medium" : ""
+                                }`}
+                              >
+                                {fmt(r.line.unitCostCents, symbol)}
                               </td>
                             </>
                           )}

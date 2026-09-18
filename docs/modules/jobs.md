@@ -130,11 +130,34 @@ across 24-108 and 24-109, and `tile labour`, `Tile  Labour` and `TILE LABOUR!`
 all recalled `3.50/sf · 24-108 · today` while `nothing like this` recalled
 nothing — the normalisation doing exactly its job and no more.
 
-**NOT DRIVEN: the two screens.** The entry-bar hint, the Tab key and the paste
-count typecheck, lint and build, and the pure half has 26 tests, but the pane
-has been signed out of Clerk since 2026-09-09 so no button was pressed. Say so
-rather than imply otherwise. **The E5c share block is still unclicked for the
-same reason** — one sign-in would clear both.
+**DRIVEN IN THE BROWSER** once the founder signed the pane in, and **clicking
+it found a bug nothing else could have.** The entry bar hinted
+`Last priced $3.50/sf · 24-108 · today — Tab to use it, Enter to leave it
+blank`; **Tab** landed `tile labour · 320 · sf · 3.50` and put the cursor back
+in the bar; **Enter** landed `tile labour · 120 · sf · (blank)`, so the two
+halves of the rule both hold.
+
+**The paste preview showed $0.00 on the very rows its own footer said it had
+priced.** The table mapped `pasted` (the raw parse) while the footer counted
+`readable` (the filled version), and because `readable` had already dropped
+the unreadable rows the two lists could not even be indexed together. A single
+`previewRows` memo now carries `{input, line, remembered}` for every pasted
+line, the table reads `line`, and each filled row says **where the price came
+from** — `priced from 24-108, today` under the description. Six pasted lines
+then read correctly: three filled and marked, one at 0.00 with no memory, one
+keeping its typed `@ 9.99`, and `tile @ four twenty` refused in red under
+*Add 5 lines, leave out 1*. **A footer that contradicts the table above it is
+exactly what a type check cannot see.**
+
+**E5c's share block was driven in the same pass** (it had shipped unclicked):
+`Make a link` produced `Open · Not opened yet · Expires 10/17/2026` with Copy
+and Revoke on that row only, the button became `New link`, `Revoke` flipped it
+to `Revoked` and the button back to `Make a link`. Marion Whitfield's
+acceptance panel read `accepted this proposal on 9/17/2026 at $190,537.53`
+above four links showing three different derived standings at once — and the
+two that had been signed read **Estimate changed**, live, because the typing
+had bumped the estimate's version past their signatures. The junk lines were
+removed afterwards and the totals came back to `$190,537.53` to the cent.
 
 **E4 SPLIT, out loud.** The second half — *"you estimated 4.20, you actually
 paid 4.65 on the last three jobs"* — is now **E4b** on the plan, because the

@@ -1988,6 +1988,118 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
   });
 
+  it("cannot read or change another tenant's ASSEMBLIES; a line hangs off this tenant's assembly; the name is unique per tenant; a driver of nothing is refused; and the lines go with it", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const a = await tx
+        .insert(schema.jobAssemblies)
+        .values({
+          tenantId: tenantA,
+          name: "Tile flooring",
+          drivingQuantityThousandths: 320_000,
+          drivingUnit: "sf",
+        })
+        .returning();
+      const l = await tx
+        .insert(schema.jobAssemblyLines)
+        .values({
+          tenantId: tenantA,
+          assemblyId: a[0].id,
+          description: "Tile, material",
+          unit: "sf",
+          quantityThousandths: 320_000,
+          unitCostCents: 420,
+          costCode: "09 30 00",
+        })
+        .returning();
+      return { assemblyId: a[0].id, lineId: l[0].id };
+    });
+
+    // Tenant B sees nothing of it and changes nothing of it.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, seeded.assemblyId)),
+      changed: await tx
+        .update(schema.jobAssemblies)
+        .set({ name: "theirs" })
+        .where(eq(schema.jobAssemblies.id, seeded.assemblyId))
+        .returning(),
+      lines: await tx
+        .select()
+        .from(schema.jobAssemblyLines)
+        .where(eq(schema.jobAssemblyLines.id, seeded.lineId)),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(seen.lines).toEqual([]);
+    // Saving one is member work, like writing the estimate it came from.
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, seeded.assemblyId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].drivingQuantityThousandths).toBe(320_000);
+
+    /**
+     * **THE NAME IS UNIQUE PER TENANT, NOT GLOBALLY.** A library with two
+     * `Tile flooring` is not a library — but every business gets its own, and
+     * two businesses naming the same thing the same way is the normal case.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblies).values({ tenantId: tenantA, name: "Tile flooring" }),
+      ),
+    ).rejects.toThrow();
+    const theirs = await withSystem((tx) =>
+      tx.insert(schema.jobAssemblies).values({ tenantId: tenantB, name: "Tile flooring" }).returning(),
+    );
+    expect(theirs).toHaveLength(1);
+
+    // A line on another tenant's assembly is unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblyLines).values({
+          tenantId: tenantA,
+          assemblyId: theirs[0].id,
+          description: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // A size of nothing cannot be scaled from, so the table refuses it.
+    for (const bad of [0, -1]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .insert(schema.jobAssemblies)
+            .values({ tenantId: tenantA, name: `Bad ${bad}`, drivingQuantityThousandths: bad }),
+        ),
+        String(bad),
+      ).rejects.toThrow();
+    }
+    // And a blank name is not a name.
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobAssemblies).values({ tenantId: tenantA, name: "   " })),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblyLines).values({
+          tenantId: tenantA,
+          assemblyId: seeded.assemblyId,
+          description: "  ",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // The lines go with the assembly.
+    await withSystem((tx) =>
+      tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, seeded.assemblyId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobAssemblyLines).where(eq(schema.jobAssemblyLines.id, seeded.lineId)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, theirs[0].id)));
+  });
+
   it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
     const seeded = await withSystem(async (tx) => {
       const e = await tx

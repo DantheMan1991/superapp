@@ -77,13 +77,92 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 | **E5b** | ~~**The brochure's PDF**~~ **SHIPPED 2026-09-17** ([ADR 0084](../decisions/0084-the-brochures-pdf-is-a-headless-print-of-the-document-itself-and-the-format-picks-the-engine.md)) | The format picks the engine at one URL: a letter is react-pdf, a brochure is a headless Chromium print of **the very string the document route serves**. `pressFor` decides where the browser comes from, and `-min` keeps the ~50MB Chromium out of the function. Killed the live defect that printed the letter whatever the format said, and found the running footer printing through the text. `npm run print:probe` is what measures it. |
 | **E5c** | ~~**The client link, with Accept**~~ **SHIPPED 2026-09-17** ([ADR 0085](../decisions/0085-a-client-link-is-a-tokenised-copy-of-the-proposal-and-accepting-on-it-records-a-signature-rather-than-accepting-the-estimate.md)) | `/proposal/<token>`: the same document with no session, `document_shares`' credentials verbatim, `withSystem` doing the token → tenant hop and nothing else, and every failure the same unbranded sentence. **Accepting records a SIGNATURE, it does not accept the estimate** — `acceptEstimate` needs an owner and the contract, and a client has neither. The version shown is checked not trusted; a link is signed once; the standing is derived, and `superseded` kills a link whose estimate moved after it was signed. |
 | ~~E5~~ | ~~**The proposal as sections, the HTML document, and the client link**~~ — split into E5a/b/c above | Presentation (how the money is grouped) and format (what the paper is) are two choices tangled in one field today. Split them, then build the document as a **section list** over pack data — and the point is that every page a custom-home proposal wants is already data here: the cover's elevation is the current drawing set (9a), the narrative is the items' names and notes, the allowances are selections (ADR 0067), the milestones are phases (ADR 0071), the warranty is a period on the job (13a), the insurance and bonding are rows (0068/0078). A brochure is a page order over things that exist. `letter` and `brochure` are two presets over that list. Stage 1 is the HTML plus print CSS, shipped as the tokenised client link with **Accept**; stage 2 adds the Chromium render behind the same route so the product can attach and email the file. Stage 1 is the first half of stage 2, so nothing is wasted. |
-| E6 | **Assemblies** | Built backwards on purpose: **"save this item as an assembly"** first, so the library assembles itself out of real work instead of needing to be seeded — nobody ever fills in an assembly library up front. Then dropping one with a driving quantity explodes it into an item whose lines' quantities are computed (1.05 sf of tile per sf of floor for waste, 0.02 bags of thinset, 1 sf of labour) with the cost codes pre-filled. **An assembly is a saved item**, which is why it waits for E1's table rather than arriving with one of its own — and ADR 0069 said assemblies wanted a few real estimates typed first, which E1 is. |
+| **E6** | ~~**Assemblies**~~ **SHIPPED 2026-09-18** ([ADR 0086](../decisions/0086-an-assembly-is-an-item-saved-at-the-size-it-was-priced-and-only-the-quantity-scales.md)) | **An assembly is a saved item**, built backwards: *save this item as an assembly* first, and the picker does not appear until the library has something in it. It records the size it was saved at and keeps every quantity as it was priced; dropping scales **only the quantities** — a cost, a unit price and a markup are rates already. The cost code travels as TEXT and is resolved against the target job own set. |
 | E7 | **The rest** | Bid alternates and options ("upgrade to quartz: +$4,200") as items outside the total until chosen; copy an estimate / a plan template, which is a production builder's whole workflow and nearly free because the rows exist; the tenant-level unit cost book, once E4 has shown what it should hold. |
 
 Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
 ## Build log
+
+### 2026-09-18 — Assemblies: an item, saved, and dropped at another size (`claude/estimate-assemblies`, ADR 0086)
+
+Slice **E6**. Two tables (`job_assemblies`, `job_assembly_lines`, migrations
+`0379`/`0380`, **live on dev and prod before the merge, 231 tables verified on
+each**).
+
+**AN ASSEMBLY IS A SAVED ITEM** — the same shape as a group and its lines,
+which is why this waited for ADR 0079's table rather than arriving with one of
+its own.
+
+**Built backwards, and that is the whole reason it will have anything in it.**
+*Save this item as an assembly* came first; dropping one came second. **The
+picker does not appear until the library has something in it** — every
+estimating product that shipped the drop-down first has an empty drop-down in
+it, and an empty one teaches people the feature is not for them. Saving reads
+the EDITOR'S OWN STATE, so an item typed a minute ago and never saved can
+still go in, which is the moment somebody knows it is worth keeping.
+
+**ONLY THE QUANTITY SCALES. EVERY RATE IS A RATE.** The assembly records the
+size it was saved at and keeps every quantity exactly as it was priced; the
+drop scales quantities by the ratio and touches nothing else. Scaling a unit
+cost, a unit price or a markup is the one mistake here that would produce a
+**plausible** wrong number — twice the tile at twice the price per foot is
+four times the money and it looks almost right — and a plausible wrong number
+goes out in a proposal. Six of the nineteen pure tests exist for that sentence
+alone.
+
+**What it is per is guessed from the lines**: the most common (quantity, unit)
+pair, so two of three lines saying `320 sf` makes it a floor of 320 sf and the
+dialog opens with the answer in it. An item of nothing but lump sums is `1` of
+nothing — a kitchen, a bathroom suite — which is a useful assembly, not a
+broken one.
+
+**The cost code travels as TEXT and is resolved at the drop**, because a code
+id belongs to one cost code SET and an assembly is the one thing in estimating
+that crosses jobs. No match means NO code, and the toast says how many came
+back uncoded. **Dropping returns lines rather than writing them**, because the
+editor saves itself (ADR 0082) and a second writer to the same rows is how
+they come to disagree.
+
+**DRIVEN end to end on the dev branch's EST-ITEMS-1**, and the restore was
+exact:
+
+- with an empty library, **`Add an assembly` was correctly absent** and only
+  the two per-item save buttons showed;
+- saving the one-lump item offered `1 line · per 1` — the right answer for a
+  lump, and the one that exercises nothing — so the three loose 320 sf tile
+  lines were gathered into a fresh item, which offered **`3 lines · per 320
+  sf`**, guessed;
+- saved → *"Saved Tile flooring to your assemblies"*, and `Add an assembly`
+  **appeared**;
+- the temporary item was removed (its lines stayed loose, ADR 0079's rule) and
+  the estimate was back to exactly what it was;
+- dropped at **500 sf** → a new item with three lines at `500 sf`, costs still
+  `4.20`, `3.50`, `3.50` — the quantities moved and the rates did not;
+- the picker read `Tile flooring · per 320 sf · 3 lines` and `One of these
+  costs $3,584.00 per 320 sf`, which is 320 × 4.20 + 2 × 320 × 3.50 to the
+  cent;
+- the dropped item and its lines were removed and the totals came back to
+  **$190,537.53**, saved.
+
+**Traps.**
+
+- **`0379` had to be hand-reordered.** drizzle put every foreign key before
+  every index, so the composite key to `job_assemblies (tenant_id, id)` landed
+  before the unique index that makes those columns a legal target. It would
+  not have run. Same repair as `0352` and `0356`.
+- **A SNAPSHOT-CHAIN REPAIR CAME WITH IT, from E5c.** `0378`'s snapshot was a
+  byte copy of `0377`'s, so both claimed the same id and **`db:generate`
+  refused to run at all** — *"are pointing to a parent snapshot … which is a
+  collision"*. An RLS migration's snapshot needs its OWN id with `prevId`
+  pointing at the one before. `db:migrate` never looks, so the break is
+  invisible until the next person generates a migration.
+- **`violatedUniqueIndex(err)` returns the constraint NAME, not a boolean.**
+  Passing it a second argument typechecks as an arity error rather than
+  silently always-false, which is the only reason it was caught.
+- **A JSX text fragment cannot carry a raw quote.** `{'{'}"job"{'}'}` — an
+  attempt to write a literal brace — is two unescaped `"` to eslint.
 
 ### 2026-09-18 — The proposal on a phone: the paper does not fit, so the screen reflows (`claude/proposal-on-a-phone`)
 
@@ -4421,7 +4500,7 @@ hand-reordered like 0329) and `0335_job_billing.sql` / `0336_job_billing_rls.sql
 `wip_adjustment` to `journal_entry_source`, which nothing in the file uses)
 and `0341_cost_plus.sql` / `0342_cost_plus_rls.sql` (slice 5b; as generated,
 since the new table references existing ones only) and `0343_sub_billing.sql`
-/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) and `0376_estimate_format_and_letter.sql` (E5a, ADR 0083; two columns and a CHECK on `job_estimates`, so no RLS migration — **generated clean, with no stray foreign key to repair**, because 0375's snapshot recorded the item key's intent) and `0377_job_estimate_shares.sql` / `0378_job_estimate_shares_rls.sql` (E5c, ADR 0085; one new table referencing an existing one, as generated and renamed off drizzle's own tag — **its `token_hash` index is UNIQUE GLOBALLY with no tenant prefix**, because the public lookup has no tenant context to scope by) follow the same rule —
+/ `0344_sub_billing_rls.sql` (slice 5c, hand-reordered) and `0345_time_and_materials.sql` / `0346_time_and_materials_rls.sql` (slice 5d; as generated) and `0347_unit_price.sql` (slice 5f; columns and CHECKs on two existing tables, so no RLS migration) and `0348_commitment_change_orders.sql` / `0349_commitment_change_orders_rls.sql` (slice 4b; as generated — the new table's unique index lands before the lines' key to it) and `0350_lien_waivers.sql` / `0351_lien_waivers_rls.sql` (slice 11a; as generated, one new table referencing existing ones) and `0352_selections.sql` / `0353_selections_rls.sql` (slice 8; hand-reordered — two new tables, the selections' unique index ahead of the choices' key) and `0354_party_documents.sql` / `0355_party_documents_rls.sql` (slice 11b; as generated) and `0356_estimates.sql` / `0357_estimates_rls.sql` (slice 10; hand-reordered — two new tables, the estimates' unique index ahead of the lines' key) and `0358_proposal.sql` (slice 10b; four columns and a CHECK on `job_estimates`, so no RLS migration) and `0359_job_phases.sql` / `0360_job_phases_rls.sql` (the schedule; hand-reordered — a self-referencing key needs the table's own unique index first) and `0373_job_estimate_groups.sql` / `0374_job_estimate_groups_rls.sql` (E1, ADR 0079; as generated but for the line's key to the item, **hand-edited to the column-list `ON DELETE SET NULL ("group_id")`** as every composite SET NULL in this repo is) and `0375_estimate_client_wording.sql` (E2, ADR 0080; three columns and two CHECKs on existing tables, so no RLS migration — **and hand-edited to REMOVE a DROP and re-ADD of that same key, which drizzle regenerated in the bare form that can never run**; `tests/migrations.test.ts` now guards the class) and `0376_estimate_format_and_letter.sql` (E5a, ADR 0083; two columns and a CHECK on `job_estimates`, so no RLS migration — **generated clean, with no stray foreign key to repair**, because 0375's snapshot recorded the item key's intent) and `0377_job_estimate_shares.sql` / `0378_job_estimate_shares_rls.sql` (E5c, ADR 0085; one new table referencing an existing one, as generated and renamed off drizzle's own tag — **its `token_hash` index is UNIQUE GLOBALLY with no tenant prefix**, because the public lookup has no tenant context to scope by) and `0379_job_assemblies.sql` / `0380_job_assemblies_rls.sql` (E6, ADR 0086; two new tables, **hand-reordered so the parent assembly's unique index lands ahead of the lines' composite key** — and shipped with a repair to `0378`'s snapshot, which was a byte copy of `0377`'s and made `db:generate` refuse to run at all) follow the same rule —
 and from slice 3 the pair is `db:verify-rls` **and `db:verify-modules`**, after
 the pack shipped invisible for want of a catalogue row. `db:verify-rls` reports **220 tables**, all enabled, forced and with
 policies, on both.

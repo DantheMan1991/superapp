@@ -27,6 +27,7 @@ import {
   type CrewInput,
 } from "./field-ops";
 import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
+import { deleteAssembly, linesForDrop, saveItemAsAssembly } from "./assembly-ops";
 import {
   createEstimateShare,
   listEstimateShares,
@@ -101,6 +102,7 @@ import {
   JobsError,
   removeBudgetLine,
   saveSovLines,
+  getProject,
   setBudgetLines,
   setDefaultCostCodeSet,
   updateChangeOrder,
@@ -4481,4 +4483,150 @@ export async function revokeEstimateShareAction(input: unknown) {
 function shareUrl(token: string): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
   return `${base}/proposal/${token}`;
+}
+
+// ------------------------------------------------------- assemblies (E6, ADR 0086)
+
+/**
+ * SAVE AN ITEM AS AN ASSEMBLY. The lines come from the editor's own state, so
+ * this works on an item that has not been saved to the estimate yet — the
+ * library is built out of what somebody is looking at, which is the only
+ * moment they know it is worth keeping.
+ */
+const assemblyLineSchema = z.object({
+  description: z.string().trim().max(300),
+  clientDescription: z.string().trim().max(300).default(""),
+  clientVisible: z.boolean().default(true),
+  unit: z.string().trim().max(20).default(""),
+  quantityThousandths: z.number().int().min(0),
+  unitCostCents: z.number().int().min(0),
+  markupPpm: z.number().int().min(0).max(10_000_000).nullable().default(null),
+  unitPriceCents: z.number().int().min(0).nullable().default(null),
+  costCode: z.string().trim().max(60).default(""),
+  sortOrder: z.number().int().default(0),
+});
+
+export async function saveAssemblyAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      name: z.string().trim().min(1).max(160),
+      clientNote: z.string().trim().max(600).default(""),
+      notes: z.string().trim().max(2000).default(""),
+      drivingQuantity: z.string().trim(),
+      drivingUnit: z.string().trim().max(20).default(""),
+      lines: z.array(assemblyLineSchema).min(1),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, drivingQuantity, ...rest } = parsed.data;
+  const driving = quantityStringToThousandths(drivingQuantity);
+  if (driving === null || driving <= 0) {
+    return { error: "What it is per has to be a quantity, like 320." };
+  }
+  try {
+    const ctx = await gate();
+    const made = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const row = await saveItemAsAssembly(tx, ctx, {
+          ...rest,
+          drivingQuantityThousandths: driving,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "assembly.saved",
+          targetType: "assembly",
+          targetId: row.id,
+          meta: { projectId, lines: rest.lines.length },
+        });
+        return row;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}`);
+    return { ok: true as const, id: made.id, name: made.name };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * THE LINES AN ASSEMBLY MAKES ON THIS JOB. Returns them rather than writing
+ * them: the editor holds the estimate in its own state and saves itself
+ * (ADR 0082), so an action that wrote lines behind its back would be a second
+ * writer to the same rows.
+ */
+export async function dropAssemblyAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      assemblyId: z.string().uuid(),
+      quantity: z.string().trim(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, assemblyId, quantity } = parsed.data;
+  const wanted = quantityStringToThousandths(quantity);
+  if (wanted === null || wanted <= 0) return { error: "How many has to be a quantity, like 500." };
+  try {
+    const ctx = await gate();
+    const made = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const project = await getProject(tx, ctx.tenantId, projectId);
+        if (!project) throw new JobsError("NOT_FOUND", "job not found");
+        return linesForDrop(tx, ctx.tenantId, assemblyId, wanted, project.costCodeSetId);
+      },
+      { role: ctx.role },
+    );
+    if (!made) return { error: "That assembly is gone." };
+    return {
+      ok: true as const,
+      name: made.assembly.name,
+      clientNote: made.assembly.clientNote,
+      lines: made.lines.map((l) => ({
+        description: l.description,
+        clientDescription: l.clientDescription,
+        clientVisible: l.clientVisible,
+        unit: l.unit,
+        quantityThousandths: l.quantityThousandths,
+        unitCostCents: l.unitCostCents,
+        markupPpm: l.markupPpm,
+        unitPriceCents: l.unitPriceCents,
+        costCodeId: l.costCodeId,
+      })),
+      /** How many lines came back with no code, so the editor can say so. */
+      uncoded: made.lines.filter((l) => l.costCodeId === null && l.costCode !== "").length,
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteAssemblyAction(input: unknown) {
+  const parsed = z.object({ projectId: z.string().uuid(), id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await deleteAssembly(tx, ctx, parsed.data.id);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "assembly.deleted",
+          targetType: "assembly",
+          targetId: parsed.data.id,
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
 }

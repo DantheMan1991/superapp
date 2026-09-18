@@ -2654,6 +2654,20 @@
       "when": 1789689349888,
       "tag": "0378_job_estimate_shares_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 379,
+      "version": "7",
+      "when": 1789733694019,
+      "tag": "0379_job_assemblies",
+      "breakpoints": true
+    },
+    {
+      "idx": 380,
+      "version": "7",
+      "when": 1789733695019,
+      "tag": "0380_job_assemblies_rls",
+      "breakpoints": true
     }
   ]
 }

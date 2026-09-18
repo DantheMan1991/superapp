@@ -83,6 +83,34 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
+### IF YOU ARE REDESIGNING THE ESTIMATE SCREEN, READ THIS FIRST
+
+`components/estimate-editor.tsx` is one file carrying seven slices of
+behaviour, and **most of it is invisible in a screenshot**. A visual redesign
+that rebuilds the table or the toolbar will silently drop these unless it
+means not to. Nothing in the pure test suite catches any of the first three —
+they are DOM contracts, and the only proof is a click.
+
+| Must survive | Where it comes from | How it breaks silently |
+| --- | --- | --- |
+| **`data-cell="<column>"` on all seven editable inputs, and `data-group` on the line row** | E3c | The keyboard grid finds "the row below" by querying the DOM in document order. A rebuilt table without these attributes leaves ↓/↑/Enter doing nothing, and every test still passes. |
+| **↓/↑ move within a COLUMN; Enter moves down and MAKES A ROW past the last; Tab, ← and → are untouched** | E3c | A grid that claims Tab traps keyboard users; one that claims ←/→ makes a typo mid-price unfixable. |
+| **The entry bar is ONE field: Enter commits and the cursor stays; a sentence it cannot read is refused, never guessed** | ADR 0081 | A line that quietly landed at $0.00 on a bid you sent is the expensive kind of mistake. |
+| **Tab takes the remembered price, and ONLY while a hint is showing** | E4a | Otherwise Tab stops moving focus. |
+| **"Unsaved" is DERIVED by comparing the payload with the last one sent, and the version is NOT in that comparison** | ADR 0082 | A `setDirty` per setter says "Saved" over work that is not; the version inside the payload makes every save dirty again. |
+| **`Show it` appears only on a line INSIDE an item** | ADR 0080 | Hidden money needs somewhere to hide, or the printed rows stop adding up. |
+| **Removing an item leaves its lines loose; it never deletes what was priced** | ADR 0079 | Silent data loss. |
+| **A fixed item price is the number that prints** | ADR 0079, the founder's decision 1 | At ten and ten, $8,400 inside the spread prints $10,164. |
+| **`Add an assembly` is hidden until the library has one** | ADR 0086 | An empty drop-down teaches people the feature is not for them. |
+| **Ctrl+D duplicates the focused row** | ADR 0081 | Most takeoff lines are near-copies of the one above. |
+| **The row buttons' `sr-only` labels need a positioned ancestor** | E3a's bug | `sr-only` is `position: absolute`; with no positioned wrapper its containing block is the PAGE and it drags the whole page sideways. The `relative` on the `overflow-x-auto` wrapper is load-bearing, and the symptom looks like a wide table. |
+
+The screen also hosts three blocks a redesign should keep whole rather than
+re-plumb: the **proposal block** (format, presentation, the three texts), **the
+client's link** (E5c), and the **six figures** row. And `npm run print:probe`
+guards the proposal document, not this screen — there is no equivalent for the
+editor, so a redesign has to be clicked.
+
 ## Build log
 
 ### 2026-09-18 — Assemblies: an item, saved, and dropped at another size (`claude/estimate-assemblies`, ADR 0086)

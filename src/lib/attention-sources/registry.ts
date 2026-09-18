@@ -6,6 +6,7 @@ import { timeAttentionSource } from "@/modules/time/attention/source";
 import { livestockAttentionSource } from "@/packs/livestock/attention/source";
 import { inventoryAttentionSource } from "@/packs/inventory/attention/source";
 import { productionAttentionSource } from "@/packs/production/attention/source";
+import { jobsAttentionSource } from "@/packs/jobs/attention/source";
 import type { AttentionSource } from "./types";
 
 /**
@@ -82,6 +83,21 @@ export const attentionSources: readonly AttentionSource[] = [
   // top. It sits under Work because work still has the stronger claim — an
   // agreed date — while a sheet is a queue with none.
   timeAttentionSource,
+  /**
+   * JOBS IS FOURTH, from 2026-09-17 — the fourth pack source, and the one
+   * with the sharpest single line this list carries: **a client put their
+   * name to a proposal and nobody has answered.** The client has finished
+   * and the business has not, which is the only obligation here where
+   * somebody outside the company is waiting; it goes to owners, because
+   * accepting an estimate is an owner's act.
+   *
+   * It sits above production because a signed proposal is money not yet
+   * agreed and a kill date is a day's work, and below time because a
+   * submitted timesheet is a person standing at the desk. Its other two
+   * lines — a selection past its date, a subcontractor with no cover —
+   * reach everybody.
+   */
+  jobsAttentionSource,
   productionAttentionSource,
   livestockAttentionSource,
   inventoryAttentionSource,

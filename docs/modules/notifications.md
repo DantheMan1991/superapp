@@ -12,6 +12,46 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-17 — Jobs joins the digest, fourth (`claude/jobs-attention`)
+
+The FOURTH pack source, `jobs-site` (`src/packs/jobs/attention/source.ts`),
+registered under time and above production — the construction pack's first
+appearance here, after thirteen rows of features that every one of them left to
+somebody opening a page.
+
+**The line this exists for: `Marion Whitfield accepted EST-2 — 190,537.53`.**
+E5c (ADR 0085) gave a client a link they can accept a proposal on, and shipped
+with the gap stated in its own PR — the business was not told. It is **owners
+only**, because accepting the estimate takes `requireWrite(ctx, "owner")` and
+the contract the estimate priced; `today` on the day they signed and `overdue`
+from the next, because that is the one moment in a job where the client has
+finished and the business has not. A signature whose estimate was edited since
+is still raised, with the wording changed so an old price is never printed as
+current.
+
+Two more, to everybody: **selections past the date the client was asked for**
+(one line per job, because they are chased in one conversation) and **a
+subcontractor on a live job whose cover does not stand up** — two rows per
+party, because lapsed is overdue (somebody uninsured may be on site today) and
+expiring within the month is a phone call this week. `missing` counts as
+lapsed: no certificate on file is not better than one that ran out.
+
+**Three things deliberately left out**, each for the rule that an obligation
+must self-clear by doing the work: a phase running late (schedules slip for
+weeks and nobody updates the record daily, so the line would repeat every
+morning until somebody moved a date); a proposal the client has not answered
+(their move, not the business's); and a bond near its limit (a capacity fact,
+cleared by winning less work). Reasons kept in
+`src/packs/jobs/attention-math.ts`, beside the three that are in.
+
+Four statements plus the board's own grouped reads, whatever the number of
+jobs — `boardExtras`, `subcontractorStanding` and one new
+`signedEstimatesAwaiting` are all keyed by id in the database. Arithmetic pure
+in `attention-math.ts` (22 tests); the source reads only. The seam took a
+seventh source without changing. **The `what-needs-you` guide was two sources
+out of date** — it said "six tools" and had no Time bullet, four days after
+time's source shipped — so both were written. Details in [jobs.md](jobs.md).
+
 ### 2026-09-09 — Inventory joins the digest, fifth (`claude/stock-reaches-what-needs-you`)
 
 The third pack source, `inventory-stock` (`src/packs/inventory/attention/source.ts`),

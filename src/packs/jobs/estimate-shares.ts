@@ -243,6 +243,104 @@ export async function signEstimateShare(
   return rows[0];
 }
 
+/** An acceptance nobody has answered: what the digest and the page raise. */
+export interface SignedEstimateAwaiting {
+  estimateId: string;
+  projectId: string;
+  projectNumber: string;
+  projectName: string;
+  number: string;
+  title: string;
+  signedName: string;
+  signedAt: Date;
+  signedTotalCents: number;
+  /** True when the estimate has been edited since — the price signed is not the price now. */
+  movedSince: boolean;
+}
+
+/**
+ * EVERY ACCEPTANCE THE BUSINESS HAS NOT ANSWERED, across every job — the read
+ * behind the pack's attention source.
+ *
+ * A client put their name to a proposal and the estimate is still open. The
+ * three honest answers all clear the line by changing the estimate's own
+ * status: accept it, decline it, or supersede it with a revision. Nothing is
+ * stored and nothing is marked read.
+ *
+ * **A drifted signature is still raised.** If the estimate was edited after
+ * the client signed, the acceptance happened and somebody must answer it — so
+ * the row says `movedSince` and the wording changes, rather than the
+ * obligation quietly disappearing because a line was touched.
+ *
+ * One statement, joined in the database: a source may not cost a query per
+ * job.
+ */
+export async function signedEstimatesAwaiting(
+  tx: Tx,
+  tenantId: string,
+): Promise<SignedEstimateAwaiting[]> {
+  const rows = await tx
+    .select({
+      estimateId: schema.jobEstimates.id,
+      projectId: schema.jobProjects.id,
+      projectNumber: schema.jobProjects.number,
+      projectName: schema.jobProjects.name,
+      number: schema.jobEstimates.number,
+      title: schema.jobEstimates.title,
+      version: schema.jobEstimates.version,
+      signedName: schema.jobEstimateShares.signedName,
+      signedAt: schema.jobEstimateShares.signedAt,
+      signedTotalCents: schema.jobEstimateShares.signedTotalCents,
+      signedVersion: schema.jobEstimateShares.signedEstimateVersion,
+    })
+    .from(schema.jobEstimateShares)
+    .innerJoin(
+      schema.jobEstimates,
+      and(
+        eq(schema.jobEstimates.tenantId, schema.jobEstimateShares.tenantId),
+        eq(schema.jobEstimates.id, schema.jobEstimateShares.estimateId),
+      ),
+    )
+    .innerJoin(
+      schema.jobProjects,
+      and(
+        eq(schema.jobProjects.tenantId, schema.jobEstimates.tenantId),
+        eq(schema.jobProjects.id, schema.jobEstimates.projectId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobEstimateShares.tenantId, tenantId),
+        sql`${schema.jobEstimateShares.signedAt} is not null`,
+        // Accepted, declined and superseded are all answers. Draft and sent
+        // are not, and a draft that was signed is the odd case worth knowing.
+        sql`${schema.jobEstimates.status} not in ('accepted', 'declined', 'superseded')`,
+      ),
+    )
+    .orderBy(desc(schema.jobEstimateShares.signedAt));
+
+  // One line per ESTIMATE: two links signed on one estimate is one obligation.
+  const seen = new Set<string>();
+  const out: SignedEstimateAwaiting[] = [];
+  for (const r of rows) {
+    if (seen.has(r.estimateId)) continue;
+    seen.add(r.estimateId);
+    out.push({
+      estimateId: r.estimateId,
+      projectId: r.projectId,
+      projectNumber: r.projectNumber,
+      projectName: r.projectName,
+      number: r.number,
+      title: r.title,
+      signedName: r.signedName ?? "",
+      signedAt: r.signedAt!,
+      signedTotalCents: r.signedTotalCents ?? 0,
+      movedSince: r.signedVersion !== r.version,
+    });
+  }
+  return out;
+}
+
 /**
  * The signature the business should see on the estimate, if any — the newest
  * one across every link, because a builder who sent two links cares that it

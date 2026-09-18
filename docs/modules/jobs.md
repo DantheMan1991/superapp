@@ -84,6 +84,59 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 
 ## Build log
 
+### 2026-09-17 — The pack reaches What needs you (`claude/jobs-attention`)
+
+**The gap E5c shipped with, closed the same day.** A client could accept a
+proposal on a link and nothing told the business; they had to open the
+estimate and look. `jobs-site` is the pack's attention source — its first, and
+the platform's seventh — so the acceptance reaches the page and the morning
+email like every other obligation. No migration, no schema change.
+
+Three obligations, each **derived and self-clearing** (the rule in
+`src/lib/attention-sources/types.ts`):
+
+1. **`Marion Whitfield accepted EST-2 — 190,537.53`**, **owners only**, because
+   accepting takes `requireWrite(ctx, "owner")` and the contract the estimate
+   priced — telling staff about a decision they cannot make is how a digest
+   earns a filter. `today` on the day they signed, `overdue` from the next.
+   Clears by accepting, declining or superseding. A signature the estimate has
+   moved past is **still raised**, reading *"and it has changed since"* with
+   the agreed price beneath, so an old number is never printed as current.
+2. **`3 selections still to choose on 24-108`**, everybody, one line per job
+   because they are chased in one conversation. Carries no `dueOn`: the dates
+   belong to the individual selections and a wrong date is worse than none.
+3. **A subcontractor on a live job whose cover does not stand up**, everybody,
+   as TWO rows per party — lapsed is `overdue` (somebody uninsured may be on
+   site today), expiring within the month is `soon` (a phone call this week).
+   **`missing` counts as lapsed**: nothing on file is not better than expired.
+
+**Three left out on purpose**, each failing the self-clearing test: a phase
+running late (schedules slip for weeks and nobody updates the record daily, so
+the row would repeat every morning until a date moved — the digest people
+mute); a proposal the client has not answered (their move, and an obligation
+belongs to whoever can clear it); a bond near its limit (a capacity fact,
+cleared by winning less work). The reasons live in `attention-math.ts` beside
+the three that are in, the way inventory's do.
+
+**It costs four statements plus the board's own grouped reads, whatever the
+number of jobs.** `boardExtras` already computed overdue selections per project
+for the card view; `subcontractorStanding` already computed each party's
+standing for the insurance audit; only `signedEstimatesAwaiting` is new, and it
+is one join taking the newest signature per estimate. Live jobs only —
+a complete or cancelled job's overdue selection would never clear.
+
+**DRIVEN on the dev branch's Hilltop Farm**, against the data E5c left behind:
+as an owner, three obligations — Marion Whitfield's acceptance of EST-ITEMS-1
+at 190,537.53 (`today`, linking to the estimate), Pleasant Valley Feed Mill's
+certificate expiring 2026-10-10 (`soon`, on 24-109), and Tractor Supply Co not
+covered at all (`overdue`, on 24-108); as staff, the same two minus the
+acceptance. The role gate is the difference, and it showed.
+
+**The guide was two sources out of date.** `docs/help/workspace/what-needs-you.md`
+said "six tools" and had no **Time** bullet, four days after time's source
+shipped — so this PR wrote Jobs' bullet AND Time's, and corrected the count.
+A guide that under-reports what a screen shows is worse than none.
+
 ### 2026-09-17 — The client's link, and the signature on it (`claude/estimate-client-link`, ADR 0085)
 
 Slice **E5c** of [the estimate program](#the-estimate-program-open-started-2026-09-16),
@@ -4638,15 +4691,15 @@ ordering only bites when two new tables reference each other in one file.
   Accept button SHIPPED as E5c** (ADR 0085): the client reads the proposal at
   `/proposal/<token>` and accepts by typing their name. Today the link is
   copied to the clipboard and pasted into the builder's own message.
-- **THE BUILDER IS NOT TOLD WHEN A CLIENT ACCEPTS.** They see it on the
-  estimate — the name, the date and the price — and nowhere else. A push or a
-  digest line wants **`jobs` to become an attention source**, which it is not
-  yet: it would be the pack's FIRST, and that is a slice of its own worth more
-  than this signature, because one source lights up every obligation the pack
-  has (proposals out for signature, expiring insurance, bonds near their limit,
-  waivers outstanding). `src/lib/attention-sources/types.ts` is the contract
-  and `registry.ts` the composition root. Until then the client's card
-  deliberately does not claim anyone was notified.
+- ~~**THE BUILDER IS NOT TOLD WHEN A CLIENT ACCEPTS.**~~ — **closed
+  2026-09-17**: `jobs-site` is the pack's attention source, so an acceptance
+  reaches What needs you and the morning email, owners only. Two more
+  obligations came with it (overdue selections, a subcontractor with no cover),
+  and three were left out for failing the self-clearing test — see the build
+  log entry. **Still open from the same idea:** a lien waiver outstanding, a
+  draft pay application nobody issued (money not billed, and the strongest
+  owner line the pack has left), and a warranty claim past its period. Each is
+  one read plus one pure helper now that the seam is in.
 - **The builder's own share block has never been clicked.** `The client's link`
   in the estimate editor — Make a link, Copy, Revoke — typechecks, lints and
   builds, and all four ops behind it were driven by script, but the buttons

@@ -3,62 +3,29 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { schema, withSystem } from "@/db";
 
 /**
- * Abuse and cost controls for the anonymous surface.
+ * Cost controls for the document share surface. The IP counters this file
+ * used to hold moved to `src/lib/public-limits.ts` when the estimate's client
+ * link became the second anonymous surface (E5c, ADR 0085); they are
+ * re-exported here so nothing that imported them from this path broke.
  *
- * Same shape as the health-check interview's: count rows in a window inside
- * the gating transaction, soft ceilings, races at the boundary accepted. These
- * are valves, not accounting.
- *
- * The byte budget is a COST control as much as a security one. A public link
- * is an egress amplifier — one leaked token pointed at a 100MB set of drawings
- * is an unbounded Vercel Blob bill, and nothing else in the system would stop
- * it.
+ * What stayed is about FILES. The byte budget is a cost control as much as a
+ * security one: a public link is an egress amplifier — one leaked token
+ * pointed at a 100MB set of drawings is an unbounded Vercel Blob bill, and
+ * nothing else in the system would stop it.
  */
 
-/** Unknown-token guesses tolerated from one IP per hour. */
-export const PROBE_HOURLY_IP_CAP = 60;
-/** Wrong passcodes tolerated from one IP per hour. */
-export const UNLOCK_FAIL_HOURLY_IP_CAP = 20;
+export {
+  PROBE_HOURLY_IP_CAP,
+  UNLOCK_FAIL_HOURLY_IP_CAP,
+  hourlyIpCap,
+  recordAttempt,
+  type AttemptKind,
+} from "@/lib/public-limits";
+
 /** Bytes one share may serve per day. */
 export const SHARE_DAILY_BYTE_CAP = 5 * 1024 * 1024 * 1024;
 /** Active links one tenant may hold open at once. */
 export const ACTIVE_SHARES_PER_TENANT = 500;
-
-export type AttemptKind = "share_probe" | "share_unlock_fail";
-
-function hoursAgo(now: Date, n: number): Date {
-  return new Date(now.getTime() - n * 60 * 60 * 1000);
-}
-
-/**
- * Record an anonymous miss and report whether this IP is over its cap.
- *
- * Runs under withSystem because public_access_attempts belongs to no tenant —
- * there is no tenant context to run it under. The caller holds no
- * user-controlled identifiers at this point, only a hashed IP.
- */
-export async function recordAttempt(
-  kind: AttemptKind,
-  ipHash: string,
-  now: Date = new Date(),
-): Promise<{ overCap: boolean }> {
-  const cap =
-    kind === "share_probe" ? PROBE_HOURLY_IP_CAP : UNLOCK_FAIL_HOURLY_IP_CAP;
-  return withSystem(async (tx) => {
-    await tx.insert(schema.publicAccessAttempts).values({ kind, ipHash });
-    const [{ n }] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(schema.publicAccessAttempts)
-      .where(
-        and(
-          eq(schema.publicAccessAttempts.kind, kind),
-          eq(schema.publicAccessAttempts.ipHash, ipHash),
-          gte(schema.publicAccessAttempts.createdAt, hoursAgo(now, 1)),
-        ),
-      );
-    return { overCap: n > cap };
-  });
-}
 
 /** Bytes this share has already served today. */
 export async function bytesServedToday(

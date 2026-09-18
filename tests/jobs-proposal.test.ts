@@ -580,7 +580,9 @@ describe("the document as it prints", () => {
   it("puts a Print control on the screen and on no sheet of paper", () => {
     const out = html();
     expect(out).toContain('onclick="window.print()"');
-    expect(out).toMatch(/@media print \{[^}]*[\s\S]*?\.print-me \{ display: none; \}/);
+    // The client link's reply card (E5c) is hidden by the same rule, for the
+    // same reason: neither is part of the document.
+    expect(out).toMatch(/@media print \{[^}]*[\s\S]*?\.print-me, \.accept \{ display: none; \}/);
   });
 
   /**

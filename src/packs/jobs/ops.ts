@@ -157,6 +157,8 @@ export class JobsError extends Error {
       | "PHASE_CYCLE"
       /** The business's Job schedule calendar does not exist yet, and only an owner may make it. */
       | "SCHEDULE_NOT_MADE"
+      /** A client link that is revoked, expired or already accepted (ADR 0085). */
+      | "SHARE_CLOSED"
       | "SHEET_TAKEN",
     message: string,
   ) {

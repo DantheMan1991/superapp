@@ -313,6 +313,98 @@ export const jobEstimateLines = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * The client's copy of the proposal, and the acceptance they put their name
+ * to (E5c, ADR 0085).
+ *
+ * A share is a tokenised, anonymous, read-only door onto the document the
+ * pack already renders — the brochure or the letter, whichever `format`
+ * names — plus one thing the client may write: their acceptance.
+ *
+ * THE CREDENTIALS FOLLOW `document_shares` EXACTLY, because that table is
+ * the platform's answer to this question and a second answer would be a
+ * second thing to get wrong. The token is never stored: `token_hash` is a
+ * keyed HMAC used for lookup and `token_ciphertext` is the token under
+ * AES-GCM so the builder can copy the link again to re-send it. Both keys
+ * live in the environment, so a database-only compromise yields nothing.
+ * `token_hash` is GLOBALLY unique with no tenant prefix, because the public
+ * lookup has no tenant context to scope by.
+ *
+ * WHAT AN ACCEPTANCE IS, AND WHAT IT IS NOT. It is a RECORD that a person
+ * holding the link put a name to this proposal at this moment — the same
+ * shape as a lien waiver (ADR 0066) or a back-charge (ADR 0077): record the
+ * fact, derive the standing. **It does not accept the estimate.**
+ * `acceptEstimate` needs an owner and the CONTRACT the estimate priced, and
+ * a client knows neither; the business still accepts it, with the signature
+ * in front of them as the reason to.
+ *
+ * `signed_estimate_version` and `signed_total_cents` are what makes the
+ * record truthful rather than approximate: they say WHAT was agreed to, so
+ * an estimate that moves afterwards cannot quietly reinterpret a signature.
+ * ---------------------------------------------------------------------- */
+
+export const jobEstimateShares = pgTable(
+  "job_estimate_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    estimateId: uuid("estimate_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    tokenCiphertext: text("token_ciphertext").notNull(),
+    /**
+     * No never-expiring anonymous links — `document_shares`' rule. Defaulted
+     * from the estimate's own `valid_until` when it has one, because a
+     * proposal that has expired should not still be openable.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedByClerkUserId: text("revoked_by_clerk_user_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    viewCount: integer("view_count").notNull().default(0),
+    lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
+    /* ---- the acceptance: all five together or none of them ---- */
+    signedAt: timestamp("signed_at", { withTimezone: true }),
+    /** What they typed. Never trusted as identity — it is what they wrote. */
+    signedName: text("signed_name"),
+    /** Hashed, like every other IP on an anonymous surface. Never raw. */
+    signedIpHash: text("signed_ip_hash"),
+    /** The estimate's version at the moment of signing, so the record is exact. */
+    signedEstimateVersion: integer("signed_estimate_version"),
+    /** And the money, so what was agreed to survives a later revision. */
+    signedTotalCents: bigint("signed_total_cents", { mode: "number" }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_estimate_shares_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("job_estimate_shares_token_hash_idx").on(t.tokenHash),
+    index("job_estimate_shares_tenant_estimate_idx").on(t.tenantId, t.estimateId),
+    foreignKey({
+      name: "job_estimate_shares_estimate_fk",
+      columns: [t.tenantId, t.estimateId],
+      foreignColumns: [jobEstimates.tenantId, jobEstimates.id],
+    }).onDelete("cascade"),
+    /** A signature is a whole fact or nothing; half of one is not evidence. */
+    check(
+      "job_estimate_shares_signature_whole",
+      sql`num_nonnulls(${t.signedAt}, ${t.signedName}, ${t.signedIpHash}, ${t.signedEstimateVersion}, ${t.signedTotalCents}) in (0, 5)`,
+    ),
+    check(
+      "job_estimate_shares_signed_name_present",
+      sql`${t.signedName} is null or length(btrim(${t.signedName})) > 0`,
+    ),
+    check(
+      "job_estimate_shares_signed_name_bounded",
+      sql`${t.signedName} is null or char_length(${t.signedName}) <= 120`,
+    ),
+    check("job_estimate_shares_view_count_nonneg", sql`${t.viewCount} >= 0`),
+  ],
+);
+
 export type JobEstimate = typeof jobEstimates.$inferSelect;
 export type JobEstimateGroup = typeof jobEstimateGroups.$inferSelect;
 export type JobEstimateLine = typeof jobEstimateLines.$inferSelect;
+export type JobEstimateShare = typeof jobEstimateShares.$inferSelect;

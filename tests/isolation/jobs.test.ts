@@ -1988,6 +1988,141 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
   });
 
+  it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const e = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantA, projectId: projectA, number: "EST-SHARE-1" })
+        .returning();
+      const s = await tx
+        .insert(schema.jobEstimateShares)
+        .values({
+          tenantId: tenantA,
+          estimateId: e[0].id,
+          tokenHash: "hash-a-iso",
+          tokenCiphertext: "cipher-a",
+          expiresAt: new Date("2030-01-01T00:00:00Z"),
+          createdByClerkUserId: "user_a",
+        })
+        .returning();
+      return { estimateId: e[0].id, shareId: s[0].id };
+    });
+
+    // Tenant B sees nothing of it and changes nothing of it — which is the
+    // whole point: a link is anonymous to the WORLD, never to another tenant.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobEstimateShares).where(eq(schema.jobEstimateShares.id, seeded.shareId)),
+      changed: await tx
+        .update(schema.jobEstimateShares)
+        .set({ signedName: "theirs" })
+        .where(eq(schema.jobEstimateShares.id, seeded.shareId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    // A staff member of the owning tenant reads it: minting and revoking a
+    // link is member work, like writing the estimate it belongs to.
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobEstimateShares).where(eq(schema.jobEstimateShares.id, seeded.shareId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].viewCount).toBe(0);
+
+    // A link on another tenant's estimate is unrepresentable.
+    const otherEstimate = await withSystem(async (tx) => {
+      const r = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantB, projectId: projectB, number: "EST-B-SHARE" })
+        .returning();
+      return r[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateShares).values({
+          tenantId: tenantA,
+          estimateId: otherEstimate,
+          tokenHash: "hash-cross",
+          tokenCiphertext: "c",
+          expiresAt: new Date("2030-01-01T00:00:00Z"),
+          createdByClerkUserId: "u",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * THE TOKEN HASH IS UNIQUE ACROSS EVERY TENANT, not per tenant. The public
+     * lookup has no tenant context to scope by — it has 43 characters and
+     * nothing else — so two tenants holding one hash would make that lookup
+     * ambiguous, which is the one thing it may never be.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateShares).values({
+          tenantId: tenantB,
+          estimateId: otherEstimate,
+          tokenHash: "hash-a-iso",
+          tokenCiphertext: "c",
+          expiresAt: new Date("2030-01-01T00:00:00Z"),
+          createdByClerkUserId: "u",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // A SIGNATURE IS A WHOLE FACT OR NOTHING: half of one is not evidence.
+    for (const half of [
+      { signedAt: new Date() },
+      { signedName: "A Client" },
+      { signedAt: new Date(), signedName: "A Client" },
+      { signedAt: new Date(), signedName: "A Client", signedIpHash: "ip" },
+      { signedAt: new Date(), signedName: "A Client", signedIpHash: "ip", signedEstimateVersion: 1 },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .update(schema.jobEstimateShares)
+            .set(half)
+            .where(eq(schema.jobEstimateShares.id, seeded.shareId)),
+        ),
+        JSON.stringify(Object.keys(half)),
+      ).rejects.toThrow();
+    }
+    // All five together is the only shape that lands.
+    const whole = await withSystem((tx) =>
+      tx
+        .update(schema.jobEstimateShares)
+        .set({
+          signedAt: new Date("2026-10-14T12:00:00Z"),
+          signedName: "A Client",
+          signedIpHash: "iphash",
+          signedEstimateVersion: 1,
+          signedTotalCents: 190_537_53,
+        })
+        .where(eq(schema.jobEstimateShares.id, seeded.shareId))
+        .returning(),
+    );
+    expect(whole[0].signedName).toBe("A Client");
+    expect(whole[0].signedTotalCents).toBe(190_537_53);
+
+    // A blank name is not a signature either.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateShares)
+          .set({ signedName: "   " })
+          .where(eq(schema.jobEstimateShares.id, seeded.shareId)),
+      ),
+    ).rejects.toThrow();
+
+    // The link goes with the estimate: nothing outlives the document it served.
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, seeded.estimateId)));
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobEstimateShares).where(eq(schema.jobEstimateShares.id, seeded.shareId)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, otherEstimate)));
+  });
+
   it("cannot read or change another tenant's PARTY DOCUMENTS; a document hangs off this tenant's party; the kind is a slug, received has its date, the limit has a floor, and the party is held", async () => {
     const docId = await withSystem(async (tx) => {
       const rows = await tx

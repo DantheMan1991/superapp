@@ -176,6 +176,21 @@ table.paper > tbody > tr > td, table.paper > tfoot > tr > td { padding: 0; borde
 table.paper > tbody > tr, table.paper > tfoot > tr { break-inside: auto; }
 .band { height: 0; }
 
+/* the client link's reply card: screen only, never part of the document */
+.accept { width: 8.5in; max-width: 100%; margin: 0 auto 40px; padding: 22px 0.9in 26px; background: #fff;
+          box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 8px 24px rgba(0,0,0,.08); }
+.accept h3 { font-family: ui-serif, Georgia, serif; font-size: 15pt; margin: 0 0 8px; color: var(--accent); }
+.accept label { display: block; font-size: 7.5pt; letter-spacing: .12em; text-transform: uppercase;
+                color: var(--muted); margin: 14px 0 5px; }
+.accept input { font: inherit; font-size: 13pt; padding: 9px 11px; width: 100%; max-width: 22em;
+                border: 1px solid #9ca3af; border-radius: 5px; background: #fff; color: var(--ink); }
+.accept input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.accept button { display: block; margin: 16px 0 0; font: inherit; font-size: 11pt; font-weight: 600;
+                 padding: 11px 22px; cursor: pointer; border: 0; border-radius: 6px;
+                 background: var(--accent); color: #fff; }
+.accept button:hover { filter: brightness(1.1); }
+.accept .bad { color: #b91c1c; font-weight: 600; }
+
 /* print it yourself: the only thing on this page that is not the document */
 .print-me { position: fixed; top: 16px; right: 16px; z-index: 10; font: inherit; font-size: 9.5pt;
             padding: 7px 15px; cursor: pointer; background: var(--ink); color: #fff; border: 0;
@@ -191,7 +206,7 @@ table.paper > tbody > tr, table.paper > tfoot > tr { break-inside: auto; }
   .footer { position: fixed; left: 0; right: 0; bottom: 0; }
   .watermark { position: fixed; }
   /* Never on the paper — and so never in the headless print either. */
-  .print-me { display: none; }
+  .print-me, .accept { display: none; }
 }
 @page { size: letter; margin: 0.75in; }
 `.trim();
@@ -324,13 +339,65 @@ function sectionHtml(section: ProposalSection, brand: ProposalHtmlBrand, logo: s
   }
 }
 
+/**
+ * WHAT A CLIENT LINK ADDS, AND IT IS NOT PART OF THE DOCUMENT (E5c, ADR 0085).
+ *
+ * A screen-only panel after the last section: type your name, press Accept.
+ * Screen-only for the same reason the Print control is, and for one more —
+ * **the paper a client prints is byte-identical to the paper the builder
+ * prints.** The document does not change because of who is looking at it, so
+ * there is still one document, and the PDF of a shared proposal is the PDF of
+ * the proposal.
+ */
+export interface ProposalAcceptView {
+  /** Where the form posts. Same-origin, and the token is already in the path. */
+  acceptUrl: string;
+  /** The version being SHOWN, posted back so a revision refuses rather than overwrites. */
+  estimateVersion: number;
+  /** Already accepted: who and when. The panel says so and asks nothing. */
+  signed: { name: string; on: string } | null;
+  /** A refusal from the last attempt, shown above the field. */
+  error?: string;
+}
+
+function acceptPanelHtml(view: ProposalAcceptView, businessName: string): string {
+  if (view.signed) {
+    return `<aside class="accept">
+  <h3>Accepted</h3>
+  <p><strong>${esc(view.signed.name)}</strong> accepted this proposal on ${esc(view.signed.on)}.</p>
+  <p class="small muted">Keep a copy with the Print button above. ${esc(businessName)} will be in touch.</p>
+</aside>`;
+  }
+  return `<aside class="accept">
+  <h3>Accept this proposal</h3>
+  ${view.error ? `<p class="bad">${esc(view.error)}</p>` : ""}
+  <form method="post" action="${esc(view.acceptUrl)}">
+    <input type="hidden" name="version" value="${view.estimateVersion}">
+    <label for="accept-name">Your full name</label>
+    <input id="accept-name" name="name" type="text" autocomplete="name" maxlength="120" required
+           placeholder="Type your name">
+    <button type="submit">Accept this proposal</button>
+  </form>
+  <p class="small muted">Typing your name and pressing Accept records that you accept the price and
+  the terms above, on today's date. If you would rather sign on paper, use the Print button and send
+  the signed page back to ${esc(businessName)}.</p>
+</aside>`;
+}
+
 /** The whole page. One string, nothing fetched, printable as it stands. */
-export function renderProposalHtml(doc: ProposalDocument, brand: ProposalHtmlBrand): string {
+export function renderProposalHtml(
+  doc: ProposalDocument,
+  brand: ProposalHtmlBrand,
+  accept?: ProposalAcceptView,
+): string {
   const accent = brand.primaryColor ?? INK;
   const logo = dataUri(brand.logo);
   const brochure = doc.format === "brochure";
   const body = doc.sections.map((s) => sectionHtml(s, brand, logo)).join("\n");
   const watermark = doc.model.watermark ? `<div class="watermark">${esc(doc.model.watermark)}</div>` : "";
+  // Nothing at all when there is no link, so a document served through any
+  // other door is byte-identical to the one that existed before E5c.
+  const panel = accept ? `\n${acceptPanelHtml(accept, brand.businessName)}` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -347,7 +414,7 @@ ${watermark}
 ${body}
 </td></tr></tbody></table>
 <div class="footer"><span>${esc(doc.model.footer)}</span><span>${esc(doc.model.title)}</span></div>
-</div>
+</div>${panel}
 </body>
 </html>`;
 }

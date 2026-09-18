@@ -3,7 +3,18 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { BookOpen, ClipboardPaste, CornerDownLeft, EyeOff, FileText, FolderPlus, Plus, Trash2 } from "lucide-react";
+import {
+  BookOpen,
+  ClipboardPaste,
+  Copy,
+  CornerDownLeft,
+  EyeOff,
+  FileText,
+  FolderPlus,
+  Link2,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -28,10 +40,14 @@ import {
   applyEstimateToBudgetAction,
   applyEstimateToScheduleAction,
   createEstimateAction,
+  createEstimateShareAction,
+  revealEstimateShareTokenAction,
+  revokeEstimateShareAction,
   updateEstimateAction,
 } from "../actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
+import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
 import {
   estimateTotals,
   groupCostCents,
@@ -274,6 +290,18 @@ export function NewEstimateDialog({ projectId, trigger }: { projectId: string; t
  * budget or a schedule; the rates and lines are shown and not sent. Revise
  * by starting a new one and marking this one superseded.
  */
+/** A client link as the builder reads it. The token is never among these. */
+export interface ShareView {
+  id: string;
+  standing: ShareStanding;
+  expiresAt: string;
+  viewCount: number;
+  lastViewedAt: string | null;
+  signedName: string | null;
+  signedAt: string | null;
+  signedTotalCents: number | null;
+}
+
 export function EstimateEditor({
   projectId,
   estimate,
@@ -283,6 +311,7 @@ export function EstimateEditor({
   isOwner,
   symbol,
   units,
+  shares,
 }: {
   projectId: string;
   estimate: EditableEstimate;
@@ -293,6 +322,7 @@ export function EstimateEditor({
   canEdit: boolean;
   isOwner: boolean;
   symbol: string | null;
+  shares: ShareView[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1230,6 +1260,7 @@ export function EstimateEditor({
             </Button>
           </div>
         </div>
+        <ClientLinks projectId={projectId} estimateId={estimate.id} shares={shares} canEdit={canEdit} symbol={symbol} />
         <p className="mb-3 text-xs text-muted-foreground">
           What the client is sent: the price as saved, shown the way you choose, with the words below around it.
           Cost, markup, overhead and profit never print — they are in the prices.
@@ -1642,5 +1673,139 @@ function AcceptEstimateDialog({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/**
+ * THE CLIENT'S LINK, AND WHAT CAME BACK ON IT (E5c, ADR 0085).
+ *
+ * A builder's view of an anonymous surface, so it says things the visitor's
+ * page never does: which links are open, which expired, which was revoked,
+ * and — the one that matters — **who accepted, when, and at what price**.
+ *
+ * The acceptance is evidence, not a state change: the estimate is still
+ * accepted by an owner, onto a contract, from the button above. This block is
+ * the reason to press it.
+ */
+function ClientLinks({
+  projectId,
+  estimateId,
+  shares,
+  canEdit,
+  symbol,
+}: {
+  projectId: string;
+  estimateId: string;
+  shares: ShareView[];
+  canEdit: boolean;
+  symbol: string | null;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const signed = shares.find((s) => s.signedAt !== null);
+  const live = shares.filter((s) => s.standing === "open" || s.standing === "signed");
+
+  const copy = (url: string, note: string) => {
+    void navigator.clipboard.writeText(url).then(
+      () => toast.success(note),
+      // A clipboard a browser refused is not a failure worth hiding.
+      () => toast.message("Copy this link", { description: url }),
+    );
+  };
+
+  const make = () => {
+    startTransition(async () => {
+      const res = await createEstimateShareAction({ projectId, id: estimateId });
+      if ("error" in res) return void toast.error(res.error);
+      copy(res.url, "Link made and copied — paste it into your email");
+      router.refresh();
+    });
+  };
+
+  const reveal = (shareId: string) => {
+    startTransition(async () => {
+      const res = await revealEstimateShareTokenAction({ projectId, id: estimateId, shareId });
+      if ("error" in res) return void toast.error(res.error);
+      copy(res.url, "Link copied");
+    });
+  };
+
+  const revoke = (shareId: string) => {
+    startTransition(async () => {
+      const res = await revokeEstimateShareAction({ projectId, id: estimateId, shareId });
+      if ("error" in res) return void toast.error(res.error);
+      toast.success("Link revoked");
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="mb-3 rounded-lg border border-border/60 p-3">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">The client&apos;s link</h3>
+        {canEdit && (
+          <Button variant="outline" size="sm" onClick={make} disabled={pending}>
+            <Link2 className="mr-1.5 size-4" /> {live.length > 0 ? "New link" : "Make a link"}
+          </Button>
+        )}
+      </div>
+
+      {signed && signed.signedAt && (
+        <div className="mb-2 rounded-md border border-emerald-600/30 bg-emerald-600/10 p-2.5 text-sm">
+          <span className="font-medium">{signed.signedName}</span> accepted this proposal on{" "}
+          {new Date(signed.signedAt).toLocaleDateString()}
+          {signed.signedTotalCents !== null && <> at {fmt(signed.signedTotalCents, symbol)}</>}.
+          <p className="mt-1 text-xs text-muted-foreground">
+            That is their acceptance on the record. The estimate itself is still accepted here, onto the contract it
+            priced — the button below.
+          </p>
+        </div>
+      )}
+
+      {shares.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Send the client a link instead of an attachment: they read the proposal on any device and accept it by
+          typing their name. The link stops working on{" "}
+          <span className="tabular-nums">the date the proposal is valid until</span>, or in thirty days when there is
+          no date.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {shares.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant={s.standing === "signed" ? "default" : s.standing === "open" ? "secondary" : "outline"}>
+                {SHARE_STANDING_LABELS[s.standing]}
+              </Badge>
+              <span className="text-muted-foreground">
+                {s.viewCount === 0
+                  ? "Not opened yet"
+                  : `Opened ${s.viewCount} ${s.viewCount === 1 ? "time" : "times"}`}
+                {s.lastViewedAt && `, last on ${new Date(s.lastViewedAt).toLocaleDateString()}`}
+              </span>
+              <span className="text-muted-foreground">
+                · {s.standing === "expired" ? "Expired" : "Expires"} {new Date(s.expiresAt).toLocaleDateString()}
+              </span>
+              {canEdit && s.standing === "open" && (
+                <>
+                  <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => reveal(s.id)} disabled={pending}>
+                    <Copy className="mr-1 size-3.5" /> Copy
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-6 px-2" onClick={() => revoke(s.id)} disabled={pending}>
+                    Revoke
+                  </Button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {shares.some((s) => s.standing === "superseded") && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          A link reading <span className="font-medium">Estimate changed</span> was accepted and then the estimate was
+          edited, so it has stopped working — it cannot go on showing a document that is not the one that was signed.
+          The acceptance stands, at the version it names. Make a new link for the revision.
+        </p>
+      )}
+    </div>
   );
 }

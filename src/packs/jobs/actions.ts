@@ -28,6 +28,13 @@ import {
 } from "./field-ops";
 import { postWip, saveWipEstimate, unpostWip } from "./wip-ops";
 import {
+  createEstimateShare,
+  listEstimateShares,
+  revealShareToken,
+  revokeEstimateShare,
+
+} from "./estimate-shares";
+import {
   askForPartyDocument,
   askForWaiver,
   createLienWaiver,
@@ -4355,4 +4362,123 @@ export async function setBondingLineAction(input: unknown) {
   } catch (err) {
     return toResult(err);
   }
+}
+
+// ------------------------------------------------------- the client's link (E5c, ADR 0085)
+
+/**
+ * A tokenised copy of the proposal the client can open and accept on.
+ *
+ * Minting one is member work, like writing the estimate it belongs to — a
+ * proposal that cannot be sent until an owner is free is a proposal that goes
+ * out as an email attachment instead. **The token is returned exactly once,
+ * here**, and afterwards only through `revealEstimateShareTokenAction`, which
+ * audits the reveal; nothing logs it, and nothing stores it in the clear.
+ */
+const shareEstimateSchema = z.object({
+  projectId: z.string().uuid(),
+  id: z.string().uuid(),
+});
+
+export async function createEstimateShareAction(input: unknown) {
+  const parsed = shareEstimateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, id } = parsed.data;
+  try {
+    const ctx = await gate();
+    const token = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const made = await createEstimateShare(tx, ctx, id);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate_share.created",
+          targetType: "estimate",
+          targetId: id,
+          // The share's id, never the token.
+          meta: { projectId, shareId: made.share.id, expiresAt: made.share.expiresAt.toISOString() },
+        });
+        return made.token;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    return { ok: true as const, url: shareUrl(token) };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The link again, for a builder re-sending it. An audited reveal, as document shares are. */
+export async function revealEstimateShareTokenAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), id: z.string().uuid(), shareId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, id, shareId } = parsed.data;
+  try {
+    const ctx = await gate();
+    const token = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const rows = await listEstimateShares(tx, ctx.tenantId, id, 0);
+        const found = rows.find((r) => r.share.id === shareId);
+        if (!found) throw new JobsError("NOT_FOUND", "link not found");
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate_share.revealed",
+          targetType: "estimate",
+          targetId: id,
+          meta: { projectId, shareId },
+        });
+        return revealShareToken(found.share);
+      },
+      { role: ctx.role },
+    );
+    return { ok: true as const, url: shareUrl(token) };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Take a link back. The signature on it, if there is one, stays: it happened. */
+export async function revokeEstimateShareAction(input: unknown) {
+  const parsed = z
+    .object({ projectId: z.string().uuid(), id: z.string().uuid(), shareId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  const { projectId, id, shareId } = parsed.data;
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await revokeEstimateShare(tx, ctx, shareId);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "estimate_share.revoked",
+          targetType: "estimate",
+          targetId: id,
+          meta: { projectId, shareId },
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * The address a client opens. Absolute, because it is pasted into an email —
+ * a root-relative path would be useless the moment it left the app.
+ */
+function shareUrl(token: string): string {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  return `${base}/proposal/${token}`;
 }

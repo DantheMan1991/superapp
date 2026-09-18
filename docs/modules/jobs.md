@@ -83,17 +83,20 @@ Noto TTFs that `next.config.ts` already traces by hand — never came near it.
 Not in the program, and deliberately: a takeoff from the drawings (shipped as
 9c), and anything that would make an estimate post to the books.
 
-### IF YOU ARE REDESIGNING THE ESTIMATE SCREEN, READ THIS FIRST
+### IF YOU ARE CHANGING THE ESTIMATE SCREEN, READ THIS FIRST
 
-`components/estimate-editor.tsx` is one file carrying seven slices of
-behaviour, and **most of it is invisible in a screenshot**. A visual redesign
-that rebuilds the table or the toolbar will silently drop these unless it
-means not to. Nothing in the pure test suite catches any of the first three —
-they are DOM contracts, and the only proof is a click.
+`components/estimate-editor.tsx` is one file carrying eight slices of
+behaviour, and **most of it is invisible in a screenshot**. A change that
+rebuilds the grid or the toolbar will silently drop these unless it means not
+to. Nothing in the pure test suite catches any of the first three — they are
+DOM contracts, and the only proof is a click.
+
+The 2a redesign (E8, below) kept every row of this table. Three of them moved,
+and the table now says where to.
 
 | Must survive | Where it comes from | How it breaks silently |
 | --- | --- | --- |
-| **`data-cell="<column>"` on all seven editable inputs, and `data-group` on the line row** | E3c | The keyboard grid finds "the row below" by querying the DOM in document order. A rebuilt table without these attributes leaves ↓/↑/Enter doing nothing, and every test still passes. |
+| **`data-cell="<column>"` on all seven editable inputs, and `data-group` on the line row** | E3c | The keyboard grid finds "the row below" by querying the DOM in document order. A rebuilt grid without these attributes leaves ↓/↑/Enter doing nothing, and every test still passes. The lookup is `[data-row][data-group]` since E8 — it was `tr[data-group]` while the grid was a `<table>`. **Three of the seven cells (`markup`, `unitPrice`, `clientDescription`) are in the row's EXPANSION now**, so ↓ in those columns walks the open rows; `cellsIn` also skips a cell the layout has hidden at this width, or ↓ would focus something nobody can see. |
 | **↓/↑ move within a COLUMN; Enter moves down and MAKES A ROW past the last; Tab, ← and → are untouched** | E3c | A grid that claims Tab traps keyboard users; one that claims ←/→ makes a typo mid-price unfixable. |
 | **The entry bar is ONE field: Enter commits and the cursor stays; a sentence it cannot read is refused, never guessed** | ADR 0081 | A line that quietly landed at $0.00 on a bid you sent is the expensive kind of mistake. |
 | **Tab takes the remembered price, and ONLY while a hint is showing** | E4a | Otherwise Tab stops moving focus. |
@@ -103,15 +106,116 @@ they are DOM contracts, and the only proof is a click.
 | **A fixed item price is the number that prints** | ADR 0079, the founder's decision 1 | At ten and ten, $8,400 inside the spread prints $10,164. |
 | **`Add an assembly` is hidden until the library has one** | ADR 0086 | An empty drop-down teaches people the feature is not for them. |
 | **Ctrl+D duplicates the focused row** | ADR 0081 | Most takeoff lines are near-copies of the one above. |
-| **The row buttons' `sr-only` labels need a positioned ancestor** | E3a's bug | `sr-only` is `position: absolute`; with no positioned wrapper its containing block is the PAGE and it drags the whole page sideways. The `relative` on the `overflow-x-auto` wrapper is load-bearing, and the symptom looks like a wide table. |
+| **The row buttons' `sr-only` labels need a positioned ancestor** | E3a's bug | `sr-only` is `position: absolute`; with no positioned wrapper its containing block is the PAGE and it drags the whole page sideways. The `relative` on the Lines card is load-bearing, and the symptom looks like a wide table. |
+| **The Lines card is NOT `overflow-hidden`, and neither is the panel below `md`** | E8 | A clipping ancestor becomes the containing block for `position: sticky` and silently disables every pinned row inside it. The card rounds its header's and its entry bar's corners instead of clipping; the panel takes `md:overflow-hidden` so that on a phone, where it scrolls with the page, the page is still what the rows stick to. |
+| **Every direct child of the work column is `flex-none`** | E8 | Otherwise the flex items shrink to the constrained height, the column never overflows, and the grid is clipped with no way to scroll to it. |
+| **A row's number is its ADDRESS, and the order it hands back is always visual order** | E8, ADR 0087 | `sort_order` is the payload's order. A reorder that returned "the same array, two elements swapped" would put the screen and the database out of step the first time a line crossed into another item — and it would only show up in the client's proposal. |
 
-The screen also hosts three blocks a redesign should keep whole rather than
-re-plumb: the **proposal block** (format, presentation, the three texts), **the
-client's link** (E5c), and the **six figures** row. And `npm run print:probe`
-guards the proposal document, not this screen — there is no equivalent for the
-editor, so a redesign has to be clicked.
+The screen also hosts two blocks to keep whole rather than re-plumb: the
+**proposal block** (format, presentation, the four texts) and **the client's
+link** (E5c). The **six figures** row is gone — the rail's *How the total is
+built* replaced it, and added the `Markup` step it never showed. And
+`npm run print:probe` guards the proposal document, not this screen — there is
+no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
+
+### 2026-09-18 — The estimate screen, redesigned: a working panel with a rail, and every row has a number (`claude/estimate-redesign-handoff`, ADR 0087)
+
+Slice **E8**, from a Claude Design handoff (option **2a**, "Quiet sections,
+with a rail") plus the founder's own addition: *"every line and group should be
+able to be reordered. drag and drop style. Also number them."* No schema, no
+action, no payload change — one component, its page shell, and a new pure core.
+
+**THE SCREEN IS NOW A PANEL WITH ITS OWN HEIGHT.** `md:h-[calc(100dvh-420px)]`,
+`min-h-[640px]`, `flex flex-col`, and two independently scrolling columns
+inside it. The complaint it answers is what an eighty-line estimate did to the
+old one: the header, the column headers and the entry bar all scrolled away,
+and the one number that matters was a small cell in a six-up strip.
+
+- **The header bar** carries the estimate's title, its status chip, its
+  coordinates, the margin, **what the client pays at 26px** — the largest thing
+  on the screen — the save state, `Save`, and `Send to client`. That last one
+  saves first, then makes the link or takes you to the one already open.
+- **The rail (252px)** is *where the money is* — a segmented bar and a jump
+  list, one row per item, with the item's share of the total — *how the total
+  is built*, which adds the **`Markup`** step the old footer never showed, and
+  *when the client says yes*, the three owner verbs. **The six-up totals strip
+  is gone**; this replaced it.
+- **The work column** pins its furniture: the Lines card header, the column
+  header, the item header you are inside, and the entry bar at the floor.
+- **Five visible columns instead of ten.** Item, cost code, markup, unit price
+  and the client's wording moved into each row's own expansion, and every input
+  in a row is borderless until you touch it. The screen used to show about
+  ninety outlined boxes at rest.
+- **Details, Rates, Proposal and By cost code are folded sections**, each
+  saying what is inside it when shut (`EST-2 · 2 Sep → 2 Oct`, `12 · 8 · 6%`,
+  `Brochure · by item · opened 3 times`). The choice is remembered per estimate
+  in `localStorage` — through `useSyncExternalStore`, not an effect. **By cost
+  code moved INSIDE the editor**: a sibling panel under a fixed-height one is
+  stranded off the bottom of the screen.
+- **The page shell lost its `PageHeader`, its back link and its `Badge`.** The
+  job layout already draws a header with the `?` help button; the editor now
+  carries the estimate's own identity, and the second copy was chrome.
+
+**EVERY ROW HAS A NUMBER AND THE NUMBER IS AN ADDRESS (ADR 0087).** Items are
+`1`, `2`, `3`; a line is `2.1`; the loose pile is the section after the last
+item, so `4.1` on a three-item estimate is how a line comes OUT of an item with
+the keyboard alone. Type `3` over a line's `2.1` and it moves to third in its
+own item; type `3.2` and it joins item 3. Grips drag the same rows, `arrayMove`
+semantics, a `DragOverlay` chip and a rule across the row it will land on.
+`estimate-order.ts` holds the arithmetic, pure, with 26 tests — the screen
+cannot prove this, because a row that lands one place off looks exactly like a
+row that landed, and the wrong `sort_order` reaches the client's proposal.
+
+`sort_order` was already the payload's order, so **autosave persists a reorder
+through the writer that was already there** — driven on Hilltop Farm's
+`Oak Row, as drawn` and confirmed through a reload.
+
+**Every draft row gained a stable `key`** — its id, or a local one. React's
+key, dnd-kit's id and "the row Ctrl+D copies" were the row's **index** before
+this, and an index is the one thing reordering changes.
+
+**THE LAYOUT ANSWERS TO THE WORK COLUMN, NOT THE WINDOW** (`@container/work`).
+This is the bug that made the first build unusable and it is worth the
+sentence: a 1,196px window with the nav open and a 252px rail leaves the grid
+about 560px, and seven fixed tracks in 560px collapse `minmax(0,1fr)` to
+**zero** — the description column *disappears* rather than the table scrolling
+sideways, and `docW <= winW` says the page is fine. Breakpoints on the window
+cannot see the rail or the nav. Measured: `@sm` three columns and a two-line
+row (a phone), `@3xl` six, `@5xl` seven.
+
+Four more that were found by clicking and would not have been found any other
+way:
+
+- **`sticky` pushes an element DOWN to its `top` even unscrolled.** `top-24`
+  (96px) with a 60px pinned stack floated every item header 36px below its own
+  first row, with the rows showing through the gap. The stack is measured: 60
+  narrow, 93 wide.
+- **A scroll container's PADDING is not covered by anything pinned inside it.**
+  `pt-5` on the work column was a 20px window above the card header that rows
+  scrolled up through. Both ends are spacers now.
+- **`sticky bottom-0` is measured against the padding box too**, so `pb-6`
+  parked the entry bar 24px off the floor.
+- **The Lines card must not be `overflow-hidden`, and neither may the panel
+  below `md`** — a clipping ancestor becomes the containing block for every
+  sticky row inside it.
+
+**Nothing was dropped.** The contract table above lists what had to survive and
+all of it did, including the seven `data-cell` attributes (three now in the row
+expansion), `data-group` (found by `[data-row][data-group]` now the grid is not
+a `<table>`), ↑↓/Enter/Ctrl+D, the entry bar's grammar and its Tab-takes-the-
+price, derived `unsaved`, `Show it` only inside an item, a fixed item price
+printing, assemblies hidden until the library has one, and the `relative` the
+`sr-only` labels need. Two things were deliberately restored rather than lost:
+**the item select**, which the handoff removed from the row without putting it
+anywhere, is in the row expansion as `In item`; and **the loose section now
+renders whenever the estimate has an item**, because the header bar's old
+*Add line* button became per-section *Add a line here* rows and there would
+otherwise be no way to add a loose line — or to drop one out of an item.
+
+`cellsIn` now skips a cell the layout has hidden at this width, or ↓ would
+focus something nobody can see.
 
 ### 2026-09-18 — Assemblies: an item, saved, and dropped at another size (`claude/estimate-assemblies`, ADR 0086)
 

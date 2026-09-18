@@ -1,35 +1,28 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
-import { formatMoney } from "@/lib/money";
-import { PageHeader } from "@/components/app/page-header";
-import { Panel } from "@/components/app/panel";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
 import { getEstimate, priceBookRows, unitsInUse } from "@/packs/jobs/estimating-ops";
 import { listEstimateShares } from "@/packs/jobs/estimate-shares";
 import { listAssemblies } from "@/packs/jobs/assembly-ops";
 import { formatQuantity } from "@/packs/jobs/billing-math";
 import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
-import { ESTIMATE_STATUS_LABELS, PACK, isEstimateStatus, slugLabel } from "@/packs/jobs/vocabulary";
+import { PACK, slugLabel } from "@/packs/jobs/vocabulary";
 
 /**
- * One estimate: the editor, and beside it what the lines add up to by cost
- * code — the budget it would write, the price it would schedule.
+ * One estimate. The editor is the WHOLE page: it owns its height, its own
+ * header — the estimate's title, its status, what the client pays and the one
+ * button that sends it — and its own internal scrolling, so nothing a builder
+ * needs to keep their place scrolls away on an estimate of eighty lines (E8).
+ *
+ * That is why there is no `<PageHeader>` here and no second panel underneath:
+ * the job's own header, vitals and tabs are the layout's, and a sibling panel
+ * below a fixed-height one would be stranded off the bottom of the screen. The
+ * by-cost-code table moved INSIDE the editor as its fourth folded section.
  */
 export default async function EstimatePage({ params }: { params: Promise<{ id: string; estimateId: string }> }) {
   const { id, estimateId } = await params;
@@ -91,124 +84,90 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
     status: c.status,
   }));
 
+  /** The estimate's coordinates for its own header: the job, and the agreement it prices. */
+  const projectLabel = [
+    `${projectWord} ${project.number}`,
+    project.address,
+    row.contract
+      ? `${slugLabel(row.contract.kind)}${row.contract.name ? ` · ${row.contract.name}` : ""}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="space-y-4">
-      <Link
-        href={`/dashboard/m/jobs/${project.id}/estimates`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" /> {project.number} · {project.name} · estimates
-      </Link>
-      <PageHeader
-        title={`${row.estimate.number}${row.estimate.title ? ` · ${row.estimate.title}` : ""}`}
-        description={`${projectWord} ${project.number}${
-          row.contract ? ` · ${slugLabel(row.contract.kind)}${row.contract.name ? ` · ${row.contract.name}` : ""}` : ""
-        }`}
-        actions={
-          <Badge variant={row.estimate.status === "accepted" ? "default" : "secondary"}>
-            {isEstimateStatus(row.estimate.status) ? ESTIMATE_STATUS_LABELS[row.estimate.status] : row.estimate.status}
-          </Badge>
-        }
-      />
-
-      <Panel className="p-5">
-        <EstimateEditor
-          key={`${row.estimate.id}:${row.estimate.version}`}
-          projectId={project.id}
-          prices={data.prices}
-          assemblies={assemblyOptions}
-          shares={data.shares.map((s) => ({
-            id: s.share.id,
-            standing: s.standing,
-            expiresAt: s.share.expiresAt.toISOString(),
-            viewCount: s.share.viewCount,
-            lastViewedAt: s.share.lastViewedAt?.toISOString() ?? null,
-            signedName: s.share.signedName,
-            signedAt: s.share.signedAt?.toISOString() ?? null,
-            signedTotalCents: s.share.signedTotalCents,
-          }))}
-          estimate={{
-            id: row.estimate.id,
-            version: row.estimate.version,
-            number: row.estimate.number,
-            title: row.estimate.title,
-            status: row.estimate.status,
-            sentOn: row.estimate.sentOn,
-            decidedOn: row.estimate.decidedOn,
-            validUntil: row.estimate.validUntil,
-            markupPpm: row.estimate.markupPpm,
-            overheadPpm: row.estimate.overheadPpm,
-            profitPpm: row.estimate.profitPpm,
-            notes: row.estimate.notes,
-            presentation: row.estimate.presentation,
-            scope: row.estimate.scope,
-            exclusions: row.estimate.exclusions,
-            terms: row.estimate.terms,
-            contractId: row.estimate.contractId,
-            showCodeNumbers: row.estimate.showCodeNumbers,
-            format: row.estimate.format,
-            letter: row.estimate.letter,
-            groups: row.groups.map((g) => ({
-              id: g.id,
-              name: g.name,
-              clientNote: g.clientNote,
-              priceMode: g.priceMode,
-              fixedPriceCents: g.fixedPriceCents,
-            })),
-            lines: row.lines.map((l) => ({
-              id: l.id,
-              groupId: l.groupId,
-              costCodeId: l.costCodeId,
-              description: l.description,
-              clientDescription: l.clientDescription,
-              clientVisible: l.clientVisible,
-              unit: l.unit,
-              quantityThousandths: l.quantityThousandths,
-              unitCostCents: l.unitCostCents,
-              markupPpm: l.markupPpm,
-              unitPriceCents: l.unitPriceCents,
-            })),
-          }}
-          units={data.units}
-          codes={codeOptions}
-          contracts={contractOptions}
-          canEdit={canEdit}
-          isOwner={isOwner}
-          symbol={symbol}
-        />
-      </Panel>
-
-      {row.byCode.length > 0 && (
-        <Panel className="p-5">
-          <h2 className="mb-1 font-heading text-sm font-medium tracking-heading">By cost code</h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            What the saved lines add up to per code: the cost is what <em>Use as budget</em> writes, the price is
-            what the job cost report will compare it with once the job is billed.
-          </p>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cost code</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {row.byCode.map((c) => (
-                  <TableRow key={c.costCodeId ?? "none"}>
-                    <TableCell className={c.costCodeId ? "" : "text-muted-foreground"}>
-                      {c.codeLabel ?? "No cost code"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMoney(c.costCents, symbol)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMoney(c.priceCents, symbol)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Panel>
-      )}
-    </div>
+    <EstimateEditor
+      key={`${row.estimate.id}:${row.estimate.version}`}
+      projectId={project.id}
+      projectLabel={projectLabel}
+      prices={data.prices}
+      assemblies={assemblyOptions}
+      // What the SAVED lines add up to per code, worked out on the server. It is
+      // the editor's fourth folded section now, not a panel underneath it.
+      byCode={row.byCode.map((c) => ({
+        costCodeId: c.costCodeId,
+        codeLabel: c.codeLabel,
+        costCents: c.costCents,
+        priceCents: c.priceCents,
+      }))}
+      shares={data.shares.map((s) => ({
+        id: s.share.id,
+        standing: s.standing,
+        expiresAt: s.share.expiresAt.toISOString(),
+        viewCount: s.share.viewCount,
+        lastViewedAt: s.share.lastViewedAt?.toISOString() ?? null,
+        signedName: s.share.signedName,
+        signedAt: s.share.signedAt?.toISOString() ?? null,
+        signedTotalCents: s.share.signedTotalCents,
+      }))}
+      estimate={{
+        id: row.estimate.id,
+        version: row.estimate.version,
+        number: row.estimate.number,
+        title: row.estimate.title,
+        status: row.estimate.status,
+        sentOn: row.estimate.sentOn,
+        decidedOn: row.estimate.decidedOn,
+        validUntil: row.estimate.validUntil,
+        markupPpm: row.estimate.markupPpm,
+        overheadPpm: row.estimate.overheadPpm,
+        profitPpm: row.estimate.profitPpm,
+        notes: row.estimate.notes,
+        presentation: row.estimate.presentation,
+        scope: row.estimate.scope,
+        exclusions: row.estimate.exclusions,
+        terms: row.estimate.terms,
+        contractId: row.estimate.contractId,
+        showCodeNumbers: row.estimate.showCodeNumbers,
+        format: row.estimate.format,
+        letter: row.estimate.letter,
+        groups: row.groups.map((g) => ({
+          id: g.id,
+          name: g.name,
+          clientNote: g.clientNote,
+          priceMode: g.priceMode,
+          fixedPriceCents: g.fixedPriceCents,
+        })),
+        lines: row.lines.map((l) => ({
+          id: l.id,
+          groupId: l.groupId,
+          costCodeId: l.costCodeId,
+          description: l.description,
+          clientDescription: l.clientDescription,
+          clientVisible: l.clientVisible,
+          unit: l.unit,
+          quantityThousandths: l.quantityThousandths,
+          unitCostCents: l.unitCostCents,
+          markupPpm: l.markupPpm,
+          unitPriceCents: l.unitPriceCents,
+        })),
+      }}
+      units={data.units}
+      codes={codeOptions}
+      contracts={contractOptions}
+      canEdit={canEdit}
+      isOwner={isOwner}
+      symbol={symbol}
+    />
   );
 }

@@ -197,6 +197,45 @@ table.paper > tbody > tr, table.paper > tfoot > tr { break-inside: auto; }
             border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
 .print-me:hover { background: #374151; }
 
+/**
+ * ON A PHONE THE PAPER DOES NOT FIT, SO THE SCREEN BECOMES READABLE INSTEAD.
+ * Screen only — print is untouched below, and the Print button still gives the
+ * exact sheet. See the file header for why this overrides the grey-desk rule.
+ */
+@media screen and (max-width: 8.9in) {
+  html, body { background: #fff; }
+  .sheet { width: auto; min-height: 0; margin: 0; padding: 22px 18px 40px; box-shadow: none; }
+  /* A 9in column and a 74pt watermark are furniture for paper, not for a hand. */
+  .cover { min-height: 0; display: block; }
+  .cover .foot { display: block; }
+  .cover .foot > div { text-align: left !important; margin-top: 18px; }
+  .watermark { display: none; }
+  h1 { font-size: ${brochure ? "24pt" : "16pt"}; max-width: none; }
+  h2 { font-size: ${brochure ? "14pt" : "10pt"}; }
+  p, .items .name { max-width: none; }
+  .facts { gap: 14px 24px; }
+  .parties, .sigs { display: block; }
+  .parties > div + div, .sigs > div + div { margin-top: 18px; }
+  /* Four columns in 375px: the description wraps and the numbers stay whole. */
+  table { font-size: 9.5pt; }
+  th { font-size: 6.5pt; letter-spacing: .06em; }
+  td { padding: 6px 0; }
+  th.n, td.n { padding-left: 6px; }
+  .row-note, .small { font-size: 8pt; }
+  /* In the flow at the end: there are no pages to run a footer along. */
+  .footer { position: static; left: auto; right: auto; bottom: auto; margin-top: 28px; }
+  .accept { width: auto; margin: 0 0 32px; padding: 20px 18px 24px; box-shadow: none;
+            border-top: 1px solid var(--rule); }
+  .accept input { max-width: none; font-size: 16pt; }
+  /**
+   * IN THE FLOW, ABOVE THE DOCUMENT. Floating top-right is exactly where the
+   * amounts are right-aligned, so on a narrow screen the one control on the
+   * page would sit on top of the money. Static costs a scroll to reach and
+   * covers nothing.
+   */
+  .print-me { position: static; display: block; margin: 14px 18px 0; padding: 7px 14px; }
+}
+
 @media print {
   html, body { background: #fff; }
   .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }

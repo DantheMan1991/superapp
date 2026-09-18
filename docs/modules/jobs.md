@@ -85,6 +85,48 @@ Not in the program, and deliberately: a takeoff from the drawings (shipped as
 
 ## Build log
 
+### 2026-09-18 — The proposal on a phone: the paper does not fit, so the screen reflows (`claude/proposal-on-a-phone`)
+
+**A defect in something already shipped and already in front of clients.** E5c
+gives a client a link; a client opens a link on a phone. At 375px the document
+showed **`Oak Row, as`** — the cover title cut mid-word — and then a screen of
+white. No logo, no business name, no price, nothing. That was the first
+impression of a $190,537.53 proposal, and it was recorded as a known gap
+rather than fixed, which was the wrong call: the gap had a user the moment
+E5c merged.
+
+**ADR 0083 said the screen is print on a grey desk, and that was written when
+only the team saw the screen.** Now a client does, on a phone, where the paper
+does not fit. So below `8.9in` the sheet reflows: full width, no shadow, no
+9in cover column, the facts and signature blocks stacked, the running footer
+back in the flow (there are no pages to run it along), the 74pt watermark
+hidden, and the price table at 9.5pt so four columns fit in 375px with the
+descriptions wrapping and the figures whole. **The Print button goes static
+above the document**, because floating top-right is exactly where the amounts
+are right-aligned — the one control on the page would otherwise sit on the
+money.
+
+**THE PAPER IS UNTOUCHED, AND THAT IS MEASURED, NOT ASSERTED.** Every rule is
+inside `@media screen and (max-width: 8.9in)`, and `npm run print:probe`
+printed **65,515 bytes across 7 pages with clearances 37/42/40/577/42/40/577 —
+byte-identical to the run before the change**. Desktop is untouched too:
+816px sheet, grey background, shadow, fixed button, watermark, all still there
+at 959px.
+
+A test now pins the two words that carry all of it: **`screen and`**. Without
+them the narrow rules would apply to PRINT, and a proposal would go out on
+paper with no sheet, no watermark and a footer in the flow — a failure the
+page probe cannot see, because it would be measuring a document that had
+already stopped being one.
+
+**DRIVEN at 375px in the pane**, on a real client link: the cover reads
+`Oak Row, as drawn` whole, with the logo, `Hilltop Farm`, the tagline, the
+job, the site; the letter reads without pinching; *THE PRICE* gives every row
+with `190,537.53` bold at the foot; *Allowances* reads; the signature blocks
+stack; and the accept card is full width with a 16pt field (which is also what
+stops iOS zooming on focus) and a full-size button. **`scrollWidth` equals
+`clientWidth` at 375 — no sideways scroll anywhere in the document.**
+
 ### 2026-09-18 — The keyboard grid: down a column, and Enter makes another row (`claude/estimate-grid-keys`)
 
 Slice **E3c**, the last named piece of the founder's speed ask. No migration,
@@ -4838,14 +4880,9 @@ ordering only bites when two new tables reference each other in one file.
   builds, and all four ops behind it were driven by script, but the buttons
   need a Clerk session the browser pane has not had since 2026-09-09. The
   CLIENT's half is fully driven, which is the half that carries the risk.
-- **The document is letter-width on a phone, and the client link is what will
-  care.** At 375px the sheet is 8.5in wide, so it scrolls sideways and the
-  cover's title is cut off — by design (ADR 0083: the screen is print on a grey
-  desk), and with no user today, because only the team opens it, from the
-  estimate's page. **E5c gives it one**: a client following a link on their
-  phone. Whether a small screen should fit the whole sheet the way a PDF reader
-  does (a viewport width of the page rather than the device) is E5c's call to
-  make and verify, not a guess to slip in beside the printing.
+- ~~**The document is letter-width on a phone.**~~ — **closed 2026-09-18**: on
+  a narrow screen the sheet reflows and the paper is untouched. See the build
+  log entry; the answer was NOT the PDF-reader scaling this note guessed at.
 - **The brochure's PDF needs one variable set before it works in production.**
   `CHROMIUM_PACK_URL`, pointing at a hosted `chromium-v*-pack.x64.tar`
   ([the runbook](../runbooks/printing-html-documents.md)). Unset, a brochure's

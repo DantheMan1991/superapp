@@ -346,6 +346,7 @@ Hiding a line keeps it off the *list*; it is not a way to make money untraceable
 
 - **The link ends when your offer ends.** It stops working on the date in `Valid until`, or in thirty days when you have not set one. There is no such thing as a link that lives forever.
 - {button:Copy|ghost} copies an open link again, for when you need to re-send it. {button:Revoke|ghost} kills it immediately — use it the moment a proposal goes to the wrong address.
+- **It reads properly on a phone**, which is where most clients will open it: the page reflows to the screen instead of making them pinch and scroll sideways. What they print is still the full page, whatever they read it on.
 - **Anyone holding the link can open it**, so treat it like the proposal itself: it is private because the address is unguessable, not because it asks who you are. Send it to the person, not to a public channel.
 - **Accepting on the link does not accept the estimate here.** It records that they accepted — their name, the date, and the price they were looking at — and that is what you then act on with {button:Accept|primary} below, which is where you name the contract it becomes. Nothing about your books moves because a client pressed a button.
 - **You are not notified yet.** The acceptance shows here, on the estimate, and you will see it next time you open it. Checking back is on you for now.

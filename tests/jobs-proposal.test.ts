@@ -594,6 +594,30 @@ describe("the document as it prints", () => {
   it("has no backtick anywhere in the document", () => {
     expect(html()).not.toContain("`");
   });
+
+  /**
+   * ON A PHONE THE PAPER DOES NOT FIT, SO THE SCREEN REFLOWS — and the whole
+   * safety of that is the two words `screen and`. Without them the narrow
+   * rules would apply to PRINT, and a proposal would go out on paper with no
+   * sheet, no watermark and a footer in the flow. The print probe measures the
+   * page; this measures the one thing that would silently redirect it.
+   */
+  it("reflows for a narrow SCREEN only, never for paper", () => {
+    const out = html();
+    expect(out).toContain("@media screen and (max-width: 8.9in)");
+    // Everything the narrow block turns off is a thing paper needs.
+    const narrow = out.slice(
+      out.indexOf("@media screen and (max-width: 8.9in)"),
+      out.indexOf("@media print"),
+    );
+    expect(narrow).toContain(".watermark { display: none; }");
+    expect(narrow).toContain("position: static");
+    // And the print block still says what the paper is.
+    const paper = out.slice(out.indexOf("@media print"));
+    expect(paper).toContain(".band { height: 0.4in; }");
+    expect(paper).toContain(".footer { position: fixed");
+    expect(paper).toContain(".print-me, .accept { display: none; }");
+  });
 });
 
 describe("renderProposalPdf", () => {

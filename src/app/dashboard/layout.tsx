@@ -13,6 +13,7 @@ import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
 import { getIndustryProfile } from "@/industries";
 import { labelFor, pluralOf } from "@/lib/packs/resolve";
+import { packGroupLabel } from "@/lib/packs/group-label";
 import { labelsForTenant } from "@/lib/packs/tenant-context";
 import { LabelProvider } from "@/components/app/label-provider";
 import {
@@ -97,6 +98,9 @@ export default async function DashboardLayout({
   const coreItems = renderable
     .filter(({ module }) => module.category !== "pack")
     .map(toNavItem);
+  const packSlugs = renderable
+    .filter(({ module }) => module.category === "pack")
+    .map(({ module }) => module.id);
   const packItems = renderable
     .filter(({ module }) => module.category === "pack")
     .map(toNavItem);
@@ -105,6 +109,9 @@ export default async function DashboardLayout({
   // `general`, which is the absence of a profile rather than one of them, so
   // the lookup returning null is the ordinary case and not an error.
   const profile = getIndustryProfile(ctx.tenant.industry);
+  // Only while that one profile accounts for every pack that is on — see
+  // `packGroupLabel`, which is where the reasoning lives.
+  const packLabel = packGroupLabel(profile, packSlugs);
 
   const navGroups: NavGroup[] = [
     {
@@ -123,9 +130,7 @@ export default async function DashboardLayout({
     },
     // A tenant with nothing switched on should not see an empty caption.
     ...(coreItems.length > 0 ? [{ label: "Modules", items: coreItems }] : []),
-    ...(packItems.length > 0
-      ? [{ label: profile?.name ?? "Add-ons", items: packItems }]
-      : []),
+    ...(packItems.length > 0 ? [{ label: packLabel, items: packItems }] : []),
     {
       label: "Business",
       items: [

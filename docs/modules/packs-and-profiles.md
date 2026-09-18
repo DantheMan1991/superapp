@@ -9,6 +9,52 @@
 
 ## Build log
 
+### 2026-09-18 — A client may run two industries, and now both screens say so (`claude/profiles-tell-the-truth`)
+
+The founder, looking at his own rail: *"there is an issue with homestead modules
+showing up under the construction menu"* and *"I don't see how to install
+multiple industries."* Both are the same fact told badly. **Installing is
+additive and does not bind (ADR 0009)** — Hilltop Farm has been running all
+seven homestead packs AND construction's three since the day the jobs pack
+shipped. Nothing was broken except what the screens said about it.
+
+**`tenants.industry` is the VOCABULARY, not the installed list.** It holds one
+slug — the last profile installed — and it decides three things: the default
+words, the seed that gets applied, and (until now) the rail's caption. It has
+never been the record of what a client runs; `tenant_modules` is.
+
+**The rail's caption.** `profile?.name ?? "Add-ons"` put **Jobs** under the
+heading **Homestead Farm**. `packGroupLabel` (`src/lib/packs/group-label.ts`,
+seven tests) gives the profile the heading only while it accounts for every pack
+that is on, and falls back to **Industry tools** the moment one is from
+somewhere else — because no single industry is an honest heading for a set drawn
+from two. It is a pure function rather than a condition in the layout precisely
+because nothing about the page fails when it is wrong.
+
+**The console's card.** Now *Industry profiles*, plural, and it lists every
+profile with how much of it is already on — `Construction · All 3 packs on`,
+`Homestead Farm · All 7 packs on · supplies the words`, `Agency · Not
+installed`. That row is the answer to "what does this client run", and it is
+derived from `tenant_modules` rather than from the stamped slug, so a profile
+that is effectively installed says so even when it is not the one supplying the
+words. The picker reads *Install another profile*; the button says **Switch on
+the other 2** when some of a profile's packs are already on, and *Re-run
+install* only when they all are.
+
+**The one thing that genuinely cannot stack is the words**, and the card now
+says so before the button rather than after: labels are tenant-wide by a
+deliberate correction of 2026-08-15 (`zone` is `land`'s word that `livestock`
+also displays — a paddock is a paddock everywhere on a farm). Choosing a profile
+other than the one currently supplying them shows a warning naming both.
+
+Driven on Hilltop Farm: the rail reads `Industry tools`, the card reports both
+profiles fully on, and picking Construction raises the vocabulary warning.
+
+A JSX slip worth recording, because it survives `tsc`, lint and the build and
+only shows on screen: `{expr} word` at the end of a line lost its space and
+rendered *"Constructionbecomes"*. `{" "}` is the fix, and reading the rendered
+`textContent` is the only thing that catches it.
+
 ### 2026-09-14 — A pack registers a seed applier, and the third profile arrives (`claude/the-construction-profile`)
 
 The `construction` profile ([construction.md](construction.md)) is the first

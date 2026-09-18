@@ -390,13 +390,23 @@ export default async function TenantDetailPage({
             </CardContent>
           </Card>
 
+          {/*
+            A CLIENT MAY RUN MORE THAN ONE INDUSTRY, and this card used to deny
+            it. Installing is additive and does not bind (ADR 0009), so a farm
+            that also builds runs `homestead-farm`'s packs AND `jobs` — but the
+            card read "Installed: construction", the picker looked like a radio
+            button, and there was nowhere to see that the other profile's packs
+            were on. `tenants.industry` is ONE column and always was: it is the
+            VOCABULARY, not the list of what has been installed.
+          */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Industry profile</CardTitle>
+              <CardTitle className="text-base">Industry profiles</CardTitle>
               <CardDescription>
-                {tenant.industry === "general"
-                  ? "None installed. The client's packs, vocabulary and pack settings all come from a profile — without one they are on defaults."
-                  : `Installed: ${tenant.industry}.`}
+                Installing switches a profile&apos;s packs on and seeds its chart
+                and folders. <strong>It is additive</strong> — install as many
+                as the client needs. What it cannot stack is the WORDS: there is one vocabulary
+                per client, and the last profile installed supplies it.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -408,6 +418,10 @@ export default async function TenantDetailPage({
                   name: p.name,
                   description: p.description,
                   packs: p.packs,
+                  // What is ALREADY on of this profile's list, so a profile that
+                  // is effectively installed says so even when it is not the one
+                  // stamped on the tenant.
+                  packsOn: p.packs.filter((slug) => enabledBySlug.get(slug) === true),
                   seed: seedSummary(p),
                 }))}
               />

@@ -18,8 +18,8 @@ export interface ModuleDefinition {
   /**
    * How much width the module's pages want.
    *
-   * "standard" (the default) keeps the shell's centred max-w-6xl column, which
-   * is right for every reading-and-forms surface in the product. "full" hands
+   * "standard" (the default) keeps the shell's centred `max-w-content`
+   * column, which is right for every reading-and-forms surface in the product. "full" hands
    * the module the whole viewport, for the one shape that genuinely needs it:
    * a list beside a detail pane, where the clamp would waste half a monitor.
    *

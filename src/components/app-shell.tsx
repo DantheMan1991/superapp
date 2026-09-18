@@ -50,7 +50,7 @@ interface AppShellProps {
   navGroups: NavGroup[];
   /**
    * Path prefixes whose pages take the whole viewport instead of the centred
-   * max-w-6xl column.
+   * `max-w-content` column.
    *
    * Passed in rather than decided here: the layout knows which modules asked
    * for it (ModuleDefinition.layout), and the shell only needs to match the
@@ -337,7 +337,15 @@ export function AppShell({
           // owns its own chrome, down to the edges.
           children
         ) : (
-          <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          /*
+           * `max-w-content` is 100rem (ADR 0088). It was `max-w-6xl`, 72rem,
+           * which on a 3440px monitor spent two thirds of the screen on
+           * margin. The column still HAS a limit, because a table row that
+           * spans an ultrawide puts its first cell and its last a head-turn
+           * apart — and running text is capped far tighter than this, at
+           * `max-w-measure`, wherever it appears.
+           */
+          <div className="mx-auto w-full max-w-content px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
             {children}
           </div>
         )}

@@ -81,6 +81,21 @@
   /* Airbnb sets -0.18px at 20px, i.e. about -0.01em; -0.02em at our larger
      heading sizes lands in the same optical place. */
   --tracking-heading: -0.02em;
+  /*
+   * HOW WIDE A PAGE GETS, AND HOW WIDE A SENTENCE GETS — two different
+   * numbers, and conflating them is what made the app feel narrow on a big
+   * monitor (ADR 0088).
+   *
+   * `content` is the shell's column. It was 72rem, which spends two thirds of
+   * an ultrawide on margin; 100rem fills far more of the screen while keeping
+   * a table row short enough to read across without moving your head.
+   *
+   * `measure` is the line length of running text, and it does NOT grow with
+   * the column. A paragraph at 100rem is 200 characters a line and nobody
+   * reads it. Every explanatory sentence in the product is capped at this.
+   */
+  --container-content: 100rem;
+  --container-measure: 80ch;
 }
 
 /*
@@ -471,6 +486,31 @@
   .help-docked [data-app-main] {
     padding-right: 28rem;
   }
+}
+
+/*
+ * A SENTENCE DOES NOT GET WIDER JUST BECAUSE THE PAGE DID (ADR 0088).
+ *
+ * The column went from 72rem to 100rem so a table could use the monitor. Every
+ * explanatory paragraph in the product would have gone with it — 1,600px of
+ * 14px text is about 230 characters a line, and the eye loses the start of the
+ * next one. Here it is capped at `--container-measure`, 80ch, which SCALES
+ * WITH THE TYPE: a 12px note gets a narrower box and the same character count.
+ *
+ * A rule rather than 398 call sites. Those paragraphs are in 188 files and
+ * almost none of them wanted to be a layout row — the ones that did say
+ * `max-w-none`, which is also how any future one opts out. The second rule is
+ * for the "nothing here yet" placeholders: centred text in a capped box has to
+ * keep the box centred, or it sits off to the left of the panel it fills.
+ *
+ * Scoped to `[data-app-main]` so a dialog, the public site and the printed
+ * proposal are untouched; they set their own measure.
+ */
+[data-app-main] p {
+  max-width: var(--container-measure);
+}
+[data-app-main] p.text-center {
+  margin-inline: auto;
 }
 
 /*

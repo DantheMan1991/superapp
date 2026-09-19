@@ -272,20 +272,30 @@ It finds pages only. To find a customer, an invoice or a document, search inside
 
 ## How to show only one side of your business
 
-**`Working on`** sits at the top of the sidebar, under the search box. It only appears once you keep **more than one company and they are in different lines of business** — one business on one trade never sees it.
+**`Working on`** sits at the top of the sidebar, under the search box. It appears once there is more than one side of the business to pick from — a business with one way of working never sees it.
 
-1. Click it and pick a side: `Everything`, or one of your lines of business. Each one names the companies on it underneath, so `Construction · Shrock Premier` tells you exactly what you are picking.
+**A side can be a line of business or a {{enterprise|lower}}**, and you will often have both:
+
+- **A line of business** comes from your companies. Say which one each company is in under Companies, and its tools follow from that.
+- **A {{enterprise|lower}}** picks its own tools, under `Settings → {{enterprise|plural}}`. That is how two {{enterprise|plural|lower}} on **one company's books** can have different menus — a cabinet shop and an excavation crew are the same set of books and two different sets of tools.
+
+1. Click it and pick a side: `Everything`, one of your lines of business, or one of your {{enterprise|plural|lower}}. A line of business names the companies on it underneath, so `Construction · Shrock Premier` tells you exactly what you are picking.
 2. The menu redraws. The tools that side of the business does not use come off it.
 
 | What you pick | What happens |
 | --- | --- |
 | `Everything` | Every tool you have. This is where you start. |
-| A line of business | The tools that side uses. Accounting, Mail, Documents and the rest never move — every company has books and post. |
+| A line of business | The tools that side uses. |
+| A {{enterprise|lower}} | The tools you ticked for it. |
+
+Accounting, Mail, Documents, Scheduling, Work and Time **never move**, whichever side you are on — every part of the business has books and post.
 
 - **It changes the menu and nothing else.** Nothing is filtered, scoped or hidden: your books, your reports and every page are exactly as they were. An old link or a bookmark still opens whatever it always opened.
 - **It never hides the page you are on.** Open a job while you are set to the farm and the `Jobs` row comes back for as long as you are in there, so you always have a way out.
 - **It remembers, on this browser.** It is your own view, not a setting for the team — the person beside you can be working on the other side at the same moment.
 - **To say which side a company is on**, open Companies under Accounting, click {button:Edit|outline} and set `Line of business`. A company left on `Not said` is in every view.
+- **To give a {{enterprise|lower}} its own tools**, open `Settings → {{enterprise|plural}}`, click {button:Edit|ghost} and tick them under `Tools it works with`. Tick none and it is not offered as a side.
+- **Retire a {{enterprise|lower}} and it leaves the switcher**; if you were on it, you land back on `Everything` with every tool showing.
 
 ## How to switch to another business
 

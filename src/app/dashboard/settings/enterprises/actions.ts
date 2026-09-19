@@ -51,6 +51,12 @@ const enterpriseSchema = z.object({
   name: z.string().min(1).max(120),
   kind: z.string().min(1).max(63).optional(),
   notes: z.string().max(5000).optional(),
+  /**
+   * Pack slugs, shape-checked only. Not an enum: the registry changes with a
+   * deploy, and a slug nothing answers to is ignored by the rail rather than
+   * refused here — see `railContexts`.
+   */
+  packs: z.array(z.string().trim().max(64).regex(/^[a-z0-9-]+$/)).max(40).optional(),
 });
 
 export async function createEnterpriseAction(input: unknown) {

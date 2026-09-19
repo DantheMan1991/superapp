@@ -3,6 +3,8 @@ import { ChevronLeft, Sprout } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { listEnterprises } from "@/lib/enterprises";
+import { getActiveModules } from "@/lib/modules";
+import { getRenderableFeature } from "@/lib/features";
 import {
   ENTERPRISE_FALLBACK,
   ENTERPRISE_FALLBACK_PLURAL,
@@ -62,10 +64,22 @@ export default async function EnterprisesPage() {
 
   // Archived ones are shown too, at the bottom: the list is short, and the only
   // way to put one back is to be able to see it.
-  const { enterprises, pack } = await withTenant(
+  const { enterprises, pack, packChoices } = await withTenant(
     ctx.tenant.id,
     async (tx) => ({
       enterprises: await listEnterprises(tx, ctx.tenant.id),
+      /**
+       * WHICH TOOLS A DIVISION MAY BE SAID TO WORK WITH (ADR 0091).
+       *
+       * The Layer 2a packs this business has switched on, and only those: core
+       * tools are never offered, because every division posts to the same
+       * books. A pack that is off is not a choice, and one that is declared but
+       * unbuilt has no screen to put in a menu.
+       */
+      packChoices: (await getActiveModules(ctx.tenant.id))
+        .filter(({ module }) => module.category === "pack")
+        .filter(({ module }) => getRenderableFeature(module.id))
+        .map(({ module }) => ({ slug: module.id, name: module.name })),
       // `enterprises` is not a pack; the key is a namespace for the profile's
       // defaults. See the profile's own comment on it.
       pack: await packContext(
@@ -152,7 +166,9 @@ export default async function EnterprisesPage() {
                       kind: e.kind,
                       status: e.status,
                       notes: e.notes,
+                      packs: e.packs,
                     }}
+                    packChoices={packChoices}
                     word={word}
                     kinds={kinds}
                   />

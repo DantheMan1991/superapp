@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -51,6 +52,70 @@ export interface EnterpriseRow {
   kind: string;
   status: string;
   notes: string;
+  /** The Layer 2a packs this division works with (ADR 0091). */
+  packs: string[];
+}
+
+/** A pack that can be picked: the slug the rail matches, and its own name. */
+export interface PackChoice {
+  slug: string;
+  name: string;
+}
+
+/**
+ * WHICH TOOLS THIS DIVISION WORKS WITH (ADR 0091).
+ *
+ * Only the Layer 2a packs are listed — the core tools are not offered, because
+ * every division posts to the same books, raises the same documents and sends
+ * the same mail. There is nothing to decide about them.
+ *
+ * Tick none and this division is simply not offered as a side to switch to,
+ * which is the right default: a business with one way of working should never
+ * meet the idea.
+ */
+function PackField({
+  id,
+  choices,
+  picked,
+  onPicked,
+  word,
+}: {
+  id: string;
+  choices: PackChoice[];
+  picked: string[];
+  onPicked: (next: string[]) => void;
+  word: string;
+}) {
+  if (choices.length === 0) return null;
+  const toggle = (slug: string) =>
+    onPicked(
+      picked.includes(slug) ? picked.filter((s) => s !== slug) : [...picked, slug],
+    );
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>Tools it works with</Label>
+      <div id={id} className="grid grid-cols-2 gap-1.5">
+        {choices.map((choice) => (
+          <label
+            key={choice.slug}
+            className="flex cursor-pointer items-center gap-2 text-sm"
+          >
+            <Checkbox
+              checked={picked.includes(choice.slug)}
+              onCheckedChange={() => toggle(choice.slug)}
+            />
+            {choice.name}
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Sets what is in the menu down the left while you are working on this{" "}
+        {word.toLowerCase()}. Accounting, Mail, Documents and the rest are always
+        there. Tick nothing and this {word.toLowerCase()} is not offered as a
+        side to switch to.
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -161,16 +226,19 @@ export function EnterpriseControls({
   enterprise,
   word,
   kinds,
+  packChoices,
 }: {
   enterprise: EnterpriseRow;
   word: string;
   kinds: string[];
+  packChoices: PackChoice[];
 }) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState(enterprise.kind);
   const [customKind, setCustomKind] = useState("");
+  const [packs, setPacks] = useState<string[]>(enterprise.packs);
   const [pending, startTransition] = useTransition();
   const archived = enterprise.status === "archived";
 
@@ -181,6 +249,7 @@ export function EnterpriseControls({
         name: String(formData.get("name") ?? ""),
         kind: kind === CUSTOM_KIND ? customKind.trim() || NO_KIND : kind,
         notes: String(formData.get("notes") ?? ""),
+        packs,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -270,6 +339,13 @@ export function EnterpriseControls({
                      the profile lists stays selectable, rather than being
                      silently changed on the next save. */
                   extra={enterprise.kind}
+                />
+                <PackField
+                  id={`packs-${enterprise.id}`}
+                  choices={packChoices}
+                  picked={packs}
+                  onPicked={setPacks}
+                  word={word}
                 />
                 <div className="grid gap-2">
                   <Label htmlFor={`notes-${enterprise.id}`}>Notes</Label>

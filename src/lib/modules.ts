@@ -5,6 +5,8 @@ import { withTenant, schema, type Tx } from "@/db";
 import type { Module, TenantModule } from "@/db/schema";
 import { deniedFor } from "@/lib/access/current";
 import { reaches } from "@/lib/access/can";
+import { areaForPath } from "@/lib/access/areas";
+import { headers } from "next/headers";
 
 export interface ActiveModule {
   module: Module;
@@ -80,7 +82,39 @@ export async function requireModuleEnabled(
   moduleId: string,
 ): Promise<void> {
   if (!(await isModuleEnabled(tenantId, moduleId))) notFound();
-  if (!reaches(await deniedFor(tenantId), moduleId)) notFound();
+  const denied = await deniedFor(tenantId);
+  if (!reaches(denied, moduleId)) notFound();
+  /**
+   * AND WHICH PART OF THE TOOL (ADR 0095), WITHOUT A LINE IN ANY OF THE PAGES.
+   *
+   * The proxy stamps `x-yosher-path` on every request it passes, from the
+   * request's own URL, overwriting anything a client sent (`src/proxy.ts`) —
+   * which is what makes it safe to read here. So the area is derived from where
+   * the caller actually is, and all 349 existing call sites gained the check
+   * the same way they gained the person check: by not being edited.
+   *
+   * **FOR A SERVER ACTION THE PATH IS THE SUBMITTING PAGE'S**, not the action's
+   * own. That is defence in depth rather than a boundary, and it is only ever
+   * stricter: it can refuse a caller who could not have loaded the page the
+   * action came from, and never admits one who could not. The boundary for
+   * writes remains the module gate and the role. See ADR 0095's open item.
+   */
+  const path = (await headers()).get("x-yosher-path") ?? "";
+  /**
+   * **IMPORTED AT CALL TIME, NOT AT MODULE LOAD, AND IT HAS TO BE.**
+   * `@/lib/features` merges the two registries, which import every module's and
+   * pack's `Component` — and those import this file for `requireModuleEnabled`.
+   * A static import here closes that loop, and `packRegistry` is `undefined`
+   * when `features.ts` initialises: five suites failed to load with "Cannot
+   * convert undefined or null to object" before this line was a dynamic import.
+   *
+   * Deferring to call time breaks the cycle without moving the area
+   * declarations away from the tools that own them, which is the whole point of
+   * declaring them there.
+   */
+  const { getFeature } = await import("@/lib/features");
+  const area = areaForPath(path, getFeature(moduleId)?.areas);
+  if (area && !reaches(denied, area)) notFound();
 }
 
 /**

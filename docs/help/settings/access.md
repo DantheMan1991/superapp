@@ -21,11 +21,19 @@ Everyone on your team reaches every tool you have switched on. That is the start
 
 1. {button:Add a level|primary}.
 2. **`Name`** — what the job is called. `Field crew`. Required, up to 60 characters, and different from your other levels.
-3. **`What they can open`** — a tick box for every tool you have switched on. **Everything starts ticked.** Untick what this job does not need.
+3. **`What they can open`** — a tick box for every tool you have switched on, and under each ticked tool, a box for each of its parts. **Everything starts ticked.** Untick what this job does not need.
 4. **`Notes`** — why it exists, for whoever inherits it. Staff never see this.
 5. {button:Add|primary}. It appears in the table.
 
-**Ticked means they can open it.** Untick `Reports` and people on that level do not get Reports: it is gone from the menu down their left, and if they type the address the page answers as if it were not there.
+**Ticked means they can open it.** Untick a tool and people on that level do not get it: gone from the menu down their left, and if they type the address the page answers as if it were not there.
+
+**Untick one part and they keep the rest of the tool.** This is the common case. Leave `Accounting` ticked and untick `Reports`, `Journal` and `Trial balance`, and somebody can still enter bills and code receipts — they just cannot open a report, in the tabs or by address.
+
+**The parts appear under a tool once it is ticked**, because parts of a tool somebody cannot open are not a choice. Unticking a tool takes its parts with it.
+
+**A tool's own front page always stays** while the tool is ticked, so they always land somewhere rather than on a page that says it does not exist.
+
+**Some tools have no parts** — Assets and Mail are one screen each — so for those it is the whole tool or nothing.
 
 **Overview, `What needs you`, Guides, their own hours and their own phone are always there.** They are not tools you switched on; they are how a person uses the product at all.
 

@@ -10,9 +10,11 @@ import { isNativeApp, launchPending } from "@/lib/native-app";
 import { LaunchOverlay } from "@/components/app/launch-overlay";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
-import { getRenderableFeature } from "@/lib/features";
+import { getFeature, getRenderableFeature } from "@/lib/features";
 import { deniedFor } from "@/lib/access/current";
-import { reaches } from "@/lib/access/can";
+import { moduleOf, reaches } from "@/lib/access/can";
+import { pathsOf } from "@/lib/access/areas";
+import { AccessProvider } from "@/components/app/access-provider";
 import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { schema, withTenant } from "@/db";
@@ -109,6 +111,27 @@ export default async function DashboardLayout({
   const renderable = active.filter(
     ({ module }) => getRenderableFeature(module.id) && reaches(denied, module.id),
   );
+
+  /**
+   * THE SECTION PATHS THIS PERSON MAY NOT OPEN (ADR 0095).
+   *
+   * Translated HERE, on the server, because turning `accounting:reports` back
+   * into a route needs the feature registry, which imports every module's
+   * `Component` and can never cross to the client. `CategoryStrip` then
+   * compares strings — see `AccessProvider`.
+   *
+   * Only the AREA keys: a denied whole tool is already gone from the rail, and
+   * its strip never renders.
+   */
+  const deniedPaths = denied
+    .filter((key) => moduleOf(key) !== key)
+    .flatMap((key) => {
+      const slug = moduleOf(key);
+      const area = getFeature(slug)?.areas?.find((a) => `${slug}:${a.key}` === key);
+      return area
+        ? pathsOf(area).map((path) => `/dashboard/m/${slug}/${path.replace(/^\/+/, "")}`)
+        : [];
+    });
   const toNavItem = ({ module }: (typeof renderable)[number]): NavItem => ({
     href: `/dashboard/m/${module.id}`,
     label: module.name,
@@ -294,7 +317,10 @@ export default async function DashboardLayout({
          * Only when accounting is on, because the page requires the module and
          * a rail row that redirects is worse than none.
          */
-        ...(accountingNav
+        // AND the area, not just the module (ADR 0095): Companies is a section
+        // of Accounting, so a level that takes it away has to take this row
+        // with it — or the rail offers a door onto a page that 404s.
+        ...(accountingNav && reaches(denied, "accounting:companies")
           ? [{ href: COMPANIES_HREF, label: "Companies", icon: "building" }]
           : []),
         /**
@@ -358,6 +384,7 @@ export default async function DashboardLayout({
         removing it. Whether a speech vendor is configured is a fact about the
         deployment, so the server answers it here once. */}
     <TellLauncher speechConfigured={isServerSpeechConfigured()} />
+    <AccessProvider deniedPaths={deniedPaths}>
     <AppShell
       contextLabel={ctx.tenant.name}
       navGroups={navGroups}
@@ -428,6 +455,7 @@ export default async function DashboardLayout({
         </FeedbackProvider>
       </LabelProvider>
     </AppShell>
+    </AccessProvider>
     </>
   );
 }

@@ -24,6 +24,20 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   },
   accounting: {
     slug: "accounting",
+    areas: [
+      { key: "receipts", name: "Inbox" },
+      { key: "banking", name: "Banking" },
+      { key: "sales", name: "Sales" },
+      { key: "purchases", name: "Purchases" },
+      { key: "accounts", name: "Chart of accounts" },
+      { key: "journal", name: "Journal" },
+      { key: "recurring", name: "Recurring" },
+      { key: "reports", name: "Reports" },
+      { key: "trial-balance", name: "Trial balance" },
+      { key: "opening", name: "Opening balances" },
+      { key: "close", name: "Close" },
+      { key: "companies", name: "Companies" },
+    ],
     name: "Accounting",
     icon: "calculator",
     /**
@@ -78,12 +92,31 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   },
   crm: {
     slug: "crm",
+    areas: [
+      { key: "records", name: "Records" },
+      { key: "deals", name: "Deals" },
+      { key: "tasks", name: "Tasks" },
+      { key: "pipelines", name: "Pipelines" },
+      { key: "automations", name: "Automations" },
+      { key: "fields", name: "Custom fields" },
+      { key: "duplicates", name: "Duplicates" },
+      { key: "reports", name: "Reports" },
+    ],
     name: "CRM",
     icon: "contact",
     Component: CrmModule,
   },
   documents: {
     slug: "documents",
+    areas: [
+      { key: "browse", name: "Browse" },
+      { key: "inbox", name: "Inbox" },
+      { key: "search", name: "Search" },
+      { key: "tags", name: "Tags" },
+      { key: "templates", name: "Templates" },
+      { key: "shares", name: "Shares" },
+      { key: "trash", name: "Trash" },
+    ],
     name: "Documents",
     icon: "folder",
     Component: DocumentsModule,
@@ -102,6 +135,9 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   // it, and nobody is sold it. Slice 4 flips the seed row.
   scheduling: {
     slug: "scheduling",
+    areas: [
+      { key: "calendars", name: "Calendars" },
+    ],
     name: "Scheduling",
     icon: "calendar",
     Component: SchedulingModule,
@@ -111,6 +147,9 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   // to try it, and nobody is sold it. Slice 4 flips the seed row.
   work: {
     slug: "work",
+    areas: [
+      { key: "lists", name: "Lists" },
+    ],
     name: "Work",
     icon: "check-square",
     Component: WorkModule,
@@ -121,6 +160,10 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   // domains slices make it a marketing tool rather than a settings page.
   marketing: {
     slug: "marketing",
+    areas: [
+      { key: "website", name: "Website" },
+      { key: "social", name: "Social" },
+    ],
     name: "Marketing",
     icon: "megaphone",
     // The page editor is a form beside a live preview; the rest of the module
@@ -136,6 +179,11 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   // `available`.
   time: {
     slug: "time",
+    areas: [
+      { key: "clock", name: "Clock" },
+      { key: "people", name: "People" },
+      { key: "pay", name: "Pay" },
+    ],
     name: "Time",
     icon: "clock",
     Component: TimeModule,

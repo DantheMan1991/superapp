@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { requireTenantOwner } from "@/lib/auth";
 import { withTenant, schema } from "@/db";
 import { getActiveModules } from "@/lib/modules";
-import { getRenderableFeature } from "@/lib/features";
+import { getFeature, getRenderableFeature } from "@/lib/features";
 import { listAccessLevels } from "@/lib/access/levels";
 import { moduleOf } from "@/lib/access/can";
 import { PageHeader } from "@/components/app/page-header";
@@ -61,7 +61,19 @@ export default async function AccessPage() {
    */
   const tools = active
     .filter(({ module }) => getRenderableFeature(module.id))
-    .map(({ module }) => ({ slug: module.id, name: module.name }));
+    .map(({ module }) => ({
+      slug: module.id,
+      name: module.name,
+      /**
+       * The parts of the tool, declared beside its own slug and icon
+       * (ADR 0095), so this screen never learns any tool's name. A tool with
+       * none is all-or-nothing, which is honest for a one-screen tool.
+       */
+      areas: (getFeature(module.id)?.areas ?? []).map((a) => ({
+        key: a.key,
+        name: a.name,
+      })),
+    }));
   const nameOf = new Map(tools.map((t) => [t.slug, t.name]));
 
   return (
@@ -94,8 +106,24 @@ export default async function AccessPage() {
               {levels.map((level) => {
                 // Only the whole-tool denials are named here; an area reads as
                 // its tool, and the dialog is where the detail belongs.
+                /**
+                 * NAMED BY TOOL, with a note when only some of a tool is gone.
+                 * "Accounting (some)" is the honest summary of a level that
+                 * keeps Purchases and loses Reports — and the dialog is where
+                 * the detail belongs, one tick box at a time.
+                 */
+                const wholeTools = new Set(
+                  level.denied.filter((k) => moduleOf(k) === k),
+                );
+                const partial = new Set(
+                  level.denied
+                    .filter((k) => moduleOf(k) !== k)
+                    .map(moduleOf)
+                    .filter((slug) => !wholeTools.has(slug)),
+                );
                 const off = [
-                  ...new Set(level.denied.map((k) => nameOf.get(moduleOf(k)) ?? moduleOf(k))),
+                  ...[...wholeTools].map((s) => nameOf.get(s) ?? s),
+                  ...[...partial].map((s) => `${nameOf.get(s) ?? s} (some)`),
                 ].sort();
                 return (
                   <TableRow key={level.id}>

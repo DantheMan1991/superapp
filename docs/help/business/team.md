@@ -30,7 +30,7 @@ Each person's row under `What people can reach` has a button showing where they 
 
 Two settings, and they are not the same kind of thing:
 
-**`Level`** — which screens they can open. Pick one of your levels, or `Every tool`. Make levels under `Settings` → **Access**; see the Access guide.
+**`Level`** — which screens they can open: whole tools, and parts of tools. Pick one of your levels, or `Every tool`. Make levels under `Settings` → **Access**; see the Access guide.
 
 **`Companies`** — which books they can see. Only appears once you keep more than one company. Tick the ones they work in; tick nothing and they see them all.
 

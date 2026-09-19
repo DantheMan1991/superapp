@@ -5,6 +5,10 @@
 > first — the whole design turns on one distinction and the file makes no sense
 > without it.
 
+**FOURTEEN TOOLS, SIXTY-ONE AREAS, AND 49 POLICIES.** Three slices, three
+ADRs: 0093 the levels and the module gate, 0094 the company scope in Postgres,
+0095 the parts of every tool.
+
 **THE DISTINCTION.** Which SCREENS somebody may open is a gate in application
 code. Which ROWS they may read is RLS. Reports, Journal, Trial balance and a
 bill's detail page all read the same `journal_lines`; the only difference is
@@ -13,6 +17,54 @@ which screen is asking, and Postgres has no concept of that. So areas are gated
 becomes theatre.
 
 ## Build log
+
+### 2026-09-19 — Every tool, not just accounting (`claude/tool-areas`, ADR 0095)
+
+The founder, correcting me: *"you said accounting areas after that, but it is
+much more than just accounting areas. every tool needs to have the ability to
+have features restricted."*
+
+Right, and it changes the SHAPE rather than the size. One accounting list would
+have made areas a thing core knows about; **a tool declaring its own** makes
+them a property of the tool. `AreaDefinition` sits on `ModuleDefinition` and
+`PackDefinition` beside the slug and the icon, filled in for all fourteen
+renderable tools **from the real route tree** under `src/app/dashboard/m/<slug>/`
+rather than from imagination — sixty-one areas.
+
+Not a central registry, because a central registry is a file somebody has to
+remember to edit, and this codebase has the cautionary tale: five packs shipped
+rendering a generic box because nobody added their key to the icon registry.
+
+**THE GATE READS THE STAMPED PATH, SO NO PAGE WAS EDITED.** `src/proxy.ts`
+stamps `x-yosher-path` on every request from the request's own URL, overwriting
+anything a client sent — which is what makes reading it safe.
+`requireModuleEnabled` derives the area and checks the same `reaches`. All 349
+call sites gained it the way they gained the person check: by not being touched.
+
+**THE MENU IS FILTERED IN `CategoryStrip`**, the one primitive eight nav strips
+render through. It is a client component holding only hrefs, and turning an href
+back into `accounting:reports` needs the feature registry — which imports every
+module's `Component`. So the server translates once in the layout and hands down
+finished route prefixes through `AccessProvider`; the client compares strings.
+Never the section you are standing in, the rule the rail already keeps.
+
+**A CIRCULAR IMPORT BIT IMMEDIATELY AND IS WORTH KNOWING ABOUT.**
+`@/lib/features` merges the registries, which import every module's `Component`,
+which import `src/lib/modules.ts`. A static import of `getFeature` there closed
+the loop: `packRegistry` was `undefined` when `features.ts` initialised and
+**five suites failed to LOAD** with *"Cannot convert undefined or null to
+object"*. `await import()` inside the already-async gate breaks it without
+moving the declarations away from the tools that own them.
+
+The tool's front door is never an area, so a level that takes every area away
+leaves a working overview rather than a tool whose only page 404s. And
+`Settings → Companies` now checks `accounting:companies`, since it is a section
+of Accounting.
+
+Driven with a temporary log in a real request, because the resolution is the one
+link no unit test covers: `/dashboard/m/accounting/reports` →
+`accounting:reports`, `/dashboard/m/accounting` → `null`,
+`/dashboard/m/jobs/warranty` → `jobs:warranty`.
 
 ### 2026-09-19 — The company scope, enforced by Postgres (`claude/companies-per-person`, ADR 0094)
 
@@ -153,6 +205,12 @@ workspace has one member and they are the owner — so it is certified by
   redirects). Returns `[]` for an owner, before any row is read.
 - `src/lib/access/levels.ts` — the single door onto the table. Takes the
   caller's `tx`; never opens a transaction and never reaches for `withSystem`.
+- `src/modules/types.ts` — `AreaDefinition`. A tool's parts are declared with
+  the tool, in `src/modules/index.ts` and `src/packs/index.ts`.
+- `src/lib/access/areas.ts` — **pure.** `areaForPath` turns a pathname into a
+  key, on segment boundaries so `report` cannot claim `reports`.
+- `src/components/app/access-provider.tsx` — the server hands the client
+  finished route prefixes; `CategoryStrip` filters on them.
 - `src/db/acting-user.ts` — who is making this request, resolved from `auth()`
   rather than passed, because 877 call sites cannot all remember.
 - `drizzle/0387_entity_scope_rls.sql` — the 49 policies and the three functions.
@@ -216,10 +274,17 @@ workspace has one member and they are the owner — so it is certified by
   LINES, so one journal entry can sit in Cabinet Shop and Excavation at once.
   The fork — reports only, records whose lines are all in one division, or pack
   records only — goes back to the founder with a real case in front of it.
-- **Areas inside a module are declared but unbuilt.** `reaches` and
-  `requireAreaReachable` take `accounting:reports` today and nothing calls them
-  with one. The founder's own example needs the area registry and the twelve
-  accounting keys, which is the second slice.
+- ~~**Areas inside a module are declared but unbuilt.**~~ — **done
+  2026-09-19**, ADR 0095, and for every tool rather than the twelve accounting
+  keys first imagined: fourteen tools, sixty-one areas.
+- **Server actions are not gated by area.** The gate derives the area from
+  `x-yosher-path`, and for an action that is the SUBMITTING PAGE's path, not the
+  action's own — so it is defence in depth for writes rather than a boundary. It
+  is only ever stricter (it can refuse somebody who could not have loaded the
+  page; it never admits somebody who could not), and the module gate plus the
+  role still apply. Doing it properly means each action naming its own area,
+  which is roughly 300 call sites: worth it for genuinely sensitive verbs, not
+  for all of them.
 - **No area declares `deniedByDefault` yet**, because nothing has needed the
   other direction. The field is described in `can.ts` and is not a type on
   anything until an area wants it.

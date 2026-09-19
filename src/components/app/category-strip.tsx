@@ -11,6 +11,7 @@ import {
 } from "react";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsDenied } from "@/components/app/access-provider";
 
 export interface CategoryItem {
   href: string;
@@ -50,11 +51,32 @@ interface CategoryStripProps {
  * something left to reveal.
  */
 export function CategoryStrip({
-  items,
+  items: allItems,
   trailing,
   className,
 }: CategoryStripProps) {
   const pathname = usePathname();
+  const isDenied = useIsDenied();
+  /**
+   * SECTIONS THIS PERSON MAY NOT OPEN ARE NOT DRAWN (ADR 0095).
+   *
+   * Filtering here rather than in each of the eight nav strips that render
+   * through this component means a section an owner took away is gone from
+   * every one of them, and a module built next year is covered by using the
+   * component everyone already uses.
+   *
+   * **BUT NEVER THE SECTION YOU ARE STANDING IN**, the rule the rail's own
+   * `hiddenHrefs` keeps for the same reason: a link from an email or a bookmark
+   * must not leave somebody on a page with no way back to its list. It cannot
+   * leak — the page itself has already refused or allowed this request
+   * server-side by the time the strip renders.
+   */
+  const items = allItems.filter(
+    (item) =>
+      !isDenied(item.href) ||
+      pathname === item.href ||
+      pathname.startsWith(item.href + "/"),
+  );
   const scroller = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
 

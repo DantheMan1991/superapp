@@ -12,8 +12,8 @@ import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getFeature, getRenderableFeature } from "@/lib/features";
 import { deniedFor } from "@/lib/access/current";
-import { moduleOf, reaches } from "@/lib/access/can";
-import { pathsOf } from "@/lib/access/areas";
+import { reaches } from "@/lib/access/can";
+import { deniedAreaPaths } from "@/lib/access/areas";
 import { AccessProvider } from "@/components/app/access-provider";
 import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
@@ -123,15 +123,7 @@ export default async function DashboardLayout({
    * Only the AREA keys: a denied whole tool is already gone from the rail, and
    * its strip never renders.
    */
-  const deniedPaths = denied
-    .filter((key) => moduleOf(key) !== key)
-    .flatMap((key) => {
-      const slug = moduleOf(key);
-      const area = getFeature(slug)?.areas?.find((a) => `${slug}:${a.key}` === key);
-      return area
-        ? pathsOf(area).map((path) => `/dashboard/m/${slug}/${path.replace(/^\/+/, "")}`)
-        : [];
-    });
+  const deniedPaths = deniedAreaPaths(denied, (slug) => getFeature(slug)?.areas);
   const toNavItem = ({ module }: (typeof renderable)[number]): NavItem => ({
     href: `/dashboard/m/${module.id}`,
     label: module.name,

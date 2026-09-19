@@ -2100,6 +2100,231 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, theirs[0].id)));
   });
 
+  it("cannot read or change another tenant's ESTIMATE OUTLINES; a step and a question hang off this tenant's rows; the name is unique per tenant; there is one default or none; a choice's options and its kind cannot disagree; and the whole tree goes together", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const o = await tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantA, name: "New build", isDefault: true })
+        .returning();
+      const s = await tx
+        .insert(schema.jobEstimateOutlineSteps)
+        .values({
+          tenantId: tenantA,
+          outlineId: o[0].id,
+          title: "Foundation",
+          costCode: "2000",
+          sortOrder: 10,
+        })
+        .returning();
+      const q = await tx
+        .insert(schema.jobEstimateOutlineQuestions)
+        .values({
+          tenantId: tenantA,
+          stepId: s[0].id,
+          prompt: "Block or poured?",
+          kind: "choice",
+          choices: ["Block", "Poured"],
+        })
+        .returning();
+      return { outlineId: o[0].id, stepId: s[0].id, questionId: q[0].id };
+    });
+
+    // Tenant B sees none of the three and changes none of them.
+    const seen = await asOtherTenant(async (tx) => ({
+      outlines: await tx
+        .select()
+        .from(schema.jobEstimateOutlines)
+        .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId)),
+      changed: await tx
+        .update(schema.jobEstimateOutlines)
+        .set({ name: "theirs" })
+        .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId))
+        .returning(),
+      steps: await tx
+        .select()
+        .from(schema.jobEstimateOutlineSteps)
+        .where(eq(schema.jobEstimateOutlineSteps.id, seeded.stepId)),
+      questions: await tx
+        .select()
+        .from(schema.jobEstimateOutlineQuestions)
+        .where(eq(schema.jobEstimateOutlineQuestions.id, seeded.questionId)),
+    }));
+    expect(seen.outlines).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(seen.steps).toEqual([]);
+    expect(seen.questions).toEqual([]);
+
+    /**
+     * **READABLE BY A MEMBER, although only an owner may write one.** The
+     * split is `requireWrite` in the ops, not a policy: an estimator being
+     * walked through an outline has to be able to read it, and RLS is
+     * row-level rather than verb-level.
+     */
+    const mine = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.jobEstimateOutlineQuestions)
+        .where(eq(schema.jobEstimateOutlineQuestions.id, seeded.questionId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].choices).toEqual(["Block", "Poured"]);
+
+    // The name is unique per tenant, and two businesses may both say "New build".
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateOutlines).values({ tenantId: tenantA, name: "New build" }),
+      ),
+    ).rejects.toThrow();
+    const theirs = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantB, name: "New build", isDefault: true })
+        .returning(),
+    );
+    expect(theirs).toHaveLength(1);
+
+    /**
+     * **ONE DEFAULT PER TENANT, OR NONE** — the partial unique index, not the
+     * application. Tenant B having its own default at the same time is the
+     * proof that the index is partial on the tenant and not global.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateOutlines)
+          .values({ tenantId: tenantA, name: "Remodel", isDefault: true }),
+      ),
+    ).rejects.toThrow();
+    const second = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantA, name: "Remodel" })
+        .returning(),
+    );
+    expect(second[0].isDefault).toBe(false);
+
+    // A step on another tenant's outline, and a question on another tenant's step.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateOutlineSteps)
+          .values({ tenantId: tenantA, outlineId: theirs[0].id, title: "x" }),
+      ),
+    ).rejects.toThrow();
+    const theirStep = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateOutlineSteps)
+        .values({ tenantId: tenantB, outlineId: theirs[0].id, title: "Theirs" })
+        .returning(),
+    );
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateOutlineQuestions)
+          .values({ tenantId: tenantA, stepId: theirStep[0].id, prompt: "x" }),
+      ),
+    ).rejects.toThrow();
+
+    // A blank name, a blank title and a blank prompt are none of them values.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateOutlines).values({ tenantId: tenantA, name: "  " }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateOutlineSteps)
+          .values({ tenantId: tenantA, outlineId: seeded.outlineId, title: " " }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateOutlineQuestions)
+          .values({ tenantId: tenantA, stepId: seeded.stepId, prompt: " " }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **OPTIONS BELONG TO A CHOICE AND TO NOTHING ELSE.** Each of these is a
+     * question the interview could not draw buttons for: a choice of one is a
+     * statement, options on a number are two answers to the same question,
+     * and a `choices` that is not an array is not a list of anything.
+     */
+    const badQuestions: Record<string, unknown>[] = [
+      { prompt: "One option", kind: "choice", choices: ["Only"] },
+      { prompt: "No options", kind: "choice", choices: [] },
+      { prompt: "Options on a number", kind: "number", choices: ["a", "b"] },
+      { prompt: "Options on a yes/no", kind: "yes_no", choices: ["Yes", "No"] },
+      { prompt: "Not a list", kind: "choice", choices: { a: 1 } },
+      { prompt: "A kind nothing knows", kind: "currency" },
+    ];
+    for (const bad of badQuestions) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .insert(schema.jobEstimateOutlineQuestions)
+            .values({
+              tenantId: tenantA,
+              stepId: seeded.stepId,
+              ...bad,
+            } as typeof schema.jobEstimateOutlineQuestions.$inferInsert),
+        ),
+        String(bad.prompt),
+      ).rejects.toThrow();
+    }
+    // And the kinds that carry no options are fine without them.
+    const plain = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateOutlineQuestions)
+        .values({ tenantId: tenantA, stepId: seeded.stepId, prompt: "How wide?", kind: "number", unit: "in" })
+        .returning(),
+    );
+    expect(plain[0].choices).toEqual([]);
+
+    // The questions go with the step, and the steps go with the outline.
+    await withSystem((tx) =>
+      tx
+        .delete(schema.jobEstimateOutlineSteps)
+        .where(eq(schema.jobEstimateOutlineSteps.id, seeded.stepId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobEstimateOutlineQuestions)
+          .where(eq(schema.jobEstimateOutlineQuestions.id, seeded.questionId)),
+      ),
+    ).toEqual([]);
+
+    await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateOutlineSteps)
+        .values({ tenantId: tenantA, outlineId: seeded.outlineId, title: "Goes with the outline" }),
+    );
+    await withSystem((tx) =>
+      tx
+        .delete(schema.jobEstimateOutlines)
+        .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobEstimateOutlineSteps)
+          .where(eq(schema.jobEstimateOutlineSteps.outlineId, seeded.outlineId)),
+      ),
+    ).toEqual([]);
+
+    await withSystem((tx) =>
+      tx.delete(schema.jobEstimateOutlines).where(eq(schema.jobEstimateOutlines.id, second[0].id)),
+    );
+    await withSystem((tx) =>
+      tx.delete(schema.jobEstimateOutlines).where(eq(schema.jobEstimateOutlines.id, theirs[0].id)),
+    );
+  });
+
   it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
     const seeded = await withSystem(async (tx) => {
       const e = await tx

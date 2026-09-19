@@ -20,6 +20,7 @@ import {
   toggleModule,
 } from "../../actions";
 import { operatorRefusal } from "@/lib/operator-guard";
+import { setEstimateInterviewGrantAction } from "@/packs/jobs/interview-settings";
 
 // `prospect` left with back-office slice 3: a business without a workspace is
 // a party in the operator's CRM, never a tenant row.
@@ -408,6 +409,61 @@ export function VocabularyEditor({
       >
         {pending ? "Saving…" : "Save vocabulary"}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * WHICH BUSINESSES HAVE THE ESTIMATE INTERVIEW (X1, ADR 0098).
+ *
+ * The layer over estimating is piloted with one client before it is anybody
+ * else's, and this is the grant. It is ours rather than theirs, which is why
+ * it lives in the console and not on the pack's settings screen: the client's
+ * own switch is a SECOND flag, and it only has an effect once this one is on.
+ *
+ * Granting turns it on for them straight away — a pilot that arrives
+ * invisible is a pilot nobody runs — and their owner may switch it off.
+ */
+export function EstimateInterviewGrant({
+  tenantId,
+  granted,
+  jobsEnabled,
+}: {
+  tenantId: string;
+  granted: boolean;
+  jobsEnabled: boolean;
+}) {
+  const [pending, startTransition] = useTransition();
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Walk an estimate</span>
+          <Badge variant="outline" className="text-xs">
+            in pilot
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {jobsEnabled
+            ? "Lets this business price a job by answering questions instead of typing lines. Their owner can switch it off; estimates are unaffected either way."
+            : "Needs Jobs switched on first."}
+        </p>
+      </div>
+      <Switch
+        checked={granted}
+        disabled={pending || !jobsEnabled}
+        aria-label="Grant the estimate interview"
+        onCheckedChange={(next) =>
+          startTransition(async () => {
+            const res = await setEstimateInterviewGrantAction({
+              tenantId,
+              granted: next,
+            });
+            if ("error" in res) toast.error(res.error);
+            else toast.success(next ? "Granted" : "Withdrawn");
+          })
+        }
+      />
     </div>
   );
 }

@@ -20,6 +20,7 @@ import {
   TenantStatusBadge,
 } from "@/components/status-badge";
 import {
+  EstimateInterviewGrant,
   ModuleToggle,
   ProfileInstaller,
   TenantStatusSelect,
@@ -48,6 +49,7 @@ import { getLedgerIntegrity } from "@/modules/accounting/core";
 import { formatCents } from "@/modules/accounting/lib/money";
 import { loadRetainerView } from "@/lib/retainer";
 import { operatorRefusal } from "@/lib/operator-guard";
+import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import {
   formatMinutesAsHours,
   todayInRetainerTz,
@@ -175,6 +177,10 @@ export default async function TenantDetailPage({
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
   );
+
+  /** The `jobs` pack's own config, for the features granted one at a time. */
+  const jobsConfig = tenantMods.find((tm) => tm.moduleId === "jobs")?.config;
+  const jobsEnabled = enabledBySlug.get("jobs") ?? false;
 
   /**
    * What this client can actually rename.
@@ -389,6 +395,21 @@ export default async function TenantDetailPage({
               })}
             </CardContent>
           </Card>
+
+          {jobsEnabled && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Features in pilot</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <EstimateInterviewGrant
+                  tenantId={tenant.id}
+                  granted={interviewGateFrom(jobsConfig).granted}
+                  jobsEnabled={jobsEnabled}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/*
             A CLIENT MAY RUN MORE THAN ONE INDUSTRY, and this card used to deny

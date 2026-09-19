@@ -270,6 +270,23 @@ sentence happened together.
 
 It finds pages only. To find a customer, an invoice or a document, search inside the tool that holds it.
 
+## How to show only one side of your business
+
+**`Working on`** sits at the top of the sidebar, under the search box. It only appears once you keep **more than one company and they are in different lines of business** — one business on one trade never sees it.
+
+1. Click it and pick a side: `Everything`, or one of your lines of business. Each one names the companies on it underneath, so `Construction · Shrock Premier` tells you exactly what you are picking.
+2. The menu redraws. The tools that side of the business does not use come off it.
+
+| What you pick | What happens |
+| --- | --- |
+| `Everything` | Every tool you have. This is where you start. |
+| A line of business | The tools that side uses. Accounting, Mail, Documents and the rest never move — every company has books and post. |
+
+- **It changes the menu and nothing else.** Nothing is filtered, scoped or hidden: your books, your reports and every page are exactly as they were. An old link or a bookmark still opens whatever it always opened.
+- **It never hides the page you are on.** Open a job while you are set to the farm and the `Jobs` row comes back for as long as you are in there, so you always have a way out.
+- **It remembers, on this browser.** It is your own view, not a setting for the team — the person beside you can be working on the other side at the same moment.
+- **To say which side a company is on**, open Companies under Accounting, click {button:Edit|outline} and set `Line of business`. A company left on `Not said` is in every view.
+
 ## How to switch to another business
 
 1. Click the business switcher at the bottom of the sidebar.

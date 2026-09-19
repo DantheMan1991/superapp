@@ -395,6 +395,13 @@ export async function updateEntity(
     name?: string;
     legalName?: string;
     isActive?: boolean;
+    /**
+     * The line of business this company is in (ADR 0090) — an industry profile
+     * slug, or "" to unsay it. A RAIL PREFERENCE and nothing else: no query
+     * filters on it and no report reads it, so it is validated for shape here
+     * and its meaning lives entirely in `lib/packs/rail-context.ts`.
+     */
+    industry?: string;
   },
 ): Promise<Entity> {
   requireOwnerRole(ctx);
@@ -420,6 +427,12 @@ export async function updateEntity(
       name: input.name === undefined ? entity.name : cleanName(input.name),
       legalName: input.legalName?.trim() ?? entity.legalName,
       isActive: input.isActive ?? entity.isActive,
+      industry:
+        input.industry === undefined
+          ? entity.industry
+          : input.industry.trim() === ""
+            ? null
+            : input.industry.trim(),
       updatedAt: new Date(),
     })
     .where(

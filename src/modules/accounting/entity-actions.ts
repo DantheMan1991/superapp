@@ -93,6 +93,13 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   legalName: z.string().trim().max(200).optional(),
   isActive: z.boolean().optional(),
+  /**
+   * An industry profile slug, or "" for "not said". Not an enum: a profile is
+   * a manifest in code and the list changes with a deploy, so the shape is
+   * checked here and a slug nothing answers to reads as unsaid when the rail
+   * looks it up (`railContexts`).
+   */
+  industry: z.string().trim().max(64).regex(/^[a-z0-9-]*$/).optional(),
 });
 
 export async function updateEntityAction(

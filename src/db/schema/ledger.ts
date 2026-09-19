@@ -345,6 +345,24 @@ export const entities = pgTable(
      * money already recorded or after `closed_through`.
      */
     booksStartOn: date("books_start_on", { mode: "string" }),
+    /**
+     * WHAT LINE OF BUSINESS THIS COMPANY IS IN — an industry profile slug, or
+     * null for "not said" (ADR 0090).
+     *
+     * **A VIEW, NOT A BOUNDARY.** It scopes NOTHING: no query filters on it, no
+     * policy reads it, and every module stays reachable from every company.
+     * Its one job is to let the rail offer "I am working on the building side"
+     * and drop the packs that side does not use — a builder who also farms was
+     * looking at seven farm rows all day.
+     *
+     * Per COMPANY rather than per tenant because that is how the question is
+     * actually asked: `tenants.industry` holds the one profile supplying the
+     * vocabulary, and a tenant may run two (ADR 0009's additive install). It is
+     * deliberately NOT a foreign key — an industry profile is a manifest in
+     * code (Layer 2b), not a row, and a slug whose profile was renamed should
+     * read as "not said" rather than break the books' table.
+     */
+    industry: text("industry"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

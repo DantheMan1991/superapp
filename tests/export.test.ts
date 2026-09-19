@@ -52,6 +52,9 @@ function minimalBooksData(): BooksData {
         // The period lock lives here since ADR 0010 slice 4.
         closedThrough: "2026-06-30",
         booksStartOn: "2026-01-01",
+        // Which line of business it is in (ADR 0090) — a rail preference, and
+        // nothing an export has any business carrying.
+        industry: null,
         createdAt: new Date(), updatedAt: new Date(),
       },
     ],

@@ -4,6 +4,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
+import { listIndustryProfiles } from "@/industries";
 import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import {
@@ -113,6 +114,17 @@ export default async function CompaniesPage() {
 
   const countOf = new Map(entryCounts.map((r) => [r.entityId, r.n]));
   const isOwner = ctx.role === "owner";
+  /**
+   * WHICH LINES OF BUSINESS THERE ARE TO CHOOSE FROM (ADR 0090).
+   *
+   * Every profile, not only the one stamped on the tenant: installing is
+   * additive and a client may run two, which is the whole reason a company
+   * needs to say which one it works in. The control renders only above one.
+   */
+  const installedProfiles = listIndustryProfiles().map((p) => ({
+    slug: p.slug,
+    name: p.name,
+  }));
 
   return (
     <div className="space-y-6">
@@ -247,6 +259,8 @@ export default async function CompaniesPage() {
                         entityId={e.id}
                         name={e.name}
                         legalName={e.legalName}
+                        industry={e.industry ?? ""}
+                        profiles={installedProfiles}
                       />
                       {!e.isDefault && e.isActive && (
                         <MakeDefaultButton entityId={e.id} name={e.name} />

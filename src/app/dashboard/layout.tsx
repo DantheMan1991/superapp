@@ -11,9 +11,18 @@ import { LaunchOverlay } from "@/components/app/launch-overlay";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
-import { getIndustryProfile } from "@/industries";
+import { eq } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { schema, withTenant } from "@/db";
+import { getIndustryProfile, listIndustryProfiles } from "@/industries";
 import { labelFor, pluralOf } from "@/lib/packs/resolve";
 import { packGroupLabel } from "@/lib/packs/group-label";
+import {
+  RAIL_CONTEXT_COOKIE,
+  hiddenPacks,
+  railContexts,
+  resolveContext,
+} from "@/lib/packs/rail-context";
 import { labelsForTenant } from "@/lib/packs/tenant-context";
 import { LabelProvider } from "@/components/app/label-provider";
 import {
@@ -112,6 +121,41 @@ export default async function DashboardLayout({
   // Only while that one profile accounts for every pack that is on — see
   // `packGroupLabel`, which is where the reasoning lives.
   const packLabel = packGroupLabel(profile, packSlugs);
+
+  /**
+   * WHICH SIDE OF THE BUSINESS THE RAIL IS SHOWING (ADR 0090).
+   *
+   * A view and nothing else: it puts rows away, it scopes no query and reads no
+   * policy, and accounting's company picker is deliberately untouched — a link
+   * to a list has to mean the same thing to everybody who opens it.
+   *
+   * The companies are read here rather than in a module because the rail is
+   * Layer 0 and `entities` is the books' own table, which every tenant has.
+   * Nothing below two industries: `railContexts` returns an empty list and the
+   * control does not render.
+   */
+  const companies = await withTenant(
+    ctx.tenant.id,
+    (tx) =>
+      tx
+        .select({ name: schema.entities.name, industry: schema.entities.industry })
+        .from(schema.entities)
+        .where(eq(schema.entities.tenantId, ctx.tenant.id)),
+    { role: ctx.role },
+  );
+  const profileViews = listIndustryProfiles().map((p) => ({
+    slug: p.slug,
+    name: p.name,
+    packs: p.packs,
+  }));
+  const contexts = railContexts(companies, profileViews);
+  const activeContext = resolveContext(
+    (await cookies()).get(RAIL_CONTEXT_COOKIE)?.value,
+    contexts,
+  );
+  const hiddenHrefs = hiddenPacks(activeContext, packSlugs, contexts, profileViews).map(
+    (slug) => `/dashboard/m/${slug}`,
+  );
 
   const navGroups: NavGroup[] = [
     {
@@ -223,6 +267,9 @@ export default async function DashboardLayout({
     <AppShell
       contextLabel={ctx.tenant.name}
       navGroups={navGroups}
+      railContexts={contexts}
+      activeRailContext={activeContext}
+      hiddenHrefs={hiddenHrefs}
       fullWidthPathPrefixes={fullWidthPathPrefixes}
       footer={
         admin ? (

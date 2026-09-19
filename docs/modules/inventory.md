@@ -33,6 +33,56 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-09-19 — Feed issued to a named lot is relieved twice (`claude/feed-inventory-accounting-g7l5kz`)
+
+**No migration, no behaviour change. Two `it.fails` tests and this entry**, from
+a founder's question — *when I use feed, is it expensed or building up as work
+in progress?* — which turned out to have two answers that cannot both be right.
+
+**THE INVARIANT AT THE TOP OF `inventory-posting.test.ts` DOES NOT HOLD WHEN AN
+ISSUE NAMES A CONSUMING LOT.** `postMovement` reads the sign and the kind and
+nothing else, so an issue debits consumption and credits `1300` whatever it was
+issued FOR. `lotCarried` folds that same issue into the CONSUMING lot's
+`consumedCents`. One movement therefore takes the feed out of the ledger and
+puts it into the pen's carried cost at the same instant:
+
+```
+chicks $300      Dr 1300 300   Cr 2050 300
+crumble $700     Dr 1300 700   Cr 2050 700
+fed BY NAME      Dr 5000 700   Cr 1300 700
+                 ───────────────────────────
+                 1300 = 300 · the two lots carry 1,000
+pen processed    Dr 5000 1000  Cr 1300 1000   ← remainingCents, feed included
+                 ───────────────────────────
+                 1300 = −700, with the meat carried at 1,000
+```
+
+The second entry is what `production/ops.ts` stamps (`lotShareCents` against
+`remainingCents`), so a kill day relieves `1300` of money that left it when the
+feed was fed and drives the account to a credit balance. Same failure shape as
+*WILL NOT RELEASE COST THAT NEVER CAME IN*, reached through the consuming lot
+instead of through an unpriced receipt.
+
+**`recordFeedDraw` IS UNAFFECTED, which is why nothing caught it.** A shared
+feeder leaves `issued_to_lot_id` NULL on purpose and the pen's feed figure is
+allocated by head-days at read time, never stamped — so `consumedCents` stays
+zero and the ledger and the fold agree. Only `recordDirectFeed` (`livestock`
+slice 8f, a lone animal fed by name) reaches this, and only on `capitalise`.
+Every posting test before today fed nothing to anything.
+
+- **Three tests**, in a `feed issued to a named lot` block sharing one fixture.
+  One pins what it does today and passes; two are `it.fails` and state what
+  should hold — `1300` equal to what the lots carry, and no second relief. They
+  were driven as ordinary tests first, to check they fail on the assertion
+  rather than on a typo: `expected 30000 to be 100000` and
+  `expected -70000 to be +0`.
+- **`it.fails` rather than a passing characterisation.** A green test asserting
+  the broken numbers cements them; this way the suite stays honest about the
+  invariant and goes red the day somebody fixes the entry.
+
+**AND THE ENTRY IS ALSO THE WRONG ONE ON ACCRUAL**, which is the larger half
+and is deliberately NOT fixed here. See Open items.
+
 ### 2026-09-09 — Find it by scanning (`claude/find-it-by-scanning`)
 
 Slice 10, the last of the review. **Migration `0285_inventory_barcode`, applied
@@ -2389,6 +2439,37 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
+- **FEED FED TO A PEN IS EXPENSED WHEN IT IS FED, AND ON ACCRUAL THAT IS THE
+  WRONG MOMENT.** An issue debits consumption, so the cost of raising an animal
+  reaches the P&L months before the revenue it produced. Under accrual the
+  animals are inventory and what is spent raising them is part of what they
+  cost: feeding is a transformation — `Dr Inventory (the pen) / Cr Inventory
+  (the delivery)`, no P&L at all — and consumption is recognised when the meat
+  is SOLD. This pack already does exactly that for a production run, whose
+  output receipt credits the consumption account so *"a transformation must net
+  to nothing on the P&L"* (`postServiceAccrual`); feeding a pen is the same act
+  and is not modelled as one, because `postMovement` never looks at
+  `issued_to_lot_id`.
+  **This is the trap ADR 0013's own Notes predict** — *"prepaid expenses
+  amortised over a period, work in progress on a job, and capitalised labour
+  would each land in exactly the same trap"* — and a pen of broilers eating
+  crumble is work in progress. That ADR turned the TAX axis into a recorded
+  decision (`inventory_tax_treatments`, `consumed` by default) and left
+  `consumed` hardcoded on the BOOK axis, where the same reasoning says it should
+  not be an opinion the software holds either.
+  **Two things hang on this, and only one is a bug.** The double relief above is
+  a defect and has its two `it.fails` tests. Expensing at consumption on the
+  allocated path is internally consistent — it is direct expensing, which is a
+  legitimate farm TAX treatment and the wrong default for accrual BOOKS. Fixing
+  the first (`issued_to_lot_id` set → the counter-account is inventory, not
+  consumption) makes the invariant hold by construction and fixes the second for
+  the named path; the allocated path needs the head-days allocation to be
+  stamped before it can be capitalised at all.
+  **NOT A SLICE, AND NOT WITHOUT AN ACCOUNTANT.** It changes what every farm's
+  balance sheet says, it needs lower-of-cost-or-market to avoid carrying a pen
+  above what it is worth (ASC 905-330), and breeding stock must keep going out
+  through `postCapitalisation` rather than this path. Same sign-off ADR 0013 is
+  waiting on, and it belongs in that ADR's brief.
 - ~~**A recorded weight cannot be corrected.**~~ — **fixed the same day,
   2026-09-08.** `Correct weight` beside `Correct cost`, over
   `inventory_weight_adjustments`; the Baxter receipt itself had been put right

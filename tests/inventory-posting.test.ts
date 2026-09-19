@@ -396,6 +396,175 @@ d("inventory posting", () => {
       expect((await netOf(cogsAccountId)) - before).toBe(4_000);
     });
 
+    /**
+     * **THE INVARIANT AT THE TOP OF THIS FILE, BROKEN BY THE ONE MOVEMENT THAT
+     * NAMES A CONSUMING LOT.**
+     *
+     *     1300 Inventory  ==  the sum of what the lots carry
+     *
+     * `postMovement` relieves `1300` for an issue whatever it was issued FOR —
+     * it reads the sign and the kind and nothing else. `lotCarried` folds the
+     * same issue into the CONSUMING lot's `consumedCents` when one is named. So
+     * one movement takes the feed out of the ledger and puts it into the pen's
+     * carried cost at the same instant, and the two readings of the farm end up
+     * differing by exactly the feed.
+     *
+     * Then it is relieved twice. A production run pro-rates the pen out at
+     * `remainingCents` (`production/ops.ts`, `lotShareCents`), which now
+     * INCLUDES that feed — so taking the pen relieves `1300` of money that left
+     * it when the feed was fed, and the account reaches a credit balance. Same
+     * failure shape as "WILL NOT RELEASE COST THAT NEVER CAME IN" below,
+     * reached through the consuming lot instead of through an unpriced receipt.
+     *
+     * **`recordFeedDraw` IS UNAFFECTED, which is why this has gone unseen.** A
+     * shared feeder leaves `issued_to_lot_id` NULL on purpose, and the pen's
+     * feed figure is allocated by head-days at read time rather than stamped.
+     * Only `recordDirectFeed` — livestock slice 8f, a lone animal fed by name —
+     * gets here, and only on `capitalise`.
+     */
+    describe("feed issued to a named lot", () => {
+      /**
+       * $300 of chicks and $700 of crumble, the crumble fed to the pen BY NAME.
+       * Returns what the two lots put into `1300` and what they say they carry,
+       * so both tests below can ask the same question of the same farm week.
+       *
+       * Differentially, because this file shares one tenant: an absolute
+       * assertion about `1300` would be a claim about every test above it.
+       */
+      const feedAPenByName = async () => {
+        const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const birds = await asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: `Named-feed broilers ${stamp}`,
+            stockingUnit: "head",
+            itemKind: "livestock",
+          }),
+        );
+        const crumble = await newItem(`Named-feed crumble ${stamp}`);
+        const pen = await asOwner((tx) =>
+          createLot(tx, ownerCtx(), {
+            itemId: birds.id,
+            code: `NF-pen-${stamp}`,
+            source: "purchased",
+          }),
+        );
+        const delivery = await asOwner((tx) =>
+          createLot(tx, ownerCtx(), {
+            itemId: crumble.id,
+            code: `NF-feed-${stamp}`,
+            source: "purchased",
+          }),
+        );
+
+        const inventoryBefore = await netOf(inventoryAccountId);
+        const cogsBefore = await netOf(cogsAccountId);
+
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: birds.id,
+            lotId: pen.id,
+            quantity: 100,
+            costCents: 30_000,
+            occurredOn: "2026-04-01",
+          }),
+        );
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: crumble.id,
+            lotId: delivery.id,
+            quantity: 700,
+            costCents: 70_000,
+            occurredOn: "2026-04-02",
+          }),
+        );
+        await asOwner((tx) =>
+          issueStock(tx, ownerCtx(), {
+            itemId: crumble.id,
+            lotId: delivery.id,
+            quantity: 700,
+            // NAMED. The whole difference between this and a shared feeder.
+            issuedToLotId: pen.id,
+            occurredOn: "2026-04-03",
+            extensionSlug: "livestock",
+          }),
+        );
+
+        const inLedger = async () => (await netOf(inventoryAccountId)) - inventoryBefore;
+        const lotsCarry = async () => {
+          const carried = await asOwner((tx) =>
+            carriedCostByLot(tx, tenantId, [pen.id, delivery.id]),
+          );
+          return (
+            (carriedValue(carried.get(pen.id)!) ?? 0) +
+            (carriedValue(carried.get(delivery.id)!) ?? 0)
+          );
+        };
+        return { birds, pen, delivery, inventoryBefore, cogsBefore, inLedger, lotsCarry };
+      };
+
+      /**
+       * **WHAT IT DOES TODAY**, pinned so a fix has to come through here.
+       * Nothing asserted below is wrong on its own; they are the two halves
+       * that cannot both be true, which is what the next test says.
+       */
+      it("moves the feed to consumption AND onto the pen, at the same instant", async () => {
+        const farm = await feedAPenByName();
+
+        // The ledger: the feed is gone and its cost is consumed.
+        expect(await farm.inLedger()).toBe(30_000);
+        expect((await netOf(cogsAccountId)) - farm.cogsBefore).toBe(70_000);
+
+        // The sub-ledger: the delivery is empty and the pen is carrying it.
+        const carried = await asOwner((tx) =>
+          carriedCostByLot(tx, tenantId, [farm.pen.id, farm.delivery.id]),
+        );
+        expect(carriedValue(carried.get(farm.delivery.id)!)).toBe(0);
+        expect(carriedValue(carried.get(farm.pen.id)!)).toBe(100_000);
+      });
+
+      /**
+       * **`it.fails` IS THE BUG REPORT.** The assertion below is what this file
+       * exists to hold and it does not hold — `1300` says $300, the lots say
+       * $1,000. Marking it expected-to-fail keeps the suite honest about the
+       * invariant without going red on a defect nobody has fixed yet.
+       *
+       * **Delete the `.fails` when the entry is fixed**, at which point this is
+       * an ordinary test and the one above it needs its numbers re-pinned.
+       */
+      it.fails("keeps 1300 equal to what the lots carry", async () => {
+        const farm = await feedAPenByName();
+        expect(await farm.inLedger()).toBe(await farm.lotsCarry());
+      });
+
+      /**
+       * The consequence, and the one that reaches a balance sheet. Taking the
+       * whole pen stamps `lotShareCents(remainingCents, taken, standing)` with
+       * `taken === standing`, which is `remainingCents` — the chicks AND the
+       * feed. Written through `recordMovement` because that is the door
+       * `livestock`'s `removeHead` uses, so this needs no run to be the entry a
+       * run would make.
+       *
+       * Everything these two lots ever held has now left, so their contribution
+       * to `1300` should be nothing. It is MINUS $700: the feed was relieved
+       * when it was fed and again when the birds that ate it went.
+       */
+      it.fails("does not relieve 1300 twice for the same feed", async () => {
+        const farm = await feedAPenByName();
+        await asOwner((tx) =>
+          recordMovement(tx, ownerCtx(), {
+            itemId: farm.birds.id,
+            lotId: farm.pen.id,
+            quantity: -100,
+            movementKind: "issue",
+            costCents: 100_000,
+            occurredOn: "2026-04-04",
+            extensionSlug: "livestock",
+          }),
+        );
+        expect(await farm.inLedger()).toBe(0);
+      });
+    });
+
 it("WILL NOT RELEASE COST THAT NEVER CAME IN", async () => {
       /**
        * `averageCostRate` is the average of what arrived WITH A PRICE. Applying

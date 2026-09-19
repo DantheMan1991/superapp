@@ -9,6 +9,33 @@ import type { LabelDefinition } from "@/lib/packs/resolve";
  * Industry templates (Layer 2) will later contribute their own definitions —
  * same seam, different package.
  */
+/**
+ * A NAMED PART OF A TOOL, which an access level can take away (ADR 0095).
+ *
+ * Declared HERE, beside the tool's own slug and icon, rather than in one
+ * central list — so a pack built next year arrives with its areas, the way it
+ * already arrives with its icon. A central list is a file somebody has to
+ * remember to edit, and the icon registry is this codebase's own cautionary
+ * tale: five packs shipped showing a generic box because nobody did.
+ *
+ * **THE TOOL'S FRONT DOOR IS NEVER AN AREA.** `/dashboard/m/jobs` belongs to no
+ * area and is reachable by anybody who has the tool at all, so a level that
+ * removes every area leaves a working screen rather than a tool whose only page
+ * 404s.
+ */
+export interface AreaDefinition {
+  /** The key's suffix: `reports` in `accounting:reports`. Stable, never shown. */
+  key: string;
+  /** What the owner ticks, in their words. */
+  name: string;
+  /**
+   * Route segments under `/dashboard/m/<slug>/` this area owns. Defaults to
+   * `[key]`, which is the ordinary case. The LONGEST match wins, so a nested
+   * area can carve itself out of a broader one.
+   */
+  paths?: string[];
+}
+
 export interface ModuleDefinition {
   /** Must match modules.id in the DB. */
   slug: string;
@@ -35,6 +62,12 @@ export interface ModuleDefinition {
    * the module. Same prefix test the shell uses for `layout: "full"`.
    */
   fullWidthPaths?: string[];
+  /**
+   * The parts of this tool an access level may take away (ADR 0095). Absent, or
+   * empty, means the tool is all-or-nothing — which is honest for a one-screen
+   * tool like Assets, and for Mail, whose whole surface is one mailbox.
+   */
+  areas?: AreaDefinition[];
   /**
    * Words this feature lets a tenant rename. Declared so the admin screen can
    * LIST what is customisable instead of somebody having to grep for

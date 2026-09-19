@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/app/use-confirm";
-import { PackField, type PackChoice } from "@/components/app/pack-field";
+import { ToolAreaField, type ToolChoice } from "@/components/app/tool-area-field";
 import {
   createAccessLevelAction,
   deleteAccessLevelAction,
@@ -27,7 +27,7 @@ import {
 
 /**
  * THE SCREEN TICKS WHAT SOMEBODY **CAN** REACH. THE DATABASE STORES WHAT THEY
- * CANNOT (ADR 0093).
+ * CANNOT (ADR 0093, extended to areas by ADR 0095).
  *
  * The inversion is deliberate and it happens in exactly one place, here.
  *
@@ -35,24 +35,31 @@ import {
  *   *"Field crew gets Jobs, Time and Documents."* A screen that asked them to
  *   tick the things somebody may NOT do reads backwards and is mis-set on the
  *   first try.
- * - **Stored is denied**, because a tool built next year must be reachable by
- *   everybody rather than silently missing for every level in every workspace.
- *   The reasoning is in `src/lib/access/can.ts`.
+ * - **Stored is denied**, because a tool or a part built next year must be
+ *   reachable by everybody rather than silently missing for every level in
+ *   every workspace. The reasoning is in `src/lib/access/can.ts`.
  *
- * So `denied = every tool switched on today, minus what is ticked`. A tool this
- * business has switched OFF is in neither list and stays reachable if it comes
- * back — which is the same permissive direction, and the safe one for a menu.
+ * So `denied = every key on offer today, minus what is ticked`, where a key is
+ * a tool slug or `tool:area`. A tool this business has switched OFF is in
+ * neither list and stays reachable if it comes back — the same permissive
+ * direction, and the safe one for a menu.
  */
-function deniedFromTicked(tools: PackChoice[], ticked: string[]): string[] {
-  return tools.map((t) => t.slug).filter((slug) => !ticked.includes(slug));
+function allKeys(tools: ToolChoice[]): string[] {
+  return tools.flatMap((t) => [t.slug, ...t.areas.map((a) => `${t.slug}:${a.key}`)]);
 }
 
-function tickedFromDenied(tools: PackChoice[], denied: readonly string[]): string[] {
-  return tools.map((t) => t.slug).filter((slug) => !denied.includes(slug));
+function deniedFromTicked(tools: ToolChoice[], ticked: string[]): string[] {
+  return allKeys(tools).filter((key) => !ticked.includes(key));
 }
 
-const HINT =
-  "Tick what this level can open. Everything else is gone from their menu, and the page says it does not exist if they type the address. Overview, their own hours and their own phone are always there.";
+function tickedFromDenied(tools: ToolChoice[], denied: readonly string[]): string[] {
+  // A part is allowed only while its tool is: `reaches` says so, and the screen
+  // has to agree or a level reads as half-on.
+  return allKeys(tools).filter((key) => {
+    const tool = key.split(":")[0];
+    return !denied.includes(key) && !denied.includes(tool);
+  });
+}
 
 export interface AccessLevelRow {
   id: string;
@@ -63,12 +70,12 @@ export interface AccessLevelRow {
 }
 
 /** Make a level. */
-export function AccessLevelForm({ tools }: { tools: PackChoice[] }) {
+export function AccessLevelForm({ tools }: { tools: ToolChoice[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   // Everything ticked to start: a new level takes nothing away until its
   // author says so, which matches what the stored empty list means.
-  const [ticked, setTicked] = useState<string[]>(tools.map((t) => t.slug));
+  const [ticked, setTicked] = useState<string[]>(allKeys(tools));
   const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
@@ -84,7 +91,7 @@ export function AccessLevelForm({ tools }: { tools: PackChoice[] }) {
       }
       toast.success("Added");
       setOpen(false);
-      setTicked(tools.map((t) => t.slug));
+      setTicked(allKeys(tools));
       router.refresh();
     });
   }
@@ -97,7 +104,7 @@ export function AccessLevelForm({ tools }: { tools: PackChoice[] }) {
           Add a level
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <form action={submit}>
           <DialogHeader>
             <DialogTitle>Add a level</DialogTitle>
@@ -119,14 +126,7 @@ export function AccessLevelForm({ tools }: { tools: PackChoice[] }) {
                 placeholder="Field crew"
               />
             </div>
-            <PackField
-              id="access-tools"
-              label="What they can open"
-              choices={tools}
-              picked={ticked}
-              onPicked={setTicked}
-              hint={HINT}
-            />
+            <ToolAreaField id="access-tools" tools={tools} picked={ticked} onPicked={setTicked} />
             <div className="grid gap-2">
               <Label htmlFor="access-notes">Notes</Label>
               <Textarea id="access-notes" name="notes" rows={2} maxLength={2000} />
@@ -157,7 +157,7 @@ export function AccessLevelControls({
   tools,
 }: {
   level: AccessLevelRow;
-  tools: PackChoice[];
+  tools: ToolChoice[];
 }) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
@@ -216,7 +216,7 @@ export function AccessLevelControls({
               Edit
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-lg">
             <form action={submit}>
               <DialogHeader>
                 <DialogTitle>Edit {level.name}</DialogTitle>
@@ -238,13 +238,11 @@ export function AccessLevelControls({
                     defaultValue={level.name}
                   />
                 </div>
-                <PackField
+                <ToolAreaField
                   id={`tools-${level.id}`}
-                  label="What they can open"
-                  choices={tools}
+                  tools={tools}
                   picked={ticked}
                   onPicked={setTicked}
-                  hint={HINT}
                 />
                 <div className="grid gap-2">
                   <Label htmlFor={`notes-${level.id}`}>Notes</Label>

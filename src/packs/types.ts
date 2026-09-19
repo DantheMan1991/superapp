@@ -24,6 +24,8 @@ export interface PackDefinition {
   icon: string;
   layout?: ModuleDefinition["layout"];
   fullWidthPaths?: ModuleDefinition["fullWidthPaths"];
+  /** The parts of this pack an access level may take away (ADR 0095). */
+  areas?: ModuleDefinition["areas"];
   /** Words this pack lets a tenant rename. See ModuleDefinition.labels. */
   labels?: LabelDefinition[];
   /**

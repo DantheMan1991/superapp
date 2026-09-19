@@ -39,6 +39,9 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   land: {
     slug: "land",
+    areas: [
+      { key: "find", name: "Find" },
+    ],
     name: "Land",
     icon: "map",
     // REQUIRES `assets` since 2026-08-15, because an occupancy record can name
@@ -102,6 +105,13 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   inventory: {
     slug: "inventory",
+    areas: [
+      { key: "entries", name: "Entries" },
+      { key: "counts", name: "Counts" },
+      { key: "matching", name: "Matching" },
+      { key: "value", name: "Value" },
+      { key: "tax", name: "Tax" },
+    ],
     name: "Inventory",
     icon: "boxes",
     requires: ["assets"],
@@ -129,6 +139,12 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   livestock: {
     slug: "livestock",
+    areas: [
+      { key: "log", name: "Log" },
+      { key: "breeding", name: "Breeding" },
+      { key: "feed", name: "Feed" },
+      { key: "ask", name: "Ask" },
+    ],
     name: "Livestock",
     icon: "beef",
     requires: ["inventory", "land"],
@@ -165,6 +181,12 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   production: {
     slug: "production",
+    areas: [
+      { key: "orders", name: "Orders" },
+      { key: "bookings", name: "Bookings" },
+      { key: "billing", name: "Billing" },
+      { key: "processors", name: "Processors" },
+    ],
     name: "Production",
     icon: "factory",
     requires: ["inventory"],
@@ -229,6 +251,9 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   retail: {
     slug: "retail",
+    areas: [
+      { key: "days", name: "Market days" },
+    ],
     name: "Retail",
     icon: "store",
     requires: ["inventory"],
@@ -267,6 +292,9 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   "professional-services": {
     slug: "professional-services",
+    areas: [
+      { key: "discovery", name: "Discovery" },
+    ],
     name: "Professional services",
     icon: "briefcase",
     requires: [],
@@ -306,6 +334,14 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   jobs: {
     slug: "jobs",
+    areas: [
+      { key: "setup", name: "Setup" },
+      { key: "cost-codes", name: "Cost codes" },
+      { key: "wip", name: "Work in progress" },
+      { key: "subcontractors", name: "Subcontractors" },
+      { key: "bonding", name: "Bonding" },
+      { key: "warranty", name: "Warranty" },
+    ],
     name: "Jobs",
     icon: "hard-hat",
     requires: [],

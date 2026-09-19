@@ -22,6 +22,7 @@ import {
   updateEntityAction,
 } from "@/modules/accounting/entity-actions";
 import { usePartyWords } from "@/components/app/label-provider";
+import { PackField, type PackChoice } from "@/components/app/pack-field";
 import {
   Select,
   SelectContent,
@@ -32,6 +33,18 @@ import {
 
 /** Radix refuses an empty string as a value, so "not said" carries a sentinel. */
 const NOT_SAID = "__none__";
+
+/** An industry profile as this screen needs it (ADR 0090, 0092). */
+export interface ProfileChoice {
+  slug: string;
+  name: string;
+  /**
+   * What that trade puts in the menu, in the names a person reads — and only
+   * the packs this client has actually switched on, because naming one it does
+   * not have would describe a menu nobody will ever see.
+   */
+  tools: string[];
+}
 
 /**
  * Managing the companies inside one client (ADR 0010).
@@ -216,22 +229,32 @@ export function RenameButton({
   name,
   legalName,
   industry,
+  packs,
   profiles,
+  packChoices,
 }: {
   entityId: string;
   name: string;
   legalName: string;
   /** Which line of business it is in, or "" for not said (ADR 0090). */
   industry: string;
+  /** The tools it works with when its trade does not describe them (ADR 0092). */
+  packs: string[];
   /** The profiles installed on this client, to choose from. */
-  profiles: { slug: string; name: string }[];
+  profiles: ProfileChoice[];
+  /** Every pack this client has switched on, to override that trade with. */
+  packChoices: PackChoice[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [nextName, setNextName] = useState(name);
   const [nextLegal, setNextLegal] = useState(legalName);
   const [nextIndustry, setNextIndustry] = useState(industry);
+  const [nextPacks, setNextPacks] = useState<string[]>(packs);
   const [pending, startTransition] = useTransition();
+  // Live, not the saved value: somebody changing the line of business wants the
+  // sentence under the tools to describe the trade they just picked.
+  const chosen = profiles.find((p) => p.slug === nextIndustry);
   return (
     <>
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
@@ -290,6 +313,35 @@ export function RenameButton({
                 </p>
               </div>
             )}
+            {/*
+              A TRADE IS NOT A BUSINESS (ADR 0092). The line of business above
+              is a shortcut that is right most of the time — and when it is not,
+              this is where the company says so. Shrock Prefab is in
+              construction and runs a factory.
+            */}
+            <PackField
+              id={`packs-${entityId}`}
+              choices={packChoices}
+              picked={nextPacks}
+              onPicked={setNextPacks}
+              hint={
+                chosen && chosen.tools.length > 0 ? (
+                  <>
+                    Tick nothing and it uses whatever {chosen.name} uses —{" "}
+                    {chosen.tools.join(", ")}. Tick some and those are the menu
+                    instead. Accounting, Mail, Documents and the rest are always
+                    there.
+                  </>
+                ) : (
+                  <>
+                    Tick nothing and every tool stays in the menu, and this
+                    company is not offered as a side to switch to. Accounting,
+                    Mail, Documents and the rest are always there whichever you
+                    pick.
+                  </>
+                )
+              }
+            />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>
@@ -304,6 +356,7 @@ export function RenameButton({
                     name: nextName,
                     legalName: nextLegal,
                     industry: nextIndustry,
+                    packs: nextPacks,
                   });
                   if ("error" in result) {
                     toast.error(result.error);

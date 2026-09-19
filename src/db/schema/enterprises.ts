@@ -101,13 +101,15 @@ export const enterprises = pgTable(
      * (ADR 0091). Empty means "not said", and a division that has not said is
      * never offered as a side to switch to.
      *
-     * **A LIST, NOT AN INDUSTRY**, and that is the difference from
-     * `entities.industry`. A company IS in a line of business, so its packs
-     * follow from the profile. A division is not: *Cabinet Shop* is not an
-     * industry and there will never be a cabinet-shop profile — it wants Jobs
-     * for its change orders and its estimates, Production for the runs, and
-     * Inventory for the sheet goods, which is a set nothing can infer. So it is
-     * picked.
+     * **A LIST, NOT AN INDUSTRY.** *Cabinet Shop* is not an industry and there
+     * will never be a cabinet-shop profile — it wants Jobs for its change
+     * orders and its estimates, Production for the runs, and Inventory for the
+     * sheet goods, which is a set nothing can infer. So it is picked.
+     *
+     * A company has BOTH (ADR 0092): `entities.industry` names the trade it is
+     * in and infers a list from the profile, `entities.packs` overrides that
+     * when the trade does not describe it. A division has only this one,
+     * because there is no trade to infer from.
      *
      * **CORE TOOLS ARE NOT IN HERE.** Every division keeps Accounting, Mail,
      * Documents and the rest, because every division posts to the same books.

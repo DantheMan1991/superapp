@@ -4,6 +4,7 @@ import {
   BookOpen,
   Boxes,
   Briefcase,
+  Building2,
   Calculator,
   Calendar,
   Clock,
@@ -79,6 +80,9 @@ export const ICONS: Record<string, LucideIcon> = {
   book: BookOpen,
   boxes: Boxes,
   briefcase: Briefcase,
+  // The legal entities whose books a client keeps — the same icon the
+  // Companies page header wears, so the rail row and the screen match.
+  building: Building2,
   calculator: Calculator,
   calendar: Calendar,
   "check-square": SquareCheck,

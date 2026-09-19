@@ -100,6 +100,13 @@ const updateSchema = z.object({
    * looks it up (`railContexts`).
    */
   industry: z.string().trim().max(64).regex(/^[a-z0-9-]*$/).optional(),
+  /**
+   * The packs this company works with when its trade does not describe them
+   * (ADR 0092), or `[]` for "not said". Shape only, for the same reason
+   * `industry` is: the registry changes with a deploy, and a slug nothing
+   * answers to is ignored by the rail rather than refused here.
+   */
+  packs: z.array(z.string().trim().max(64).regex(/^[a-z0-9-]+$/)).max(40).optional(),
 });
 
 export async function updateEntityAction(

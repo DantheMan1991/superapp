@@ -4,15 +4,21 @@
  * A workspace holds companies, and a company holds divisions. Either can be a
  * side of the business worth putting a menu together for:
  *
- * - **A company IS in a line of business**, so its packs follow from the
+ * - **A company is in a line of business**, so its packs follow from the
  *   installed profile. Shrock Premier builds; construction lists `assets`,
  *   `inventory` and `jobs`; that is the menu.
+ * - **…until the company says otherwise** (ADR 0092). A profile lists the packs
+ *   a TRADE uses, and a company is one business inside one: Shrock Prefab is in
+ *   construction and runs a factory. So the profile is the default and
+ *   `entities.packs` is the override — and a company that has said its own
+ *   tools becomes a side named after ITSELF, because it no longer shares a menu
+ *   with the others in its trade.
  * - **A division is not an industry**, and there will never be a cabinet-shop
  *   profile. *Cabinet Shop* wants Jobs for its change orders and its estimates,
  *   Production for the runs and Inventory for the sheet goods — a set nothing
  *   can infer from a manifest. So a division carries the list itself.
  *
- * Both end up as the same thing here: a name, the companies behind it, and the
+ * All three end up as the same thing here: a name, a line underneath, and the
  * packs it uses. Everything downstream reads `packs` and never asks which kind
  * it came from.
  *
@@ -36,6 +42,14 @@ export interface ProfileView {
   packs: readonly string[];
 }
 
+/** A company as this file needs it. `packs` empty means it has not said. */
+export interface CompanyView {
+  id: string;
+  name: string;
+  industry: string | null;
+  packs?: readonly string[];
+}
+
 /** A division as this file needs it. `packs` empty means it has not said. */
 export interface DivisionView {
   id: string;
@@ -45,24 +59,31 @@ export interface DivisionView {
 
 export interface RailContext {
   /**
-   * What the cookie holds. Prefixed by kind, because a division's id and an
-   * industry's slug live in the same value and must not be able to collide.
+   * What the cookie holds. Prefixed by kind, because a company's id, a
+   * division's id and an industry's slug live in the same value and must not
+   * be able to collide.
    */
   slug: string;
-  /** "Construction", "Cabinet Shop". */
+  /** "Construction", "Cabinet Shop", "Shrock Prefab". */
   label: string;
-  /** The line underneath — the companies in it, or nothing for a division. */
-  companies: string[];
+  /**
+   * The line underneath, which is whatever grounds the label: the companies in
+   * an industry, the trade a company works in, and nothing for a division. Empty
+   * draws no second line at all.
+   */
+  hint: string;
   /** The Layer 2a packs this side of the business uses. */
   packs: string[];
 }
 
 export const industryKey = (slug: string): string => `industry:${slug}`;
 export const divisionKey = (id: string): string => `division:${id}`;
+export const companyKey = (id: string): string => `company:${id}`;
 
 /**
- * The sides worth offering: every industry the companies name, then every
- * division that has said which packs it uses.
+ * The sides worth offering: every industry the companies name, every company
+ * that overrode its industry's tools, then every division that has said which
+ * packs it uses.
  *
  * **NOTHING BELOW TWO**, which is the rule accounting's company picker already
  * keeps in its own words: *the single-company client never learns the concept
@@ -72,25 +93,42 @@ export const divisionKey = (id: string): string => `division:${id}`;
  * "unassigned" is a state, not a side of the business.
  */
 export function railContexts(
-  companies: readonly { name: string; industry: string | null }[],
+  companies: readonly CompanyView[],
   profiles: readonly ProfileView[],
   divisions: readonly DivisionView[] = [],
 ): RailContext[] {
   const byIndustry = new Map<string, RailContext>();
+  const named: RailContext[] = [];
   for (const company of companies) {
-    const slug = company.industry;
-    if (!slug) continue;
-    const profile = profiles.find((p) => p.slug === slug);
+    const profile = company.industry
+      ? profiles.find((p) => p.slug === company.industry)
+      : undefined;
+    /**
+     * A COMPANY THAT SAID ITS OWN TOOLS IS A SIDE OF ITS OWN (ADR 0092), and
+     * it has to be: two companies in one trade with different menus cannot
+     * share one row, and the row they would share is named after the trade.
+     * Its line of business still grounds the label underneath, when it has one.
+     */
+    if (company.packs && company.packs.length > 0) {
+      named.push({
+        slug: companyKey(company.id),
+        label: company.name,
+        hint: profile?.name ?? "",
+        packs: [...company.packs],
+      });
+      continue;
+    }
+    if (!company.industry) continue;
     // A slug whose profile was renamed or retired reads as "not said" rather
     // than offering a side of the business nothing can describe.
     if (!profile) continue;
-    const existing = byIndustry.get(slug);
-    if (existing) existing.companies.push(company.name);
+    const existing = byIndustry.get(company.industry);
+    if (existing) existing.hint = `${existing.hint}, ${company.name}`;
     else {
-      byIndustry.set(slug, {
-        slug: industryKey(slug),
+      byIndustry.set(company.industry, {
+        slug: industryKey(company.industry),
         label: profile.name,
-        companies: [company.name],
+        hint: company.name,
         packs: [...profile.packs],
       });
     }
@@ -100,10 +138,10 @@ export function railContexts(
     .map((d) => ({
       slug: divisionKey(d.id),
       label: d.name,
-      companies: [],
+      hint: "",
       packs: [...d.packs],
     }));
-  const contexts = [...byIndustry.values(), ...fromDivisions];
+  const contexts = [...byIndustry.values(), ...named, ...fromDivisions];
   return contexts.length > 1 ? contexts : [];
 }
 

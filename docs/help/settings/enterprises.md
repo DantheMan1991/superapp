@@ -36,6 +36,8 @@ Tick the tools that side of the business uses. **It only changes the menu down t
 - **This is where two {{enterprise|plural|lower}} on one company's books can have different tools.** A cabinet shop that runs jobs, stock and production, and an excavation crew that runs jobs, equipment and stock, are one set of books and two different menus.
 - Only tools your business has switched on appear in the list.
 
+**The same tick boxes sit on each of your companies**, one level up, under `Settings → Companies`. A company also has a `Line of business`, so it can take its tools from its trade and only tick its own when that trade does not describe it — a {{enterprise|lower}} has no trade to take them from, so it always picks. See the Companies guide.
+
 ## How to retire one, and put it back
 
 1. {button:Retire|ghost} on its row. It asks first.

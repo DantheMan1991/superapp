@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -26,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useConfirm } from "@/components/app/use-confirm";
+import { PackField, type PackChoice } from "@/components/app/pack-field";
 import { slugLabel } from "@/lib/enterprises/vocabulary";
 import {
   archiveEnterpriseAction,
@@ -56,67 +56,7 @@ export interface EnterpriseRow {
   packs: string[];
 }
 
-/** A pack that can be picked: the slug the rail matches, and its own name. */
-export interface PackChoice {
-  slug: string;
-  name: string;
-}
-
-/**
- * WHICH TOOLS THIS DIVISION WORKS WITH (ADR 0091).
- *
- * Only the Layer 2a packs are listed — the core tools are not offered, because
- * every division posts to the same books, raises the same documents and sends
- * the same mail. There is nothing to decide about them.
- *
- * Tick none and this division is simply not offered as a side to switch to,
- * which is the right default: a business with one way of working should never
- * meet the idea.
- */
-function PackField({
-  id,
-  choices,
-  picked,
-  onPicked,
-  word,
-}: {
-  id: string;
-  choices: PackChoice[];
-  picked: string[];
-  onPicked: (next: string[]) => void;
-  word: string;
-}) {
-  if (choices.length === 0) return null;
-  const toggle = (slug: string) =>
-    onPicked(
-      picked.includes(slug) ? picked.filter((s) => s !== slug) : [...picked, slug],
-    );
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>Tools it works with</Label>
-      <div id={id} className="grid grid-cols-2 gap-1.5">
-        {choices.map((choice) => (
-          <label
-            key={choice.slug}
-            className="flex cursor-pointer items-center gap-2 text-sm"
-          >
-            <Checkbox
-              checked={picked.includes(choice.slug)}
-              onCheckedChange={() => toggle(choice.slug)}
-            />
-            {choice.name}
-          </label>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Sets what is in the menu down the left while you are working on this{" "}
-        {word.toLowerCase()}. Accounting, Mail, Documents and the rest are always
-        there. Tick nothing and this {word.toLowerCase()} is not offered as a
-        side to switch to.
-      </p>
-    </div>
-  );
-}
+export type { PackChoice };
 
 /**
  * Add an enterprise.
@@ -345,7 +285,7 @@ export function EnterpriseControls({
                   choices={packChoices}
                   picked={packs}
                   onPicked={setPacks}
-                  word={word}
+                  hint={`Sets what is in the menu down the left while you are working on this ${word.toLowerCase()}. Accounting, Mail, Documents and the rest are always there. Tick nothing and this ${word.toLowerCase()} is not offered as a side to switch to.`}
                 />
                 <div className="grid gap-2">
                   <Label htmlFor={`notes-${enterprise.id}`}>Notes</Label>

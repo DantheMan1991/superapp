@@ -18,7 +18,7 @@ Yosher opens on the **Overview** page. The sidebar on the left takes you to ever
   - `Modules`. One row for each core tool switched on: Accounting, CRM, Mail, Documents, Scheduling, Work. A tool that is not switched on has no row.
   - Your industry's name, such as `Homestead Farm`. The add-ons built for it: Land, Assets, Inventory, Livestock, Production, Retail. A business with no industry set sees `Add-ons` instead. With no add-ons switched on, the group is not shown.
   - `Business`. `Hours`, your retainer and the work log, and `Team`.
-  - `Settings`. Owners only. `Email setup`, `Billing`, `Taking payments`, your {{enterprise|plural|lower}}, and `Business settings`.
+  - `Settings`. Owners only. `Email setup`, `Billing`, `Taking payments`, `Companies` (while Accounting is on), your {{enterprise|plural|lower}}, and `Business settings`.
 - **The row you are on** is filled in. A tool's row keeps its color whether or not you are on it.
 - **The count on `Mail`.** A number at the right end of the row is your unread mail across every connected mailbox, up to `99+`. A red dot instead of a number means a mailbox needs reconnecting, so the count cannot be trusted. No other row carries a mark, and an accountant never sees one, because that role has no mail.
 - **The business switcher.** At the bottom of the sidebar, showing the business you are in. See how to switch, below.
@@ -274,18 +274,20 @@ It finds pages only. To find a customer, an invoice or a document, search inside
 
 **`Working on`** sits at the top of the sidebar, under the search box. It appears once there is more than one side of the business to pick from — a business with one way of working never sees it.
 
-**A side can be a line of business or a {{enterprise|lower}}**, and you will often have both:
+**A side can be a line of business, one company, or a {{enterprise|lower}}**, and you will often have more than one kind:
 
-- **A line of business** comes from your companies. Say which one each company is in under Companies, and its tools follow from that.
+- **A line of business** comes from your companies. Say which trade each company works in, under `Settings → Companies`, and its tools follow from that. Every company in the same trade shares one line in the list.
+- **One company** picks its own tools, in the same place, when its trade does not describe it. A prefab shop inside a building group is construction and wants a production tool — so it ticks its own, and gets its own line under its own name.
 - **A {{enterprise|lower}}** picks its own tools, under `Settings → {{enterprise|plural}}`. That is how two {{enterprise|plural|lower}} on **one company's books** can have different menus — a cabinet shop and an excavation crew are the same set of books and two different sets of tools.
 
-1. Click it and pick a side: `Everything`, one of your lines of business, or one of your {{enterprise|plural|lower}}. A line of business names the companies on it underneath, so `Construction · Shrock Premier` tells you exactly what you are picking.
+1. Click it and pick a side: `Everything`, a line of business, a company, or one of your {{enterprise|plural|lower}}. Each names what grounds it underneath, so `Construction · Shrock Premier` is a trade and the company in it, and `Shrock Prefab · Construction` is one company and the trade it works in.
 2. The menu redraws. The tools that side of the business does not use come off it.
 
 | What you pick | What happens |
 | --- | --- |
 | `Everything` | Every tool you have. This is where you start. |
-| A line of business | The tools that side uses. |
+| A line of business | The tools that trade uses. |
+| A company | The tools you ticked for it. |
 | A {{enterprise|lower}} | The tools you ticked for it. |
 
 Accounting, Mail, Documents, Scheduling, Work and Time **never move**, whichever side you are on — every part of the business has books and post.
@@ -293,7 +295,8 @@ Accounting, Mail, Documents, Scheduling, Work and Time **never move**, whichever
 - **It changes the menu and nothing else.** Nothing is filtered, scoped or hidden: your books, your reports and every page are exactly as they were. An old link or a bookmark still opens whatever it always opened.
 - **It never hides the page you are on.** Open a job while you are set to the farm and the `Jobs` row comes back for as long as you are in there, so you always have a way out.
 - **It remembers, on this browser.** It is your own view, not a setting for the team — the person beside you can be working on the other side at the same moment.
-- **To say which side a company is on**, open Companies under Accounting, click {button:Edit|outline} and set `Line of business`. A company left on `Not said` is in every view.
+- **To say which side a company is on**, open `Settings → Companies`, click {button:Edit|outline} and set `Line of business`. A company left on `Not said` is in every view.
+- **To give one company its own tools** instead of its trade's, tick them under `Tools it works with` in that same dialog. Tick none and it keeps using its trade's.
 - **To give a {{enterprise|lower}} its own tools**, open `Settings → {{enterprise|plural}}`, click {button:Edit|ghost} and tick them under `Tools it works with`. Tick none and it is not offered as a side.
 - **Retire a {{enterprise|lower}} and it leaves the switcher**; if you were on it, you land back on `Everything` with every tool showing.
 

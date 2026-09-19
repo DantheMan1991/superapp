@@ -22,6 +22,31 @@ changes this module MUST add an entry here (rule in AGENTS.md).
 > at the start of every accounting session, so its length is a real cost — it was
 > 4,367 lines before the 2026-09-14 sweep, 94% of it build log.
 
+### 2026-09-18 — A company may say which tools it works with (`claude/a-company-says-which-tools-too`, ADR 0092)
+
+`entities.packs`, `text[]` default `{}` (migration `0383`). **A RAIL PREFERENCE
+ON AN ACCOUNTING TABLE**, which is worth saying plainly: no query filters on it,
+no report groups by it, no policy reads it, and the books are untouched. It sits
+beside `entities.industry` (ADR 0090) and for the same reason — the rail is
+Layer 0 and `entities` is the one table every tenant has.
+
+`industry` names the trade and infers a tool list from the profile; this
+overrides that list when the trade does not describe the company. Shrock Prefab
+is in construction and runs a factory. Empty means not said, and not said means
+the profile answers — so opening `Edit` and saving changes nothing.
+
+`updateEntity` takes it and `updateEntityAction` shape-checks it, exactly as
+`industry` is handled: not an enum, because a pack is a slug in a registry that
+changes with a deploy, and a slug nothing answers to is ignored by the rail
+rather than refused here.
+
+**The Companies screen also gained a rail row** — `Settings` → `Companies`,
+owners only, while accounting is on. It had exactly one entry point, the
+`Companies` stat card on the overview, which is a fine place to notice it and a
+hopeless one to look for it: the founder went hunting for where a company says
+what line of business it is in, and it is in that row's `Edit` dialog. The card
+stays; `AccountingNav` is still ten tabs and gains no eleventh.
+
 ### 2026-09-16 — The hidden label that scrolled the page (`claude/sr-only-needs-a-containing-block`)
 
 The journal entry editor scrolled the WHOLE PAGE sideways on a phone — 202px
@@ -527,6 +552,7 @@ on the dev fixture** for the founder to drive.
 | `deposits` | 2026-09-07 | Payments held in Undeposited Funds banked together as one entry (`0265`; `source = deposit`, `0264`; RLS `0266`, owner-only writes). `invoice_payments.deposit_id` points back, cleared by a void. One company per deposit, the register's; a deposit is voided, never deleted |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `entities.books_start_on` | 2026-09-08 | The day one company's books begin ([ADR 0035](../decisions/0035-the-books-begin-on-a-day-and-nothing-is-dated-before-it.md), `0280`), beside `closed_through` — the two ends of the period on one row. Null = never said. Written only by `setBooksStartOn` (owner), never to a day after a non-void entry or after the close. Read by `assertPeriodOpen` (refuses `BEFORE_BOOKS_START`), by the CSV import and the Plaid sync (rows before it are not staged), and by the setup card |
+| `entities.industry`, `entities.packs` | 2026-09-18 | **RAIL PREFERENCES ON THIS MODULE'S TABLE, AND THEY SCOPE NOTHING** ([ADR 0090](../decisions/0090-which-side-of-the-business-the-rail-shows-is-a-view-and-the-books-are-not-in-it.md), [ADR 0092](../decisions/0092-a-company-may-override-the-tools-its-trade-implies.md), `0381`/`0383`). No query filters on either, no report groups by them, no policy reads them; they decide which Layer 2a packs are in the left-hand menu while somebody is "working on" that side of the business, and nothing else. `industry` is an industry-profile slug or null for not said — deliberately not an FK, since a profile is a manifest in code. `packs` is `text[]` default `{}`, the override for a company whose trade does not describe it (Shrock Prefab is in construction and runs a factory); empty means not said and the profile answers instead. Core tools are never in the list. Here rather than on `tenants` because the rail is Layer 0 and `entities` is the one table every tenant has |
 | `invoices.is_opening`, `bills.is_opening` | 2026-09-09 | Open on the day the books began ([ADR 0037](../decisions/0037-a-document-open-when-the-books-began-is-real-and-its-other-leg-is-opening-balance-equity.md), `0281`). Boolean, default false, written once by the Opening page's verbs. Read by `issueInvoice` / `approveBill` (the entry is dated on the start day and the other leg is Opening Balance Equity), by the cash lens (recognition from the document's lines), and by the Opening page's lists |
 | `bank_accounts.kind = 'personal'`, `accounts.subtype = 'owner_funds'`, `bank_rules.action` | 2026-09-08 | The personal register ([ADR 0034](../decisions/0034-a-personal-account-is-a-register-whose-ledger-leg-is-the-owners-equity.md), `0278`). Its ledger account is EQUITY (`owner_funds`, 3300s), never a bank asset; no opening balance, never reconciled, not a deposit target. `bank_rules.action` is `categorize` (default, every pre-existing rule) or `exclude` (sets the row aside on arrival); `set_account_id` became nullable, held to the action by CHECK `bank_rules_action_account`. `bank_transactions.rule_suggestion` and `ai_suggestion` may now carry `action: "exclude"` / `personal: true` with a null `accountId`. RLS `0279`: `bank_accounts` hides the kind from `staff`; `bank_transactions` and register-scoped `bank_rules` inherit through an EXISTS |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |

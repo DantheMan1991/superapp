@@ -5,7 +5,7 @@
 > **Order:** 340
 > **Area:** Companies
 
-Companies is not in the accounting menu. Open it from the `Companies` card on the accounting Overview, which reads `One set of books. Add another for a second LLC.` while you keep one company, and `Each keeps its own books — reports can scope to one` once you keep more. The line under the title reads `Each company keeps its own books — its own trial balance, profit & loss and balance sheet. The chart of accounts, customers, vendors and contacts are shared across all of them.` To add one, click {button:Add a company|primary}.
+Open **Companies** under `Settings` in the sidebar — that row is there for owners. You can also reach it from the `Companies` card on the accounting Overview, which reads `One set of books. Add another for a second LLC.` while you keep one company, and `Each keeps its own books — reports can scope to one` once you keep more. It is not one of the tabs in the accounting menu. The line under the title reads `Each company keeps its own books — its own trial balance, profit & loss and balance sheet. The chart of accounts, customers, vendors and contacts are shared across all of them.` To add one, click {button:Add a company|primary}.
 
 ## What you see
 
@@ -31,16 +31,20 @@ The two accounts that track money between companies are created for you.
 
 ## How to edit or deactivate a company
 
-1. Click {button:Edit|outline}. The dialog is `Edit Maple Street LLC` with `Name` and `Legal name`. Click {button:Save|primary}. It reads `Saving…`, then you see `Saved`.
-
-**`Line of business`** is the third field, and it only appears once more than one industry is set up for your business. It says which side of the business this company is on — `Construction`, `Homestead Farm`, or `Not said`.
-
-**It changes the menu down the left and nothing else.** The note under the field says so: *"It does not scope anything: the books, the reports and every page stay exactly as they are."* Setting it does not move a penny, does not filter a report and does not hide a page. It is what lets **`Working on`** at the top of the menu put away the tools the other side of the business uses — see the guide for getting around.
-
-A company left on `Not said` is in every view. You never lose a company by not answering.
+1. Click {button:Edit|outline}. The dialog is `Edit Maple Street LLC`, with `Name`, `Legal name`, and two fields about the menu described below. Click {button:Save|primary}. It reads `Saving…`, then you see `Saved`.
 2. Click {button:Deactivate|ghost} to take a company out of the pickers without touching its books. You see `Maple Street LLC deactivated`, and the row shows {badge:Inactive|outline}. Its entries, reports and closes stay as they are, and it still appears in the `Company` control on reports and on the Close page, because a wound-up company still has a last period to close. {button:Reactivate|ghost} brings it back: `Maple Street LLC reactivated`.
 
 A company cannot be deleted, because its books are part of your record.
+
+### The two fields about the menu
+
+**`Line of business`** is the third field, and it only appears once more than one industry is set up for your business. It says which trade this company works in — `Construction`, `Homestead Farm`, or `Not said`.
+
+**`Tools it works with`** is the fourth: a tick box for each of your add-on tools.
+
+Both of them **change the menu down the left and nothing else.** The note under the first says so: *"It does not scope anything: the books, the reports and every page stay exactly as they are."* Setting either does not move a penny, does not filter a report and does not hide a page. Together they are what lets **`Working on`** at the top of the menu put away the tools the other side of the business does not use — see *How to show only one side of your business* in the getting-around guide.
+
+A company left on `Not said` with nothing ticked is in every view. You never lose a company by not answering.
 
 ## How to move money between companies
 
@@ -49,6 +53,21 @@ A company cannot be deleted, because its books are part of your record.
 3. Pick `To company`, `Which company benefited?`: any company but the payer.
 4. Pick `What did they get?`, shown once you pick the company: `Cash into an account, or what it paid for`. The receiving company's own bank accounts are listed first, as `Checking (cash in)`, then its ordinary accounts as `6100 · Rent`. Under it: `Their own account if the cash reached them, otherwise whatever it paid for on their behalf.` It is required.
 5. Fill in `Amount`, `Date` and `Memo`, `What was it for?`, then click {button:Record transfer|primary}. It reads `Recording…`, then you see `Transfer recorded in both companies`. Two journal entries are posted, one in each company's books, linked to each other, and the who-owes-whom table updates.
+
+## How to say which tools a company works with
+
+Most of the time you do not have to. Pick its `Line of business` and it uses whatever that trade uses — the note under the tick boxes names them, such as `Tick nothing and it uses whatever Construction uses — Assets, Inventory, Jobs.`
+
+Tick some when that is not true of this company. A prefab shop inside a building group is still construction, but it wants Production and does not want Assets — so tick `Jobs`, `Inventory` and `Production`, and those are its menu instead.
+
+- **Ticking nothing is the normal state**, and it means "use the trade's tools". It is not "no tools". Opening {button:Edit|outline} and saving changes nothing.
+- **Ticking some replaces the trade's list, it does not add to it.** You see exactly what you ticked.
+- **Only the add-on tools are listed.** Accounting, Mail, Documents, Scheduling, Work and Time are always there for every company, because they all sit in one business.
+- **Only tools you have switched on appear**, so the list is the menu you actually have.
+- **A company that ticks its own tools gets its own line in `Working on`**, under its own name, with its trade underneath it. A company that does not is listed with the others in its trade.
+- **A company with no line of business can still tick tools**, and it is then offered under its name alone. That is the answer for a company no trade describes.
+
+The same control sits on each of your {{enterprise|plural|lower}}, one level down, under `Settings`. Same idea, same tick boxes.
 
 ## Messages
 

@@ -1,10 +1,11 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Building2 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { getActiveModules, requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { listIndustryProfiles } from "@/industries";
+import { getRenderableFeature } from "@/lib/features";
 import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import {
@@ -115,6 +116,20 @@ export default async function CompaniesPage() {
   const countOf = new Map(entryCounts.map((r) => [r.entityId, r.n]));
   const isOwner = ctx.role === "owner";
   /**
+   * WHICH TOOLS A COMPANY MAY BE SAID TO WORK WITH (ADR 0092).
+   *
+   * The Layer 2a packs this client has switched on, and only those: core tools
+   * are never offered, because every company here is in one workspace and keeps
+   * the same mail, documents and chart of accounts. A pack that is off is not a
+   * choice, and one declared but unbuilt has no screen to put in a menu. The
+   * division picker on the settings list reads exactly the same list.
+   */
+  const packChoices = (await getActiveModules(ctx.tenant.id))
+    .filter(({ module }) => module.category === "pack")
+    .filter(({ module }) => getRenderableFeature(module.id))
+    .map(({ module }) => ({ slug: module.id, name: module.name }));
+  const nameOfPack = new Map(packChoices.map((p) => [p.slug, p.name]));
+  /**
    * WHICH LINES OF BUSINESS THERE ARE TO CHOOSE FROM (ADR 0090).
    *
    * Every profile, not only the one stamped on the tenant: installing is
@@ -124,6 +139,14 @@ export default async function CompaniesPage() {
   const installedProfiles = listIndustryProfiles().map((p) => ({
     slug: p.slug,
     name: p.name,
+    /**
+     * What that trade would put in the menu, in the names a person reads —
+     * filtered to what this client HAS, because naming a pack it never switched
+     * on would describe a menu nobody will ever see.
+     */
+    tools: p.packs
+      .map((slug) => nameOfPack.get(slug))
+      .filter((name): name is string => name !== undefined),
   }));
 
   return (
@@ -260,7 +283,9 @@ export default async function CompaniesPage() {
                         name={e.name}
                         legalName={e.legalName}
                         industry={e.industry ?? ""}
+                        packs={e.packs}
                         profiles={installedProfiles}
+                        packChoices={packChoices}
                       />
                       {!e.isDefault && e.isActive && (
                         <MakeDefaultButton entityId={e.id} name={e.name} />

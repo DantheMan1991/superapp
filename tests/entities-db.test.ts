@@ -34,6 +34,7 @@ import {
   reverseIntercompanyPair,
   reverseEntry,
   setDefaultEntity,
+  updateEntity,
   type EntityScope,
   type FilterScope,
   type LedgerCtx,
@@ -239,6 +240,67 @@ d("entities: two sets of books in one tenant", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
     });
+  });
+
+  /* -- the rail preferences, which scope NOTHING (ADR 0090, 0092) --------- */
+
+  /**
+   * `entities.packs` is a view preference and every assertion here is about it
+   * staying one — but it needs a DB test all the same, because the two ways it
+   * can go wrong are both invisible to a pure one.
+   */
+  it("a company's tools start EMPTY, never null", async () => {
+    const companies = await withTenant(tenantId, (tx) => listEntities(tx, tenantId));
+    // The column defaults to `'{}'`, so a company nobody has edited reads as an
+    // empty list — whichever of the two provisioning made and whichever
+    // `createEntity` did. Null would make `packs.length` throw in the rail for
+    // every company that existed before the migration, which is all of them.
+    expect(companies).toHaveLength(2);
+    for (const company of companies) {
+      expect(company.packs).toEqual([]);
+      expect(company.industry).toBeNull();
+    }
+  });
+
+  it("saying its own tools, then unsaying them, both round-trip", async () => {
+    const said = await withTenant(tenantId, (tx) =>
+      updateEntity(tx, owner, { entityId: maple, packs: ["jobs", "production"] }),
+    );
+    expect(said.packs).toEqual(["jobs", "production"]);
+    // The name and the default flag are not in this patch and must not move.
+    expect(said.name).toBe("Doors LLC Group");
+    expect(said.isDefault).toBe(true);
+
+    /**
+     * **UNSAYING IS AN EMPTY LIST, NOT AN ABSENT ONE**, and that is the whole
+     * reason this is here. `input.packs ?? entity.packs` keeps `[]`; so does
+     * `||`, because an empty array is truthy. What does NOT is the guard
+     * somebody reaches for when they want "did they send me anything" —
+     * `input.packs?.length ? input.packs : entity.packs` — which silently
+     * refuses to clear the list. That leaves a company stuck as its own side of
+     * the business with no way back, which is exactly the kind of wrong a view
+     * preference is not allowed to be. Proved by writing that line and watching
+     * this fail.
+     */
+    const unsaid = await withTenant(tenantId, (tx) =>
+      updateEntity(tx, owner, { entityId: maple, packs: [] }),
+    );
+    expect(unsaid.packs).toEqual([]);
+  });
+
+  it("leaves the tools alone when the patch does not mention them", async () => {
+    await withTenant(tenantId, (tx) =>
+      updateEntity(tx, owner, { entityId: oak, packs: ["inventory"] }),
+    );
+    const after = await withTenant(tenantId, (tx) =>
+      updateEntity(tx, owner, { entityId: oak, legalName: "Oak Row Holdings LLC" }),
+    );
+    expect(after.packs).toEqual(["inventory"]);
+    expect(after.legalName).toBe("Oak Row Holdings LLC");
+    // Put it back, so nothing downstream in this file inherits a menu.
+    await withTenant(tenantId, (tx) =>
+      updateEntity(tx, owner, { entityId: oak, packs: [], legalName: "" }),
+    );
   });
 
   /* -- the invariant that separates an entity from a dimension ------------ */

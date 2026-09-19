@@ -9,6 +9,51 @@
 
 ## Build log
 
+### 2026-09-18 — A company may say its own tools too (`claude/a-company-says-which-tools-too`, ADR 0092)
+
+ADR 0091 shipped in the evening and the founder found the hole in it by morning:
+*"i don' see where you set set industries per company. nor the modules per
+company."*
+
+The first half was findability — the field is real, always renders, and the only
+way to the screen holding it was a stat card on the accounting overview. The
+second half was a genuine gap, and it was a sentence I had written the day
+before: *a company IS in a line of business, so its packs follow from the
+profile.*
+
+**A PROFILE LISTS THE PACKS A TRADE USES; A COMPANY IS ONE BUSINESS INSIDE
+ONE.** Shrock Premier, Prefab and Restoration are all, loosely, construction —
+and **Prefab is a factory**. Tagging it `construction` gets it `assets`,
+`inventory`, `jobs` and no Production, with nothing anywhere to say otherwise.
+The limitation `enterprises.packs` fixed for a division was still sitting one
+rung up.
+
+**`entities.packs`** (`text[]`, migration `0383`, live on dev and prod before
+the merge). The same column, because it is the same question. The inference
+stays the default and `industry` keeps its job — **empty means not said** — so
+an unrelated rename cannot quietly freeze a company's menu against the next pack
+its profile gains. That is the one assertion in the DB suite written as a trap:
+the guard somebody reaches for, `input.packs?.length ? … : …`, refuses to clear
+the list, and the test was proved by writing that line and watching it fail.
+
+**A company that has said its own tools is a side named after ITSELF.** It
+cannot stay in its trade's row — that row is labelled *Construction* and gathers
+every company in it, and two companies with different menus cannot share one. So
+`railContexts` splits it out with the trade as the line underneath, and
+`RailContext.companies` became `hint`, because with three kinds of side the line
+is no longer always a list of companies.
+
+Driven on Hilltop Farm: Shrock Premier given Jobs, Inventory and Production — a
+set no profile lists — left the *Construction* row and appeared as **Shrock
+Premier / Construction**, producing exactly that rail with every core tool still
+there. Unticking all three put it back in *Construction* and dropped the stale
+`company:<uuid>` cookie to Everything with the full rail.
+
+**And the screen is in the rail now**, `Companies` under `Settings` directly
+above the divisions row, for owners, only while accounting is on. Always — not
+above one company — because *the button to make a second only existed on a list
+that needed two* is a catch-22 this codebase has shipped before.
+
 ### 2026-09-18 — A division is a side of the business too (`claude/a-division-has-its-own-tools`, ADR 0091)
 
 ADR 0090 shipped in the morning and met the case it could not express by the
@@ -778,6 +823,9 @@ No new tables. Existing columns take on new values:
 | `modules` | `category` | Gains the value `'pack'`. Was already text with no constraint. |
 | `tenant_modules` | `config` | Gains an optional `labels` key for per-tenant vocabulary overrides. |
 | `tenants` | `industry` | Becomes meaningful — it is the installed profile slug, not a descriptive tag. |
+| `entities` | `industry` | The line of business one COMPANY is in, or null ([ADR 0090](../decisions/0090-which-side-of-the-business-the-rail-shows-is-a-view-and-the-books-are-not-in-it.md), `0381`). A rail preference: it scopes nothing. |
+| `entities` | `packs` | `text[]` default `{}` — the tools that company works with when its trade does not describe them ([ADR 0092](../decisions/0092-a-company-may-override-the-tools-its-trade-implies.md), `0383`). Empty = not said, and the profile above answers. |
+| `enterprises` | `packs` | `text[]` default `{}` — the tools one DIVISION works with ([ADR 0091](../decisions/0091-a-division-carries-its-own-pack-list-because-a-division-is-not-an-industry.md), `0382`). No profile to infer from, so it is always a choice. |
 
 Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
 `--custom` policy migration, and isolation-test coverage
@@ -798,6 +846,16 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   no-profile-installed path is the common one. Label resolution must degrade
   silently rather than throw — it will run on every request for every tenant
   that has never installed a profile.
+- **THREE THINGS CAN BE "A SIDE OF THE BUSINESS", AND THEY ARE ALL THE SAME
+  SHAPE BY THE TIME ANYTHING READS THEM** (`src/lib/packs/rail-context.ts`): an
+  INDUSTRY, which gathers every company in it and takes its packs from the
+  profile; a COMPANY that overrode that list (ADR 0092); a DIVISION, which has
+  no profile to infer from and always picks (ADR 0091). `railContexts` returns
+  one `RailContext` per side and `hiddenPacks` never asks which kind it was.
+  **Empty means not said, everywhere** — a company with no packs falls back to
+  its trade, a division with none is not a side at all, and nothing is offered
+  below two sides. **Core tools are never in any of the lists**, because
+  everything in one workspace posts to the same books.
 - **The costing seam is the point.** A pack that tracks activity without syncing
   a dimension member and posting to the ledger has built a to-do list. The
   reason this platform's version of an industry is worth anything is that every

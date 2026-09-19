@@ -10,7 +10,9 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { tabsInUse } from "@/packs/jobs/tab-rows";
 import { tabsOffFrom } from "@/packs/jobs/tabs";
+import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import { TabSettingsForm } from "@/packs/jobs/components/tab-settings-form";
+import { InterviewSwitch } from "@/packs/jobs/components/interview-switch";
 import { PACK } from "@/packs/jobs/vocabulary";
 
 /**
@@ -43,6 +45,8 @@ export default async function JobsSetupPage() {
     { role: ctx.role },
   );
   const projectWord = labelFor(data.labels, "project", "Project");
+  /** The interview is a granted layer; without the grant this panel is absent. */
+  const gate = interviewGateFrom(data.config);
 
   return (
     <div className="space-y-4">
@@ -77,6 +81,11 @@ export default async function JobsSetupPage() {
           setting.
         </p>
       </Panel>
+      {gate.granted && (
+        <Panel className="p-5">
+          <InterviewSwitch on={!gate.off} canEdit={isOwner} />
+        </Panel>
+      )}
     </div>
   );
 }

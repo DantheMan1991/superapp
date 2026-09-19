@@ -1,6 +1,7 @@
 import type { IndustryProfile } from "../types";
 import { CONSTRUCTION_COA } from "./accounts";
 import { CONSTRUCTION_COST_CODE_SETS } from "./cost-codes";
+import { CONSTRUCTION_ESTIMATE_OUTLINES } from "./estimate-outlines";
 
 /**
  * The platform's third industry profile: construction, in every flavour.
@@ -163,7 +164,16 @@ export const construction: IndustryProfile = {
       "Pay Applications & Draws",
     ],
     packs: {
-      jobs: { costCodeSets: CONSTRUCTION_COST_CODE_SETS },
+      jobs: {
+        costCodeSets: CONSTRUCTION_COST_CODE_SETS,
+        /**
+         * Two starter ways of walking an estimate (ADR 0098) — a new build and
+         * a remodel, because they are different walks and not one walk with
+         * optional stops. Questions only: the pack asks how wide the footing
+         * is and never says.
+         */
+        estimateOutlines: CONSTRUCTION_ESTIMATE_OUTLINES,
+      },
     },
   },
 };

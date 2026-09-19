@@ -2724,6 +2724,20 @@
       "when": 1789818211617,
       "tag": "0388_entity_scope_fix_two_parents",
       "breakpoints": true
+    },
+    {
+      "idx": 389,
+      "version": "7",
+      "when": 1789856207419,
+      "tag": "0389_motionless_paladin",
+      "breakpoints": true
+    },
+    {
+      "idx": 390,
+      "version": "7",
+      "when": 1789856291286,
+      "tag": "0390_job_estimate_outlines_rls",
+      "breakpoints": true
     }
   ]
 }

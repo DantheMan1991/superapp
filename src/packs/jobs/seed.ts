@@ -1,10 +1,17 @@
 import "server-only";
 import type { Tx } from "@/db";
 import { createCostCode, createCostCodeSet, listCostCodeSets, type JobsCtx } from "./ops";
-import { costCodeSetsFrom } from "./seed-shape";
+import { createOutline, listOutlines } from "./outline-ops";
+import { costCodeSetsFrom, estimateOutlinesFrom } from "./seed-shape";
 
-export { costCodeSetsFrom, summarizeJobsSeed } from "./seed-shape";
-export type { CostCodeSetSeed, JobsSeed } from "./seed-shape";
+export { costCodeSetsFrom, estimateOutlinesFrom, summarizeJobsSeed } from "./seed-shape";
+export type {
+  CostCodeSetSeed,
+  EstimateOutlineSeed,
+  EstimateOutlineStepSeed,
+  EstimateOutlineQuestionSeed,
+  JobsSeed,
+} from "./seed-shape";
 
 /**
  * A profile's starter cost code lists, written into this pack's tables.
@@ -28,7 +35,10 @@ export async function applyJobsSeed(
   seed: unknown,
 ): Promise<{ created: number; description: string }> {
   const wanted = costCodeSetsFrom(seed);
-  if (wanted.length === 0) return { created: 0, description: "" };
+  const wantedOutlines = estimateOutlinesFrom(seed);
+  if (wanted.length === 0 && wantedOutlines.length === 0) {
+    return { created: 0, description: "" };
+  }
 
   const existing = new Set(
     (await listCostCodeSets(tx, ctx.tenantId)).map((s) => s.name.trim().toLowerCase()),
@@ -59,11 +69,57 @@ export async function applyJobsSeed(
     existing.add(set.name.toLowerCase());
   }
 
+  /**
+   * THE OUTLINES, by the same three rules (ADR 0098). Skipped WHOLE when the
+   * tenant already has one by that name — a business that pruned "New build"
+   * down to the fourteen steps it actually walks must not find the other
+   * twenty back after a re-install — and never made the default, because the
+   * pack's own rule already makes the first one a tenant has its default.
+   */
+  const existingOutlines = new Set(
+    (await listOutlines(tx, ctx.tenantId)).map((o) =>
+      o.outline.name.trim().toLowerCase(),
+    ),
+  );
+  let outlinesCreated = 0;
+  let stepsCreated = 0;
+  for (const outline of wantedOutlines) {
+    if (existingOutlines.has(outline.name.toLowerCase())) continue;
+    await createOutline(tx, ctx, {
+      name: outline.name,
+      notes: outline.notes,
+      isDefault: undefined,
+      steps: outline.steps.map((step) => ({
+        title: step.title,
+        costCode: step.costCode,
+        guidance: step.guidance,
+        questions: step.questions?.map((q) => ({
+          prompt: q.prompt,
+          kind: q.kind,
+          choices: q.choices,
+          unit: q.unit,
+          notes: q.notes,
+        })),
+      })),
+    });
+    outlinesCreated += 1;
+    stepsCreated += outline.steps.length;
+    existingOutlines.add(outline.name.toLowerCase());
+  }
+
+  const parts: string[] = [];
+  if (setsCreated > 0) {
+    parts.push(
+      `${setsCreated} cost code ${setsCreated === 1 ? "list" : "lists"} with ${codesCreated} codes`,
+    );
+  }
+  if (outlinesCreated > 0) {
+    parts.push(
+      `${outlinesCreated} estimate ${outlinesCreated === 1 ? "outline" : "outlines"} with ${stepsCreated} steps`,
+    );
+  }
   return {
-    created: setsCreated,
-    description:
-      setsCreated === 0
-        ? ""
-        : `${setsCreated} cost code ${setsCreated === 1 ? "list" : "lists"} with ${codesCreated} codes`,
+    created: setsCreated + outlinesCreated,
+    description: parts.join(" and "),
   };
 }

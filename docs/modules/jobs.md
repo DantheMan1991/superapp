@@ -120,6 +120,101 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-19 — The estimate interview, X1: the outline is the tenant's, and a question is a row (`claude/estimate-outlines`, ADR 0098)
+
+**What the founder asked for**, in his words: a layer over estimating where
+instead of typing lines you walk the house with the software and answer
+questions — *"Let's start with the foundation. Are you doing this in-house or
+bidding? Block or poured? Looks like the footer is 24 inches, is that right?
+Any rebar?"* — and the estimate fills in behind the conversation. Target: **a
+bid in forty-five minutes**. Constraints, also his: it is a layer that can be
+turned off, it starts with one client, and it must be able to reach everybody.
+
+**This slice is the one with no model in it.** The conversation reads a script;
+this is the script, and it is data a person edits. Nothing here calls Claude.
+
+**WHAT ALREADY EXISTED, which is most of the machinery.** The takeoff pushes a
+measured quantity onto a line (ADR 0074), assemblies drop a saved item at
+another size (ADR 0086), price memory fills a cost from what this business
+charged last time (E4a), and `updateEstimate` writes a whole estimate in one
+call (ADR 0082). The interview will need no new write path: it produces
+`EstimateGroupInput[]` and `EstimateLineInput[]`, the same types the editor
+saves, which is what makes it a layer rather than a second estimating tool.
+
+**Three tables.** `job_estimate_outlines` (several per tenant, one default by
+a partial unique index, the cost code set's shape because it is the same kind
+of thing), `job_estimate_outline_steps` (a phase, in order, with a cost code as
+TEXT and prose guidance), `job_estimate_outline_questions` (the prompt, its
+kind, a choice's options in jsonb, a number's unit, notes for the interviewer).
+
+**Four decisions, all in [ADR 0098](../decisions/0098-an-estimate-outline-is-the-tenants-and-a-question-is-a-row-so-an-answer-can-point-at-one.md):**
+
+- **The outline is the tenant's data, never a script in the pack.** A remodel
+  is not a new build, so one business needs several; and the pack must carry no
+  business's sizes or prices. The construction profile seeds a **New build**
+  (33 steps) and a **Remodel** (23 steps) whose questions ask and never answer.
+  `tests/jobs-outline.test.ts` scans the starters' words for a digit and fails
+  on one — *"How wide is the footing?"* ships, *"24 inches"* does not.
+- **A cost code is TEXT, not an id** — `resolveCostCode`'s call for assemblies,
+  because a code's id belongs to one set and an outline is walked on every job.
+- **A question is a ROW, not a string in a jsonb array.** An answer recorded
+  against a question ID is what lets an interview resume exactly and lets a
+  finish gate say *"you answered this and no line came of it"*. The editor's
+  save therefore keeps a row's id, ADR 0082's rule, or a typo fix would orphan
+  a transcript with nothing failing.
+- **Nothing branches.** No condition column, ever. **Coverage is the outline's
+  job and judgement is the interview's** — *"any rebar?"* is skipped when the
+  answer was block, and the skip is recorded with its reason. A question's
+  notes carry *"only when they are pouring"* as prose.
+
+**THE GATE IS TWO FLAGS, and that is not one too many.**
+`estimateInterviewGranted` is ours (superadmin, on the console's tenant page);
+`estimateInterviewOff` is theirs (owner, on the pack's setup screen). *"We are
+piloting this with one client"* and *"any client may switch on a feature we
+have not priced"* are different statements and one flag can only make one. The
+tenant's key stores the REFUSAL, `tabsOff`'s rule, so a granted tenant has it
+on without clicking anything.
+
+**A new outline can be read off a cost code list.** A business's chart of cost
+is already its phases in the order it builds them — the residential starter is
+in build order for exactly that reason — so the shortest road to a usable
+outline is to take the list it already keeps and ask one question at every
+stop: *who is doing this one?* In-house, bidding it out, by others, not on
+this job. That answer decides the shape of everything downstream, and it is
+the only question that needs no knowledge of the trade.
+
+### Two things found by running it
+
+**A LOOP THAT WRITES A TREE IS A ROUND TRIP PER ROW, and the seed test found
+it by timing out at thirty seconds.** `writeSteps` inserted a step, selected
+its questions, inserted each one; the two starters are 56 steps and 150
+questions, so a profile install was making over four hundred trips to Neon.
+The fix is to **mint the ids in the application** — `randomUUID()` rather than
+the column default — so the whole tree is known before a single write and each
+table takes one multi-row insert. `RETURNING` from a multi-row insert gives no
+order worth relying on, which is why minting beats reading them back. This was
+not a test being slow: it was a profile install nobody would have sat through.
+
+**THE EXISTING SEED TESTS WERE ASSERTING A SENTENCE THAT HAD CHANGED.**
+`seedSummary(construction).packs` and the applier's description both grew the
+outlines, so three tests in `tests/profile-seed.test.ts` failed on strings that
+were correct the day before. They are now computed from the manifest's own
+constants rather than typed, and the file gained the outline half of the three
+seeding rules: both starters land whole, new build becomes the default, and an
+outline the tenant has **pruned** is left exactly as it is on a re-install.
+
+### What is NOT built, and is next
+
+The interview itself — the conversation that reads an outline, asks its
+questions and proposes groups and lines. Then **bid requests** to
+subcontractors, which the *Bidding it out* answer implies and which is a
+feature of its own (nothing in the pack solicits a bid today; a commitment is
+the subcontract after you have bought it, and **SES production access is still
+denied**, so emailing a sub reaches only a verified address). Then quantities
+imported from a **Revit** schedule — the founder draws in Revit, which turns
+the takeoff from a measurement into a join if the type names carry the
+assembly keys. Then a takeoff opened inline from a question.
+
 ### 2026-09-18 — Which parts of a job this business does (`claude/jobs-tabs-you-use`, ADR 0089)
 
 The founder: *"How does it work for the construction companies that don't do
@@ -4660,6 +4755,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` — CHECK lines / codes / **groups** (E1, ADR 0079) / sum, the live definition being in `0373`, which drops and re-adds it — and the proposal's `scope`, `exclusions` and `terms`: the words fixed with the money, the presentation free. An accepted estimate's ITEMS are fixed with its lines and its rates. Since E2 also `show_code_numbers` (ADR 0080), off by default and free on an accepted estimate, being a printing choice. |
 | `job_estimate_groups` | **The item the client buys** (E1, ADR 0079): a name in the client's words, an optional `client_note` paragraph, `price_mode` — `rollup` (its lines sum) or `fixed` (the price is typed, and sits OUTSIDE the overhead-and-profit spread) — `fixed_price_cents`, sort order. One level deep, by the shape rather than by a rule. | Cascade from the estimate. CHECK: name present and ≤ 200, note ≤ 4,000, mode on the list, price ≥ 0, and **`(price_mode = 'fixed') = (fixed_price_cents is not null)`** so the mode and the number cannot disagree. Nothing stores a total; the item's cost, price and margin come from `estimate-math.ts`. |
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement. |
+| `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
+| `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
+| `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
@@ -5156,15 +5254,29 @@ ordering only bites when two new tables reference each other in one file.
   **The serverless path is unverified until that is done** — E5b was driven
   against a real Chrome on a laptop, which proves the document and the press
   but not the function.
-- **The estimate program is open; E1, E2, E3a, E3b, E5a, E5b and E5c are shipped** —
-  see [the plan](#the-estimate-program-open-started-2026-09-16) for the rest,
-  each with the founder's decision behind it. What is NOT built:
-  **keyboard grid navigation** — arrows and Tab between cells, Enter on the
-  last row making another (E3c); the **price memory**, including the
-  estimated-versus-actual read the pack already has the data for (E4);
-  **assemblies**, which are a saved item (E6); and **bid alternates, copying an
-  estimate and the tenant unit cost book** (E7). The whole of row 10 — the
+- **The estimate program: E1, E2, E3a, E3b, E3c, E4a, E5a, E5b, E5c and E6 are
+  all shipped** — see [the plan](#the-estimate-program-open-started-2026-09-16),
+  each with the founder's decision behind it. ~~keyboard grid navigation
+  (E3c)~~, ~~the price memory (E4a)~~ and ~~assemblies (E6)~~ all closed
+  2026-09-18; this paragraph said otherwise until 2026-09-19. Still open:
+  **E4b**, estimated-versus-actual per cost code, **deliberately blocked** until
+  a job closes with real spend — the dev tenant has three budget lines across
+  two jobs and no completed job, so the screen would render empty and could
+  only be "verified" against invented accounting; and **E7** — bid alternates,
+  copying an estimate, and the tenant unit cost book. The whole of row 10 — the
   estimate, its proposal, both formats, the PDF and the client link — is done.
+- **THE ESTIMATE INTERVIEW (X, ADR 0098) IS ONE SLICE IN.** X1 is the outline —
+  the steps and questions a walk is made of, as the tenant's own data behind a
+  two-flag gate. What is NOT built is the rest of it: **the interview** that
+  reads an outline and holds the conversation; **bid requests** to
+  subcontractors, which the *Bidding it out* answer implies and which nothing
+  in the pack does today (a commitment is the subcontract after you have bought
+  it, and SES production access is still denied, so a request would reach only
+  a verified address); **quantities from a Revit schedule**, which is the
+  founder's own drawing tool and turns a takeoff into a join when the type
+  names carry the assembly keys; and **a takeoff opened inline** from a
+  question. Nothing in X1 touches the estimate editor, which is the claim of a
+  layer and what makes the pilot safe.
 - ~~**THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.**~~ — **closed
   2026-09-16 (E3a, ADR 0081)**, and the cause was not the table's width:
   the row buttons' `sr-only` labels are `position: absolute`, so with no

@@ -6,6 +6,7 @@ import { applyProfileSeed, seedSummary } from "../src/app/admin/profile-seed";
 import { getIndustryProfile, industryRegistry } from "../src/industries";
 import { packSeedAppliers } from "../src/packs/seeds";
 import { CONSTRUCTION_COST_CODE_SETS } from "../src/industries/construction/cost-codes";
+import { CONSTRUCTION_ESTIMATE_OUTLINES } from "../src/industries/construction/estimate-outlines";
 import { COST_CODE_DIMENSION } from "../src/packs/jobs/vocabulary";
 import { AGENCY_COA } from "../src/industries/agency/accounts";
 import { GENERAL_COA } from "../src/modules/accounting/templates/general";
@@ -24,6 +25,13 @@ const STAMP = `profile-seed-test-${process.pid}`;
 const agency = getIndustryProfile("agency")!;
 
 let tenantId = "";
+
+const CODE_COUNT = CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0);
+const OUTLINE_COUNT = CONSTRUCTION_ESTIMATE_OUTLINES.length;
+const STEP_COUNT = CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
+  (n, o) => n + o.steps.length,
+  0,
+);
 
 d("profile seed", () => {
   beforeAll(async () => {
@@ -187,7 +195,7 @@ d("a pack seed (construction → jobs)", () => {
 
   it("says what the pack seed would bring, in the pack's words", () => {
     expect(seedSummary(construction).packs).toEqual([
-      `2 cost code lists (${CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0)} codes)`,
+      `2 cost code lists (${CODE_COUNT} codes), ${OUTLINE_COUNT} estimate outlines (${STEP_COUNT} steps)`,
     ]);
   });
 
@@ -199,6 +207,10 @@ d("a pack seed (construction → jobs)", () => {
       tx.select({ id: schema.jobCostCodeSets.id }).from(schema.jobCostCodeSets).where(eq(schema.jobCostCodeSets.tenantId, coTenant)),
     );
     expect(sets).toHaveLength(0);
+    const outlines = await withSystem((tx) =>
+      tx.select({ id: schema.jobEstimateOutlines.id }).from(schema.jobEstimateOutlines).where(eq(schema.jobEstimateOutlines.tenantId, coTenant)),
+    );
+    expect(outlines).toHaveLength(0);
   });
 
   it("lands both lists, every code a cost object, the first one the default — once", async () => {
@@ -206,8 +218,10 @@ d("a pack seed (construction → jobs)", () => {
     expect(first.packs).toEqual([
       {
         slug: "jobs",
-        created: 2,
-        description: `2 cost code lists with ${CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0)} codes`,
+        created: 2 + OUTLINE_COUNT,
+        description:
+          `2 cost code lists with ${CODE_COUNT} codes and ` +
+          `${OUTLINE_COUNT} estimate outlines with ${STEP_COUNT} steps`,
       },
     ]);
     expect(first.waitingOn).not.toContain("jobs");
@@ -236,7 +250,7 @@ d("a pack seed (construction → jobs)", () => {
     );
     // Residential first in the manifest, so it is the default; one default only.
     expect(sets.filter((s) => s.isDefault).map((s) => s.name)).toEqual(["Residential phases"]);
-    expect(codes).toHaveLength(CONSTRUCTION_COST_CODE_SETS.reduce((n, s) => n + s.codes.length, 0));
+    expect(codes).toHaveLength(CODE_COUNT);
     // THE POINT OF GOING THROUGH THE PACK: every seeded code is chargeable.
     expect(new Set(members.map((m) => m.packEntityId))).toEqual(new Set(codes.map((c) => c.id)));
     // In manifest order, not insertion luck.
@@ -272,6 +286,109 @@ d("a pack seed (construction → jobs)", () => {
     expect(report.packs).toEqual([]);
     const left = await withSystem((tx) =>
       tx.select({ id: schema.jobCostCodes.id }).from(schema.jobCostCodes).where(eq(schema.jobCostCodes.setId, csi)),
+    );
+    expect(left).toHaveLength(1);
+  });
+
+  /**
+   * THE SECOND PACK SEED (X1, ADR 0098): the starter estimate outlines, by the
+   * same three rules. The tree is what makes this worth its own test — an
+   * outline is three tables deep, so "created" is easy to report and hard to
+   * actually write.
+   */
+  it("lands both outlines whole, new build the default, questions and all", async () => {
+    const { outlines, steps, questions } = await withSystem(async (tx) => ({
+      outlines: await tx
+        .select()
+        .from(schema.jobEstimateOutlines)
+        .where(eq(schema.jobEstimateOutlines.tenantId, coTenant)),
+      steps: await tx
+        .select()
+        .from(schema.jobEstimateOutlineSteps)
+        .where(eq(schema.jobEstimateOutlineSteps.tenantId, coTenant)),
+      questions: await tx
+        .select()
+        .from(schema.jobEstimateOutlineQuestions)
+        .where(eq(schema.jobEstimateOutlineQuestions.tenantId, coTenant)),
+    }));
+
+    expect(outlines.map((o) => o.name).sort()).toEqual(
+      CONSTRUCTION_ESTIMATE_OUTLINES.map((o) => o.name).sort(),
+    );
+    // New build is first in the manifest, so it is the default; one default only.
+    expect(outlines.filter((o) => o.isDefault).map((o) => o.name)).toEqual(["New build"]);
+    expect(steps).toHaveLength(STEP_COUNT);
+    expect(questions).toHaveLength(
+      CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
+        (n, o) => n + o.steps.reduce((m, st) => m + (st.questions?.length ?? 0), 0),
+        0,
+      ),
+    );
+
+    // In manifest order, not insertion luck — the walk is the point of it.
+    const newBuild = outlines.find((o) => o.name === "New build")!;
+    const walk = steps
+      .filter((s) => s.outlineId === newBuild.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((s) => s.title);
+    expect(walk).toEqual(
+      CONSTRUCTION_ESTIMATE_OUTLINES.find((o) => o.name === "New build")!.steps.map(
+        (s) => s.title,
+      ),
+    );
+
+    // A choice arrived as a choice, with its options, through the jsonb.
+    const foundation = steps.find(
+      (s) => s.outlineId === newBuild.id && s.title === "Foundation",
+    )!;
+    const asked = questions
+      .filter((q) => q.stepId === foundation.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    expect(asked[0].kind).toBe("choice");
+    expect(asked[0].choices).toEqual([
+      "In-house",
+      "Bidding it out",
+      "By others",
+      "Not on this job",
+    ]);
+    expect(foundation.costCode).toBe("2000");
+  });
+
+  it("leaves an outline the tenant has pruned exactly as it is", async () => {
+    // Cut the remodel down to one step, re-run: the rest must not come back.
+    const remodel = await withSystem(async (tx) => {
+      const [row] = await tx
+        .select({ id: schema.jobEstimateOutlines.id })
+        .from(schema.jobEstimateOutlines)
+        .where(
+          and(
+            eq(schema.jobEstimateOutlines.tenantId, coTenant),
+            eq(schema.jobEstimateOutlines.name, "Remodel"),
+          ),
+        );
+      const kept = await tx
+        .select({ id: schema.jobEstimateOutlineSteps.id })
+        .from(schema.jobEstimateOutlineSteps)
+        .where(eq(schema.jobEstimateOutlineSteps.outlineId, row.id))
+        .limit(1);
+      await tx
+        .delete(schema.jobEstimateOutlineSteps)
+        .where(
+          and(
+            eq(schema.jobEstimateOutlineSteps.outlineId, row.id),
+            ne(schema.jobEstimateOutlineSteps.id, kept[0].id),
+          ),
+        );
+      return row.id;
+    });
+
+    const report = await applyProfileSeed(coTenant, construction, ["jobs"], CO_STAMP);
+    expect(report.packs).toEqual([]);
+    const left = await withSystem((tx) =>
+      tx
+        .select({ id: schema.jobEstimateOutlineSteps.id })
+        .from(schema.jobEstimateOutlineSteps)
+        .where(eq(schema.jobEstimateOutlineSteps.outlineId, remodel)),
     );
     expect(left).toHaveLength(1);
   });

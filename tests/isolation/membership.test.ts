@@ -62,16 +62,50 @@ d("membership role escalation (RLS)", () => {
     });
   });
 
-  it("tenant context cannot promote itself to owner", async () => {
-    // The escalation this migration exists to prevent: a WITH CHECK violation
-    // raises, it does not silently write.
-    await expect(
-      withTenant(tenantA, (tx) =>
+  /**
+   * **THE MECHANISM MOVED, THE GUARANTEE DID NOT** (ADR 0093, `drizzle/0385`).
+   *
+   * Under `0085` this raised: the row was visible to a STAFF context and the
+   * WITH CHECK refused the value. `0385` added `app_current_tenant_role() =
+   * 'owner'` to the USING clause as well, so a staff context no longer SEES the
+   * row and the update matches nothing. Strictly stronger, and worth asserting
+   * in both shapes rather than rewriting the old one away.
+   */
+  it("hides every membership row from a staff context UPDATE", async () => {
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
         tx
           .update(schema.memberships)
           .set({ role: "owner" })
           .where(eq(schema.memberships.id, membershipStaffA))
           .returning(),
+      { role: "staff" },
+    );
+    expect(updated).toHaveLength(0);
+
+    const after = await withSystem((tx) =>
+      tx
+        .select({ role: schema.memberships.role })
+        .from(schema.memberships)
+        .where(eq(schema.memberships.id, membershipStaffA)),
+    );
+    expect(after[0].role).toBe("staff");
+  });
+
+  it("REFUSES an owner context minting an owner - the WITH CHECK half", async () => {
+    // The owner passes USING, so the row is reachable and the VALUE is what is
+    // refused. This is the assertion the test above used to make.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx
+            .update(schema.memberships)
+            .set({ role: "owner" })
+            .where(eq(schema.memberships.id, membershipStaffA))
+            .returning(),
+        { role: "owner" },
       ),
     ).rejects.toThrow();
 
@@ -87,12 +121,15 @@ d("membership role escalation (RLS)", () => {
   it("tenant context cannot modify an existing owner row", async () => {
     // Excluded by USING rather than rejected by WITH CHECK, so the row is
     // invisible to the UPDATE and zero rows change.
-    const updated = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "staff" })
-        .where(eq(schema.memberships.id, membershipOwnerA))
-        .returning(),
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "staff" })
+          .where(eq(schema.memberships.id, membershipOwnerA))
+          .returning(),
+      { role: "owner" },
     );
     expect(updated).toHaveLength(0);
 
@@ -106,12 +143,15 @@ d("membership role escalation (RLS)", () => {
   });
 
   it("tenant context cannot demote the other tenant's member", async () => {
-    const updated = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "expert" })
-        .where(eq(schema.memberships.id, membershipStaffB))
-        .returning(),
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "expert" })
+          .where(eq(schema.memberships.id, membershipStaffB))
+          .returning(),
+      { role: "owner" },
     );
     expect(updated).toHaveLength(0);
   });
@@ -129,28 +169,56 @@ d("membership role escalation (RLS)", () => {
     ).rejects.toThrow();
   });
 
-  it("the accountant toggle still works: staff ↔ expert", async () => {
-    // The narrowed policy must not break the one legitimate caller
-    // (setMemberAccountantAction), which only ever writes these two values.
-    const toExpert = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "expert" })
-        .where(eq(schema.memberships.id, membershipStaffA))
-        .returning(),
+  /**
+   * The narrowed policy must not break the one legitimate caller,
+   * `setMemberAccountantAction` - which is `requireTenantOwner()` and, since
+   * `0385` made the role load-bearing, now passes `{ role: ctx.role }`.
+   *
+   * **THIS TEST IS WHY THAT FIX EXISTS.** It was written as a guard for exactly
+   * this class of change, it fired on the full isolation run, and the call site
+   * it was guarding had been relying on app-layer enforcement alone.
+   */
+  it("the accountant toggle still works for an OWNER: staff to expert", async () => {
+    const toExpert = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "expert" })
+          .where(eq(schema.memberships.id, membershipStaffA))
+          .returning(),
+      { role: "owner" },
     );
     expect(toExpert).toHaveLength(1);
     expect(toExpert[0].role).toBe("expert");
 
-    const back = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "staff" })
-        .where(eq(schema.memberships.id, membershipStaffA))
-        .returning(),
+    const back = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "staff" })
+          .where(eq(schema.memberships.id, membershipStaffA))
+          .returning(),
+      { role: "owner" },
     );
     expect(back).toHaveLength(1);
     expect(back[0].role).toBe("staff");
+  });
+
+  /** And the same toggle is refused to everybody else, which is the new half. */
+  it("REFUSES the accountant toggle to a staff context", async () => {
+    const tried = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "expert" })
+          .where(eq(schema.memberships.id, membershipStaffA))
+          .returning(),
+      { role: "staff" },
+    );
+    expect(tried).toHaveLength(0);
   });
 
   it("only withSystem can mint an owner", async () => {

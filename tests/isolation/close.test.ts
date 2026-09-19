@@ -178,23 +178,31 @@ d("close-tools isolation (RLS + composite tenant FKs)", () => {
   });
 
   it("memberships UPDATE under tenant context is scoped to the tenant", async () => {
-    // In-tenant update works (the new memberships_member_update policy)…
-    const own = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "expert" })
-        .where(eq(schema.memberships.id, fx.a.membershipId))
-        .returning(),
+    // In-tenant update works - AS AN OWNER, since `drizzle/0385` narrowed the
+    // policy to owners so that `access_level_id` could live on this row
+    // (ADR 0093). The tenant scoping this test is about is unchanged.
+    const own = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "expert" })
+          .where(eq(schema.memberships.id, fx.a.membershipId))
+          .returning(),
+      { role: "owner" },
     );
     expect(own).toHaveLength(1);
     expect(own[0].role).toBe("expert");
-    // …but cannot touch the other tenant's rows (0 rows affected).
-    const cross = await withTenant(tenantA, (tx) =>
-      tx
-        .update(schema.memberships)
-        .set({ role: "expert" })
-        .where(eq(schema.memberships.id, fx.b.membershipId))
-        .returning(),
+    // …but cannot touch the other tenant's rows (0 rows affected), even then.
+    const cross = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.memberships)
+          .set({ role: "expert" })
+          .where(eq(schema.memberships.id, fx.b.membershipId))
+          .returning(),
+      { role: "owner" },
     );
     expect(cross).toHaveLength(0);
   });

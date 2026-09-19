@@ -9,6 +9,62 @@
 
 ## Build log
 
+### 2026-09-18 — "Working on": which side of the business the rail shows (`claude/working-on-this-side`, ADR 0090)
+
+The founder, running a farm and a building company out of one workspace:
+*"ideally you could tie certain industry packs to a specific company."* Seven
+homestead rows beside construction's three, all day, whichever half of the
+business he was in.
+
+**`entities.industry`, nullable, and it scopes NOTHING** (migration `0381`,
+live on dev and prod before the merge, RLS verified on 231 tables each). No
+query filters on it, no policy reads it, no report groups by it. Its whole
+effect is that the rail can put away the packs the chosen side does not use.
+Not a foreign key on purpose: a profile is a manifest in code, and a slug whose
+profile was renamed should read as "not said" rather than break the books' own
+table. The export deliberately does not carry it — a rail preference is not part
+of a set of books.
+
+**THE CONTROL IS LABELLED BY INDUSTRY, NOT BY COMPANY, AND THAT IS THE WHOLE
+DECISION.** Accounting already has a company picker, in the URL, and a bare URL
+means something precise: `resolveEntityScope` returns `{ kind: "combined" }` —
+all companies, for everybody. A rail preference that set that picker's default
+would make the same link show two people different numbers, which in a product
+that keeps books is the kind of bug that ends in a wrong filing. So the shell
+filters TOOLS, the page filters BOOKS, and they are named differently so nobody
+expects one to drive the other. The mapping underneath is still per company: the
+control reads `Construction` with `Shrock Premier` beneath it.
+
+**A cookie, not `localStorage`** — the rail is server-rendered, so the
+preference has to be readable there or the first paint shows every row and then
+drops half of them. Same weight as the documents browser's view mode.
+
+**Nothing below two industries.** `railContexts` returns an empty list and the
+control does not render, which is the rule accounting's own picker already
+states: *the single-company client never learns the concept exists*. A company
+that has not said what it does is in every view and never a view of its own.
+
+**And it never hides the page you are on.** `SidebarNav` keeps any row whose
+href the current path is inside — a link into Jobs from an email, opened while
+the rail is set to the farm, would otherwise land somebody on a page with no row
+back to its list and no sign of why. Driven on Hilltop Farm with a second
+company added: under Construction the rail drops Land, Livestock, Production and
+Retail; under the farm it drops Jobs — except on a job, where Jobs comes back.
+
+Everything is wrong in the SAFE direction (14 tests): no context, an unknown
+one, a context with no profile behind it, and a stored choice no longer on offer
+all hide nothing. A row that should not be there is a row you ignore; a missing
+one is a feature somebody thinks was taken away.
+
+Enterprises are deliberately not in this. An enterprise is a reporting
+dimension, not a set of books, and giving a dimension its own tool set is how it
+quietly becomes an entity.
+
+A harness note that cost twenty minutes: driving two Radix dialogs in a row from
+one script edited the FIRST one twice — Cancel had not finished closing when the
+next `Edit` was clicked, so `document.querySelector('[role="dialog"]')` still
+returned the old one. Read the dialog's title before touching its fields.
+
 ### 2026-09-18 — A client may run two industries, and now both screens say so (`claude/profiles-tell-the-truth`)
 
 The founder, looking at his own rail: *"there is an issue with homestead modules

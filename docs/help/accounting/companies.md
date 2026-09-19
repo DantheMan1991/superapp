@@ -32,6 +32,12 @@ The two accounts that track money between companies are created for you.
 ## How to edit or deactivate a company
 
 1. Click {button:Edit|outline}. The dialog is `Edit Maple Street LLC` with `Name` and `Legal name`. Click {button:Save|primary}. It reads `Saving…`, then you see `Saved`.
+
+**`Line of business`** is the third field, and it only appears once more than one industry is set up for your business. It says which side of the business this company is on — `Construction`, `Homestead Farm`, or `Not said`.
+
+**It changes the menu down the left and nothing else.** The note under the field says so: *"It does not scope anything: the books, the reports and every page stay exactly as they are."* Setting it does not move a penny, does not filter a report and does not hide a page. It is what lets **`Working on`** at the top of the menu put away the tools the other side of the business uses — see the guide for getting around.
+
+A company left on `Not said` is in every view. You never lose a company by not answering.
 2. Click {button:Deactivate|ghost} to take a company out of the pickers without touching its books. You see `Maple Street LLC deactivated`, and the row shows {badge:Inactive|outline}. Its entries, reports and closes stay as they are, and it still appears in the `Company` control on reports and on the Close page, because a wound-up company still has a last period to close. {button:Reactivate|ghost} brings it back: `Maple Street LLC reactivated`.
 
 A company cannot be deleted, because its books are part of your record.

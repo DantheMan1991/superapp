@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { RailContextSwitcher } from "@/components/app/rail-context-switcher";
+import type { RailContext } from "@/lib/packs/rail-context";
 import { useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,15 @@ interface AppShellProps {
    */
   fullWidthPathPrefixes?: string[];
   /**
+   * The sides of the business there are to switch between, and the one chosen
+   * (ADR 0090). Empty below two industries, which is when the control and the
+   * whole idea stay out of the way.
+   */
+  railContexts?: RailContext[];
+  activeRailContext?: string | null;
+  /** Module hrefs the chosen side puts away. */
+  hiddenHrefs?: string[];
+  /**
    * Rendered at the bottom of the sidebar, and inside the mobile drawer.
    *
    * For ordinary links and text. Anything that opens a PORTALLED popover —
@@ -99,15 +110,32 @@ function Brand({ contextLabel }: { contextLabel: string }) {
 function SidebarNav({
   navGroups,
   pathname,
+  hiddenHrefs,
   onNavigate,
 }: {
   navGroups: NavGroup[];
   pathname: string;
+  /**
+   * Rows the chosen side of the business puts away (ADR 0090) — **except the
+   * one you are standing in.** A view preference must never hide the page
+   * somebody is looking at: a link into Jobs from an email, opened while the
+   * rail is set to the farm, would otherwise leave them on a page with no way
+   * back to its list and no sign of why.
+   */
+  hiddenHrefs?: string[];
   onNavigate?: () => void;
 }) {
+  const hidden = new Set(hiddenHrefs ?? []);
+  const inside = (href: string) => pathname === href || pathname.startsWith(href + "/");
   return (
     <nav className="flex-1 overflow-y-auto px-3 pb-2">
-      {navGroups.map((group) => (
+      {navGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !hidden.has(item.href) || inside(item.href)),
+        }))
+        .filter((group) => group.items.length > 0)
+        .map((group) => (
         <div key={group.label} className="mb-4 last:mb-0">
           <p className="px-2.5 pb-1 text-[11px] font-medium text-sidebar-foreground/45">
             {group.label}
@@ -202,6 +230,9 @@ function toCommandItems(navGroups: NavGroup[]): CommandItem[] {
  */
 export function AppShell({
   contextLabel,
+  railContexts = [],
+  activeRailContext = null,
+  hiddenHrefs = [],
   navGroups,
   fullWidthPathPrefixes,
   footer,
@@ -265,9 +296,11 @@ export function AppShell({
             <div className="px-3 pb-3">
               <CommandPalette items={commandItems} className={railPill} />
             </div>
+            <RailContextSwitcher contexts={railContexts} active={activeRailContext} />
             <SidebarNav
               navGroups={navGroups}
               pathname={pathname}
+              hiddenHrefs={hiddenHrefs}
               onNavigate={() => setDrawerOpen(false)}
             />
             {footer && (
@@ -311,7 +344,8 @@ export function AppShell({
         <div className="px-3 pb-3">
           <CommandPalette items={commandItems} className={railPill} />
         </div>
-        <SidebarNav navGroups={navGroups} pathname={pathname} />
+        <RailContextSwitcher contexts={railContexts} active={activeRailContext} />
+        <SidebarNav navGroups={navGroups} pathname={pathname} hiddenHrefs={hiddenHrefs} />
         {(footer || identity) && (
           <div className="space-y-3 border-t border-sidebar-border p-4">
             {footer}

@@ -22,6 +22,16 @@ import {
   updateEntityAction,
 } from "@/modules/accounting/entity-actions";
 import { usePartyWords } from "@/components/app/label-provider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+/** Radix refuses an empty string as a value, so "not said" carries a sentinel. */
+const NOT_SAID = "__none__";
 
 /**
  * Managing the companies inside one client (ADR 0010).
@@ -205,15 +215,22 @@ export function RenameButton({
   entityId,
   name,
   legalName,
+  industry,
+  profiles,
 }: {
   entityId: string;
   name: string;
   legalName: string;
+  /** Which line of business it is in, or "" for not said (ADR 0090). */
+  industry: string;
+  /** The profiles installed on this client, to choose from. */
+  profiles: { slug: string; name: string }[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [nextName, setNextName] = useState(name);
   const [nextLegal, setNextLegal] = useState(legalName);
+  const [nextIndustry, setNextIndustry] = useState(industry);
   const [pending, startTransition] = useTransition();
   return (
     <>
@@ -242,6 +259,37 @@ export function RenameButton({
                 onChange={(e) => setNextLegal(e.target.value)}
               />
             </div>
+            {/*
+              Only once the client runs more than one industry. Asking a
+              single-industry business which line of business a company is in is
+              a question with one answer, and the menu it feeds never renders.
+            */}
+            {profiles.length > 1 && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`industry-${entityId}`}>Line of business</Label>
+                <Select
+                  value={nextIndustry === "" ? NOT_SAID : nextIndustry}
+                  onValueChange={(v) => setNextIndustry(v === NOT_SAID ? "" : v)}
+                >
+                  <SelectTrigger id={`industry-${entityId}`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NOT_SAID}>Not said</SelectItem>
+                    {profiles.map((p) => (
+                      <SelectItem key={p.slug} value={p.slug}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only changes what is in the menu down the left when you are working
+                  on this side of the business. It does not scope anything: the books,
+                  the reports and every page stay exactly as they are.
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>
@@ -255,6 +303,7 @@ export function RenameButton({
                     entityId,
                     name: nextName,
                     legalName: nextLegal,
+                    industry: nextIndustry,
                   });
                   if ("error" in result) {
                     toast.error(result.error);

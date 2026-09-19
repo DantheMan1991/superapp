@@ -99,6 +99,7 @@ export async function applyJobsSeed(
           choices: q.choices,
           unit: q.unit,
           notes: q.notes,
+          alwaysAsk: q.alwaysAsk,
         })),
       })),
     });

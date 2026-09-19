@@ -133,8 +133,20 @@ export function resolveCostCode(
   written: string,
   codes: readonly { id: string; code: string }[],
 ): string | null {
-  const want = written.replace(/\s+/g, "").toLowerCase();
+  const want = normalizedCode(written);
   if (want === "") return null;
-  const hit = codes.find((c) => c.code.replace(/\s+/g, "").toLowerCase() === want);
+  const hit = codes.find((c) => normalizedCode(c.code) === want);
   return hit?.id ?? null;
+}
+
+/**
+ * Two spellings of the same code, reduced to one string.
+ *
+ * Exported because the outline editor checks a typed code against the
+ * tenant's lists as somebody types (ADR 0098) and MUST agree with what the
+ * interview will do later. Two normalizers would mean a code the editor calls
+ * good and the walk cannot find.
+ */
+export function normalizedCode(written: string): string {
+  return written.replace(/\s+/g, "").toLowerCase();
 }

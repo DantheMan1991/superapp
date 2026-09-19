@@ -205,6 +205,20 @@ export const jobEstimateOutlineQuestions = pgTable(
     unit: text("unit").notNull().default(""),
     /** When to ask it, what to watch for — prose, never parsed. */
     notes: text("notes").notNull().default(""),
+    /**
+     * A QUESTION THE INTERVIEW MAY NEVER DECIDE IS IRRELEVANT.
+     *
+     * The counterweight to letting the model skip (ADR 0098): *"is there
+     * asbestos?"* on a pre-war remodel must not be quietly judged moot
+     * because the answers went another way. Off by default, because most
+     * questions SHOULD be skippable — a walk that asks about rebar after you
+     * said block is a walk somebody learns to click through.
+     *
+     * It means always ASKED, not always ANSWERED. A hard block would trap
+     * somebody who genuinely does not know yet; an unanswered one is named
+     * before the bid goes out instead, which is where it is useful.
+     */
+    alwaysAsk: boolean("always_ask").notNull().default(false),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

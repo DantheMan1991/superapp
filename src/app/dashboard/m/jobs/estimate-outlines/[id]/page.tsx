@@ -7,6 +7,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { packContext } from "@/lib/packs/tenant-context";
 import { PageHeader } from "@/components/app/page-header";
+import { listCostCodes, listCostCodeSets } from "@/packs/jobs/ops";
 import { choicesOf, loadOutline } from "@/packs/jobs/outline-ops";
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import { PACK } from "@/packs/jobs/vocabulary";
@@ -36,8 +37,26 @@ export default async function EstimateOutlinePage({
     async (tx) => {
       const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
       const gate = interviewGateFrom(pack.config);
-      if (!gate.available) return { gate, loaded: null };
-      return { gate, loaded: await loadOutline(tx, ctx.tenant.id, id) };
+      if (!gate.available) return { gate, loaded: null, books: [] };
+      /**
+       * EVERY LIST, NOT JUST THE DEFAULT. A step's code is checked against all
+       * of them, because "2000 is in Residential phases but not in CSI
+       * divisions" is the useful sentence — an outline walked on a job using
+       * the other list would come out uncoded there and nowhere else.
+       */
+      const sets = await listCostCodeSets(tx, ctx.tenant.id);
+      const books = await Promise.all(
+        sets.map(async (set) => ({
+          id: set.id,
+          name: set.name,
+          isDefault: set.isDefault,
+          codes: (await listCostCodes(tx, ctx.tenant.id, set.id)).map((c) => ({
+            code: c.code,
+            name: c.name,
+          })),
+        })),
+      );
+      return { gate, loaded: await loadOutline(tx, ctx.tenant.id, id), books };
     },
     { role: ctx.role },
   );
@@ -65,6 +84,7 @@ export default async function EstimateOutlinePage({
         initialNotes={outline.notes}
         initialVersion={outline.version}
         canWrite={canWrite}
+        books={data.books}
         initialSteps={steps.map((step) => ({
           id: step.id,
           title: step.title,
@@ -77,6 +97,7 @@ export default async function EstimateOutlinePage({
             choices: choicesOf(q),
             unit: q.unit,
             notes: q.notes,
+            alwaysAsk: q.alwaysAsk,
           })),
         }))}
       />

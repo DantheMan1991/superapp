@@ -43,6 +43,8 @@ export interface EstimateOutlineQuestionSeed {
   choices?: string[];
   unit?: string;
   notes?: string;
+  /** The interview may never decide this one is irrelevant (ADR 0098). */
+  alwaysAsk?: boolean;
 }
 
 export interface EstimateOutlineStepSeed {
@@ -132,6 +134,7 @@ function questionFrom(raw: unknown): EstimateOutlineQuestionSeed | null {
     choices,
     unit: typeof q.unit === "string" ? q.unit.trim() : undefined,
     notes: typeof q.notes === "string" ? q.notes : undefined,
+    alwaysAsk: q.alwaysAsk === true,
   };
 }
 

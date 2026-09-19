@@ -16,10 +16,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Panel } from "@/components/app/panel";
 import type { OutlineQuestionKind } from "@/db/schema";
 import { moveItem } from "../estimate-order";
-import { outlineIssue, summarizeOutline, type OutlineStepShape } from "../outline-math";
+import {
+  codeStanding,
+  outlineIssue,
+  stepsWithUnknownCode,
+  summarizeOutline,
+  type CodeStanding,
+  type CostCodeBook,
+  type OutlineStepShape,
+} from "../outline-math";
 import { saveOutlineAction } from "../outline-actions";
 
 /**
@@ -50,6 +59,31 @@ import { saveOutlineAction } from "../outline-actions";
  * before E3a found it. This screen has no horizontal scroll to hide it in.
  */
 
+/**
+ * WHAT A TYPED COST CODE IS, against the lists this business keeps.
+ *
+ * Silent when the code is in every list, because the common case should say
+ * nothing. `partial` is the sentence worth having — a code in one list and
+ * not another comes out uncoded on a job using the other one, and nothing
+ * else would ever tell you.
+ */
+function CodeNote({ standing }: { standing: CodeStanding }) {
+  if (standing.state === "none") return null;
+  if (standing.state === "missing") {
+    return (
+      <span className="text-xs text-warning-foreground">
+        not in any of your cost code lists
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-muted-foreground">
+      {standing.name}
+      {standing.state === "partial" && ` · not in ${standing.missingFrom.join(", ")}`}
+    </span>
+  );
+}
+
 const KINDS: { value: OutlineQuestionKind; label: string; hint: string }[] = [
   { value: "choice", label: "Pick one", hint: "Buttons. One option per line below." },
   { value: "yes_no", label: "Yes or no", hint: "Two buttons." },
@@ -67,6 +101,7 @@ interface QuestionDraft {
   choicesText: string;
   unit: string;
   notes: string;
+  alwaysAsk: boolean;
 }
 
 interface StepDraft {
@@ -90,6 +125,7 @@ export interface LoadedStep {
     choices: string[];
     unit: string;
     notes: string;
+    alwaysAsk: boolean;
   }[];
 }
 
@@ -114,6 +150,7 @@ function draftsFrom(steps: readonly LoadedStep[]): StepDraft[] {
       choicesText: q.choices.join("\n"),
       unit: q.unit,
       notes: q.notes,
+      alwaysAsk: q.alwaysAsk,
     })),
   }));
 }
@@ -142,6 +179,7 @@ function payloadOf(name: string, notes: string, steps: readonly StepDraft[]) {
         choices: q.kind === "choice" ? linesOf(q.choicesText) : [],
         unit: q.kind === "number" ? q.unit.trim() : "",
         notes: q.notes.trim(),
+        alwaysAsk: q.alwaysAsk,
       })),
     })),
   };
@@ -154,6 +192,7 @@ export function OutlineEditor({
   initialSteps,
   initialVersion,
   canWrite,
+  books,
 }: {
   outlineId: string;
   initialName: string;
@@ -161,6 +200,8 @@ export function OutlineEditor({
   initialSteps: LoadedStep[];
   initialVersion: number;
   canWrite: boolean;
+  /** Every cost code list this business keeps, for checking a step's code. */
+  books: CostCodeBook[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -181,6 +222,15 @@ export function OutlineEditor({
   const summary = useMemo(
     () => summarizeOutline(payload.steps as OutlineStepShape[]),
     [payload],
+  );
+  /**
+   * Steps whose code NO list of this business has — a typo, and invisible
+   * until a bid comes out with an uncoded line. A step with no code at all is
+   * counted separately by `summarizeOutline`: that is a deliberate blank.
+   */
+  const unknownCodes = useMemo(
+    () => stepsWithUnknownCode(payload.steps as OutlineStepShape[], books),
+    [payload, books],
   );
 
   function patchStep(key: string, patch: Partial<StepDraft>) {
@@ -249,6 +299,13 @@ export function OutlineEditor({
             {summary.silentSteps > 0 && ` · ${summary.silentSteps} asking nothing`}
             {summary.uncodedSteps > 0 && ` · ${summary.uncodedSteps} with no cost code`}
           </p>
+          {unknownCodes > 0 && (
+            <p className="text-sm text-warning-foreground">
+              {unknownCodes === 1
+                ? "1 step carries a code none of your cost code lists has."
+                : `${unknownCodes} steps carry a code none of your cost code lists has.`}
+            </p>
+          )}
           <div className="ml-auto flex items-center gap-2">
             {issue && canWrite && (
               <p className="text-sm text-destructive">{issue}</p>
@@ -298,6 +355,7 @@ export function OutlineEditor({
               aria-label="Cost code"
               maxLength={60}
             />
+            <CodeNote standing={codeStanding(step.costCode, books)} />
             {canWrite && (
               <Button
                 size="icon"
@@ -450,6 +508,25 @@ export function OutlineEditor({
                   aria-label="Notes for the interviewer"
                   maxLength={2000}
                 />
+                <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={question.alwaysAsk}
+                    disabled={!canWrite}
+                    onCheckedChange={(next) =>
+                      patchQuestion(step.key, question.key, {
+                        alwaysAsk: next === true,
+                      })
+                    }
+                    aria-label="Always ask this question"
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">Always ask</span> —
+                    the walk may never decide this one does not apply. For the
+                    questions where being asked is the point: asbestos, a permit,
+                    who carries the risk.
+                  </span>
+                </label>
               </div>
             ))}
             {canWrite && (
@@ -467,6 +544,7 @@ export function OutlineEditor({
                         choicesText: "",
                         unit: "",
                         notes: "",
+                        alwaysAsk: false,
                       },
                     ],
                   })

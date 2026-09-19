@@ -79,6 +79,7 @@ const questionSchema = z.object({
   choices: z.array(z.string().max(120)).max(12).optional(),
   unit: z.string().trim().max(24).optional(),
   notes: z.string().trim().max(2000).optional(),
+  alwaysAsk: z.boolean().optional(),
 });
 
 const stepSchema = z.object({

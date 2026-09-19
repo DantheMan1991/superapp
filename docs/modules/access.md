@@ -18,6 +18,47 @@ becomes theatre.
 
 ## Build log
 
+### 2026-09-19 — A route handler is a door too (`claude/gate-route-handlers`, ADR 0096)
+
+Asked to make the restrictions finer, the first thing worth doing was auditing
+what the existing ones actually cover. **Nineteen route handlers read tenant
+data and NOT ONE called `requireModuleEnabled`.** Twelve called
+`isModuleEnabled`, which asks whether the BUSINESS has the tool and never
+whether this PERSON may reach it.
+
+So somebody whose level denied Accounting outright could still
+`GET /api/accounting/invoices/<id>/pdf` and be handed the invoice. They need the
+uuid, and uuids are in URLs, in emails, and in lists the same person can see on
+screens they do have.
+
+ADR 0093 and 0095 both argued from "349 call sites, the universal chokepoint".
+It is the universal chokepoint for PAGES and SERVER ACTIONS. It is not one for
+route handlers, and nobody checked — including
+`tests/module-gate-scan.test.ts`, which looked at `page.tsx` and `"use server"`
+files and had the same blind spot the convention did.
+
+`routeGate(tenantId, moduleId, areas?)` returns null or a `Response`, because a
+handler cannot `notFound()`. Nine signed-in data routes now use it. **Every
+area mapping came from the screen that LINKS to the route**, never from its
+name: `/api/accounting/documents/[id]/file` sounds like Documents and is linked
+only from the accounting Inbox. Guessing from names is how `0387` attached a
+policy to `journal_entries` because a column was called `entry_id`, two
+migrations ago.
+
+`areas` is ANY-OF: a commitment PDF is linked from both Ordered and
+Commitments, and demanding both would refuse people who should not be.
+
+The scan test now covers handlers in both directions — every one that reads
+tenant data calls `routeGate`, and none settles for `isModuleEnabled`. Proved by
+deleting the call from the invoice PDF route: 1 of 228 failed.
+
+**And the thing that matters more than the fix:** a screen gate is not a data
+gate. Denying `accounting:reports` hides the Reports pages; the same money is in
+the Journal, the trial balance and a bill's detail. If the intent is "must not
+see what we spend", areas do not deliver it and an owner who believes otherwise
+has been misled by a tick box. Only a row rule does, which is ADR 0094's kind of
+work, per dimension.
+
 ### 2026-09-19 — Every tool, not just accounting (`claude/tool-areas`, ADR 0095)
 
 The founder, correcting me: *"you said accounting areas after that, but it is
@@ -221,7 +262,8 @@ workspace has one member and they are the owner — so it is certified by
 - `drizzle/0387_entity_scope_rls.sql` — the 49 policies and the three functions.
   Its header is the reference for why each is shaped the way it is.
 - `tests/isolation/entity-scope.test.ts` — the lookup and the policies, apart.
-- `src/lib/modules.ts` — `requireModuleEnabled` (both questions),
+- `src/lib/modules.ts` — `requireModuleEnabled` (pages and actions),
+  `routeGate` (route handlers, which cannot `notFound()`),
   `requireAreaReachable`, `canReach`.
 - `src/app/dashboard/settings/access/` — the screen. Owners only.
 - `src/app/dashboard/team/team-roles.tsx` — `AccessLevelPicker`, where somebody

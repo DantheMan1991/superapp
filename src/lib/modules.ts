@@ -133,6 +133,54 @@ export async function requireAreaReachable(
 }
 
 /**
+ * THE GATE FOR A ROUTE HANDLER (ADR 0096). Null when allowed, a Response when
+ * not — a handler cannot `notFound()`.
+ *
+ * ── WHY THIS EXISTS, AND WHAT IT IS FIXING ──────────────────────────────────
+ *
+ * An audit of every route handler that reads tenant data found **nineteen of
+ * them and not one calling `requireModuleEnabled`**. Twelve checked
+ * `isModuleEnabled`, which asks whether the BUSINESS has the tool and never
+ * whether this PERSON may reach it. So a person whose access level denied
+ * Accounting outright could still `GET /api/accounting/invoices/<id>/pdf` and
+ * be handed the invoice. They need the uuid — and uuids are in URLs, in emails,
+ * and in lists the same person can see elsewhere.
+ *
+ * The pages and the server actions were covered from the day levels shipped,
+ * because both go through `requireModuleEnabled`. Route handlers never did, and
+ * `tests/module-gate-scan.test.ts` did not look at them. Both are fixed here.
+ *
+ * ── THE AREA IS NAMED, NOT DERIVED ──────────────────────────────────────────
+ *
+ * A page's area comes from its own path. `/api/accounting/invoices/[id]/pdf` is
+ * not under `/dashboard/m/`, so nothing can derive it — the route has to say
+ * which part of which tool it serves. Every mapping in this codebase was taken
+ * from the screen that actually links to the route, not from its name: the
+ * `entry_id` that meant `time_entries` rather than `journal_entries` is a
+ * recent enough lesson (`drizzle/0388`).
+ *
+ * `areas` is ANY-OF, not all-of. A commitment PDF is linked from both the
+ * Ordered tab and the Commitments tab, and somebody who can reach either has a
+ * legitimate route to the file.
+ */
+export async function routeGate(
+  tenantId: string,
+  moduleId: string,
+  areas: readonly string[] = [],
+): Promise<Response | null> {
+  const refuse = () =>
+    new Response(JSON.stringify({ error: "not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
+  if (!(await isModuleEnabled(tenantId, moduleId))) return refuse();
+  const denied = await deniedFor(tenantId);
+  if (!reaches(denied, moduleId)) return refuse();
+  if (areas.length > 0 && !areas.some((key) => reaches(denied, key))) return refuse();
+  return null;
+}
+
+/**
  * The non-throwing form, for a nav strip deciding which tabs to draw.
  *
  * A row this returns false for is not drawn AND its page 404s — the two read

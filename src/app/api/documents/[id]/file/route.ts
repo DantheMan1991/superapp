@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
-import { isModuleEnabled } from "@/lib/modules";
+import { routeGate } from "@/lib/modules";
 import { streamBlobResponse } from "@/lib/blob-stream";
 import { dispositionFor, sanitizeFileName } from "@/modules/documents/allowlist";
 
@@ -28,9 +28,9 @@ export async function GET(
   if (!ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (!(await isModuleEnabled(ctx.tenant.id, "documents"))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  // The BUSINESS has the tool AND this PERSON may reach it (ADR 0096).
+  const refused = await routeGate(ctx.tenant.id, "documents");
+  if (refused) return refused;
 
   const versionId = req.nextUrl.searchParams.get("v");
   const forceDownload = req.nextUrl.searchParams.get("download") === "1";

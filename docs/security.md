@@ -148,10 +148,19 @@ sites gained the second question without being edited.
 — every module page calls it or reads nothing, and every `"use server"` file
 that opens a transaction reaches it.
 
+**Every door asks it, and there are three kinds of door.** Pages and server
+actions go through `requireModuleEnabled`; **route handlers go through
+`routeGate`** ([ADR 0096](decisions/0096-a-route-handler-is-a-door-too.md)),
+which exists because an audit found nineteen handlers reading tenant data and
+none of them asking. `isModuleEnabled` is the weaker question — it is about the
+business, never the person — and on a route with a session it is not enough.
+
 **A screen gate is not a row gate, and the two must not be confused.** Which
 company's rows somebody may read is RLS, because Reports and a bill's detail
 page read the same `journal_lines` and no gate on a screen can tell those rows
-apart. That half landed in
+apart. It follows that **no arrangement of area tick boxes makes a number
+invisible**: a person who keeps the Journal can read every entry a report would
+have summarised. Anything finer than a company needs a row rule of its own. That half landed in
 [ADR 0094](decisions/0094-a-company-scope-is-resolved-by-the-transaction-not-passed-to-it.md):
 `memberships.entity_ids`, and 49 **`AS RESTRICTIVE`** policies (`drizzle/0387`)
 that are AND'd with whatever each table already had, so not one existing policy

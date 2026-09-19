@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
-import { isModuleEnabled } from "@/lib/modules";
+import { routeGate } from "@/lib/modules";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
 import {
@@ -38,9 +38,9 @@ export async function GET(
   if (!ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (!(await isModuleEnabled(ctx.tenant.id, "accounting"))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  // The BUSINESS has the tool AND this PERSON may reach it (ADR 0096).
+  const refused = await routeGate(ctx.tenant.id, "accounting", ["accounting:sales"]);
+  if (refused) return refused;
 
   const data = await withTenant(
     ctx.tenant.id,

@@ -5,6 +5,9 @@ import { z } from "zod";
 import { withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { getActiveModules } from "@/lib/modules";
+import { getFeature, getRenderableFeature } from "@/lib/features";
+import { allowedKeys, starterById } from "@/lib/access/starters";
 import {
   AccessError,
   createAccessLevel,
@@ -73,6 +76,74 @@ export async function createAccessLevelAction(input: unknown) {
       // The keys, not the notes: what a level takes away is the fact worth
       // being able to reconstruct later, and it is not personal data.
       meta: { name: level.name, denied: level.denied },
+    });
+    revalidatePath(BASE);
+    return { ok: true as const, id: level.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Create a level from a starter (ADR 0097).
+ *
+ * **THE DENIED LIST IS COMPUTED HERE, ON THE SERVER, FROM WHAT THIS BUSINESS
+ * ACTUALLY HAS.** A starter names keys that might exist — one list serves a
+ * farm and a builder — so the level it produces is *everything on offer today,
+ * minus what the starter allows*. Computing it on the client would bake in
+ * whatever that page happened to know, and a stale tab would write a level
+ * missing a tool switched on five minutes ago.
+ *
+ * What it creates is an ORDINARY level. Nothing marks it as having come from a
+ * starter, nothing reasserts it, and the owner can rename, retick or delete it
+ * like any other. After this call there is nothing left of the starter but a
+ * name.
+ */
+export async function createStarterLevelAction(input: unknown) {
+  const ctx = await requireTenantOwner();
+  const parsed = z.object({ starterId: z.string().max(40) }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const starter = starterById(parsed.data.starterId);
+  if (!starter) return { error: "That starter no longer exists." };
+
+  const onOffer = (await getActiveModules(ctx.tenant.id))
+    .filter(({ module }) => getRenderableFeature(module.id))
+    .flatMap(({ module }) => [
+      module.id,
+      ...(getFeature(module.id)?.areas ?? []).map((a) => `${module.id}:${a.key}`),
+    ]);
+  /**
+   * **NAMING A TOOL ALLOWS ITS PARTS TOO**, and this line is here because the
+   * first version did not. `allowedKeys` is pure and cannot expand a tool into
+   * its areas — it has no registry — so a starter saying `tools: ["documents"]`
+   * produced a level with Documents ticked and all seven of its parts unticked:
+   * a tool whose only page was its front door. The tests passed (the tool WAS
+   * allowed) and the screen said "Documents (some)", which is how it was found.
+   */
+  const whole = new Set(starter.tools);
+  const allowed = new Set(allowedKeys(starter));
+  const denied = onOffer.filter(
+    (key) => !allowed.has(key) && !whole.has(key.split(":")[0]),
+  );
+
+  try {
+    const level = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        createAccessLevel(tx, ctx.tenant.id, {
+          name: starter.name,
+          notes: starter.notes,
+          denied,
+        }),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "access.level_created",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "access_level",
+      targetId: level.id,
+      meta: { name: level.name, denied: level.denied, starter: starter.id },
     });
     revalidatePath(BASE);
     return { ok: true as const, id: level.id };

@@ -18,6 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccessLevelControls, AccessLevelForm } from "./access-controls";
+import { StarterButtons } from "./starter-buttons";
+import { STARTER_LEVELS } from "@/lib/access/starters";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +78,15 @@ export default async function AccessPage() {
     }));
   const nameOf = new Map(tools.map((t) => [t.slug, t.name]));
 
+  /**
+   * Only the starters whose name is still free, so the row empties itself as
+   * they get used rather than offering to make a second "Bookkeeping".
+   */
+  const taken = new Set(levels.map((l) => l.name.toLowerCase()));
+  const starters = STARTER_LEVELS.filter((s) => !taken.has(s.name.toLowerCase())).map(
+    (s) => ({ id: s.id, name: s.name, notes: s.notes }),
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -89,7 +100,7 @@ export default async function AccessPage() {
         <EmptyState
           icon={<KeyRound />}
           title="No levels yet"
-          description="A level is a job — “Field crew”, “Bookkeeper” — with the tools that job does not need switched off. You make it once and put people on it."
+          description="A level is a job — with the tools and the parts of tools that job does not need switched off. You make it once and put people on it."
         />
       ) : (
         <DataTable isEmpty={false}>
@@ -176,6 +187,8 @@ export default async function AccessPage() {
           </Table>
         </DataTable>
       )}
+
+      <StarterButtons starters={starters} />
 
       {/*
         SAID PLAINLY, on the screen, because the gap between what this does and

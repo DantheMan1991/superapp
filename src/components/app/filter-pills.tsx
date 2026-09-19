@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useIsDenied } from "@/components/app/access-provider";
 
 export interface FilterPill {
   /** Matched against `activeKey`. */
@@ -39,11 +40,32 @@ interface FilterPillsProps {
  * fill for filtering.
  */
 export function FilterPills({
-  items,
+  items: allItems,
   activeKey,
   variant = "solid",
   className,
 }: FilterPillsProps) {
+  /**
+   * A PILL ONTO A PAGE THIS PERSON MAY NOT OPEN IS NOT DRAWN (ADR 0095).
+   *
+   * `accent` pills are sub-navigation — Invoices / Customers / Reminders in
+   * accounting's Sales — so they are exactly as much a menu as the strip above
+   * them, and leaving one in place while its page refuses is the failure that
+   * makes a permission screen worthless.
+   *
+   * Applied to `solid` filters too, and harmlessly: a filter's href is the page
+   * you are already on with a query on the end, so it is never denied. Testing
+   * the variant would be a second rule to keep in step with the first.
+   *
+   * **NEVER THE ONE YOU ARE ON**, the rule the rail and the strip both keep: a
+   * link from an email must not leave somebody on a page with no way back. It
+   * cannot leak, because the page has already refused or allowed the request
+   * server-side by the time a pill renders.
+   */
+  const isDenied = useIsDenied();
+  const items = allItems.filter(
+    (item) => item.key === activeKey || !isDenied(item.href.split("?")[0]),
+  );
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>
       {items.map((item) => {

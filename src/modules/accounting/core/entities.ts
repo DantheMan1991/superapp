@@ -170,13 +170,32 @@ export async function getDefaultEntityId(
     ),
     columns: { id: true },
   });
-  if (!row) {
+  if (row) return row.id;
+  /**
+   * THE DEFAULT COMPANY MAY NOT BE ONE THIS PERSON CAN SEE (ADR 0094).
+   *
+   * `entities` is scoped by policy now, so somebody limited to Prefab inside a
+   * group whose default is Premier finds no default at all — and every "new
+   * bill" would have thrown a developer's error at them. Their default is their
+   * own: the first company they DO have, deterministically.
+   *
+   * Not a silent widening. The fallback can only pick a company already visible
+   * to this caller, and posting into it is something they are entitled to do —
+   * whereas the tenant default is a company whose WITH CHECK would refuse them
+   * anyway.
+   */
+  const mine = await tx.query.entities.findFirst({
+    where: eq(schema.entities.tenantId, tenantId),
+    orderBy: asc(schema.entities.name),
+    columns: { id: true },
+  });
+  if (!mine) {
     throw new LedgerError(
       "ENTITY_MISSING",
-      `tenant ${tenantId} has no default entity`,
+      `tenant ${tenantId} has no entity this caller may use`,
     );
   }
-  return row.id;
+  return mine.id;
 }
 
 /**

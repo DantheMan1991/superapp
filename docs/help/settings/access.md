@@ -48,7 +48,7 @@ Changes reach them on their next page load. Nobody is signed out.
 
 **It decides which screens somebody can open.** Not just what is in their menu — the pages themselves refuse.
 
-**It does not yet limit which company's books they see.** Somebody who can open a report can still run it across every company you keep. That is the next piece of this, and it works differently underneath, because for figures it has to be the database that refuses rather than the screen.
+**Which company's books somebody sees is set separately**, on the Team page beside their level. That one works differently underneath: a level takes a screen away, while a company limit means the figures are never given to them in the first place, on any screen. See the Team guide.
 
 **It does not change what anybody has already done.** Records, entries and documents are exactly where they were, whoever made them.
 

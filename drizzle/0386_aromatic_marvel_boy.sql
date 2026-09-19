@@ -1,0 +1,1 @@
+ALTER TABLE "memberships" ADD COLUMN "entity_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

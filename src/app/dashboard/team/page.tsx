@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AccountantToggle, AccessLevelPicker } from "./team-roles";
+import { AccountantToggle, MemberAccessButton } from "./team-roles";
 import { listAccessLevels } from "@/lib/access/levels";
 import { PageHeader } from "@/components/app/page-header";
 
@@ -37,8 +37,11 @@ export default async function TeamPage() {
     clerkUserId: string;
     role: "owner" | "staff" | "expert";
     accessLevelId: string | null;
+    accessLevelName: string | null;
+    entityIds: string[];
   }> = [];
   let levels: { id: string; name: string }[] = [];
+  let companies: { id: string; name: string }[] = [];
 
   if (ctx.role === "owner" && ctx.tenant.clerkOrgId) {
     // Idempotent sync so the panel works even before the webhook is configured
@@ -58,11 +61,18 @@ export default async function TeamPage() {
           clerkUserId: schema.profiles.clerkUserId,
           role: schema.memberships.role,
           accessLevelId: schema.memberships.accessLevelId,
+          accessLevelName: schema.accessLevels.name,
+          entityIds: schema.memberships.entityIds,
         })
         .from(schema.memberships)
         .innerJoin(
           schema.profiles,
           eq(schema.profiles.id, schema.memberships.profileId),
+        )
+        // LEFT, because most people are on no level and must still be listed.
+        .leftJoin(
+          schema.accessLevels,
+          eq(schema.accessLevels.id, schema.memberships.accessLevelId),
         )
         .where(eq(schema.memberships.tenantId, ctx.tenant.id))
         .orderBy(schema.profiles.email),
@@ -74,6 +84,20 @@ export default async function TeamPage() {
         { role: ctx.role },
       )
     ).map((l) => ({ id: l.id, name: l.name }));
+    /**
+     * Every company, read AS AN OWNER — who is never scoped, so this is the
+     * whole list even once other people are limited to part of it.
+     */
+    companies = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        tx
+          .select({ id: schema.entities.id, name: schema.entities.name })
+          .from(schema.entities)
+          .where(eq(schema.entities.tenantId, ctx.tenant.id))
+          .orderBy(schema.entities.name),
+      { role: ctx.role },
+    );
   }
 
   return (
@@ -152,10 +176,13 @@ export default async function TeamPage() {
           <CardHeader>
             <CardTitle>What people can reach</CardTitle>
             <CardDescription>
-              Everyone reaches every tool you have switched on. Put somebody on a
-              level to take some of it away — the tools are gone from their menu,
-              and the pages answer as if they were not there. Owners always reach
-              everything.{" "}
+              Everyone reaches every tool you have switched on, and every
+              company&rsquo;s books. A <strong className="font-medium">level</strong>{" "}
+              takes tools away — gone from their menu, and the pages answer as if
+              they were not there. <strong className="font-medium">Companies</strong>{" "}
+              takes books away, and that one is enforced underneath: entries,
+              invoices and reports for a company they are not on are not returned
+              to them at all. Owners always reach everything.{" "}
               <Link href="/dashboard/settings/access" className="underline">
                 Manage levels
               </Link>
@@ -163,7 +190,7 @@ export default async function TeamPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {levels.length === 0 ? (
+            {levels.length === 0 && companies.length < 2 ? (
               <p className="text-sm text-muted-foreground">
                 No levels yet. Make one under{" "}
                 <Link href="/dashboard/settings/access" className="underline">
@@ -191,10 +218,14 @@ export default async function TeamPage() {
                     ) : m.clerkUserId === ctx.userId ? (
                       <Badge variant="secondary">You</Badge>
                     ) : (
-                      <AccessLevelPicker
+                      <MemberAccessButton
                         membershipId={m.membershipId}
+                        name={m.name || m.email}
                         levelId={m.accessLevelId}
+                        levelName={m.accessLevelName}
+                        entityIds={m.entityIds}
                         levels={levels}
+                        companies={companies}
                       />
                     )}
                   </li>

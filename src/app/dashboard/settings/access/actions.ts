@@ -9,7 +9,7 @@ import {
   AccessError,
   createAccessLevel,
   deleteAccessLevel,
-  setMemberAccessLevel,
+  setMemberAccess,
   updateAccessLevel,
 } from "@/lib/access/levels";
 
@@ -141,19 +141,23 @@ export async function deleteAccessLevelAction(input: unknown) {
 }
 
 /**
- * Put somebody on a level, or take them off it.
+ * What one person may reach: their level, and which companies' books they see.
  *
- * Audited in both directions, and worth it for the reason moving the default
- * company is: this decides what a person can see for as long as nobody changes
- * it back, and "when did this change, and who changed it" is a question
- * somebody will eventually ask.
+ * ONE ACTION FOR BOTH, because they are one decision made on one screen, and
+ * two writers to a capability row is how a codebase acquires a privilege bug
+ * nobody can reproduce. Audited in both directions, and worth it for the reason
+ * moving the default company is: this decides what somebody can see for as long
+ * as nobody changes it back, and "when did this change, and who changed it" is
+ * a question somebody will eventually ask.
  */
-export async function setMemberAccessLevelAction(input: unknown) {
+export async function setMemberAccessAction(input: unknown) {
   const ctx = await requireTenantOwner();
   const parsed = z
     .object({
       membershipId: z.string().uuid(),
       levelId: z.string().uuid().nullable(),
+      /** Empty = every company, which is what every membership reads as today. */
+      entityIds: z.array(z.string().uuid()).max(200),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
@@ -161,21 +165,21 @@ export async function setMemberAccessLevelAction(input: unknown) {
     await withTenant(
       ctx.tenant.id,
       (tx) =>
-        setMemberAccessLevel(
-          tx,
-          ctx.tenant.id,
-          parsed.data.membershipId,
-          parsed.data.levelId,
-        ),
+        setMemberAccess(tx, ctx.tenant.id, parsed.data.membershipId, {
+          levelId: parsed.data.levelId,
+          entityIds: parsed.data.entityIds,
+        }),
       { role: ctx.role },
     );
     await logAudit({
-      action: "access.member_level_set",
+      action: "access.member_access_set",
       tenantId: ctx.tenant.id,
       actorClerkUserId: ctx.userId,
       targetType: "membership",
       targetId: parsed.data.membershipId,
-      meta: { levelId: parsed.data.levelId },
+      // Identifiers only, and both of them: which level and how many companies
+      // is the pair somebody will want to reconstruct.
+      meta: { levelId: parsed.data.levelId, companies: parsed.data.entityIds.length },
     });
     revalidatePath("/dashboard/team");
     revalidatePath(BASE);

@@ -151,7 +151,23 @@ that opens a transaction reaches it.
 **A screen gate is not a row gate, and the two must not be confused.** Which
 company's rows somebody may read is RLS, because Reports and a bill's detail
 page read the same `journal_lines` and no gate on a screen can tell those rows
-apart.
+apart. That half landed in
+[ADR 0094](decisions/0094-a-company-scope-is-resolved-by-the-transaction-not-passed-to-it.md):
+`memberships.entity_ids`, and 49 **`AS RESTRICTIVE`** policies (`drizzle/0387`)
+that are AND'd with whatever each table already had, so not one existing policy
+was rewritten.
+
+Two things about it belong in this document rather than only in the ADR:
+
+- **`withTenant` resolves the acting user itself** (`src/db/acting-user.ts`),
+  from `auth()`, because the scope cannot be an optional argument across 877
+  call sites — omitting it would grant every company, which is the direction S3
+  forbids. It sets `app.acting_user`, deliberately NOT `app.clerk_user_id`,
+  whose "forgot it, saw nothing" contract on the mail tables is left untouched.
+- **A RESTRICTIVE policy applies to the superadmin too**, so
+  `app_entity_allows()` begins with `app_is_superadmin()`. Any future
+  restrictive policy must do the same, or every webhook, cron and seed stops
+  seeing rows.
 
 **S5 — Zod-validate every boundary.**
 Server actions, route handlers, webhooks, JMAP responses, AI tool output. Parse

@@ -164,11 +164,12 @@ export default async function AccessPage() {
         </p>
         <p>
           <strong className="font-medium text-foreground">
-            It does not yet limit which company&rsquo;s books they see.
+            Which company&rsquo;s books somebody sees is set on the Team page,
           </strong>{" "}
-          Somebody who can open a report can still run it across every company.
-          That is the next piece of this, and it works differently underneath
-          because it has to be the database that refuses the figures.
+          beside their level, and it is a different kind of limit: a level takes
+          a screen away, while a company limit means the figures for the others
+          are never given to them at all &mdash; on any screen, including ones
+          built later.
         </p>
         <p>
           <strong className="font-medium text-foreground">Owners always reach everything.</strong>{" "}

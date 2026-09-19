@@ -2703,6 +2703,20 @@
       "when": 1789810513241,
       "tag": "0385_access_levels_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 386,
+      "version": "7",
+      "when": 1789815422960,
+      "tag": "0386_aromatic_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 387,
+      "version": "7",
+      "when": 1789815494412,
+      "tag": "0387_entity_scope_rls",
+      "breakpoints": true
     }
   ]
 }

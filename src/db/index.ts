@@ -3,6 +3,7 @@ import { drizzle, NeonDatabase } from "drizzle-orm/neon-serverless";
 import { sql } from "drizzle-orm";
 import ws from "ws";
 import * as schema from "./schema";
+import { actingClerkUserId } from "./acting-user";
 
 /**
  * Tenant-aware database access.
@@ -18,7 +19,14 @@ import * as schema from "./schema";
  *   app.clerk_user_id  — the acting user (drizzle/0043): lets a policy scope
  *                        rows to ONE PERSON inside a tenant. Mail needs it —
  *                        a mailbox is private correspondence, so tenant-level
- *                        scoping is not enough
+ *                        scoping is not enough. PASSED IN, and empty unless a
+ *                        caller opts in
+ *   app.acting_user    — who is making the request (ADR 0094): RESOLVED HERE
+ *                        from the session, never passed, because an optional
+ *                        argument across 877 call sites is not a boundary
+ *   app.entity_ids     — which companies that person may read (drizzle/0387).
+ *                        Computed ONCE here, in the statement below, so the
+ *                        per-row predicate only parses a string. Empty = all
  *
  * Nothing is visible until one of the helpers below sets that context inside
  * a transaction, so a query that forgets a `where` clause returns nothing
@@ -78,6 +86,16 @@ export async function withTenant<T>(
   // previous transaction on this backend left behind. Writing "" explicitly is
   // what makes "no user was passed" mean no user.
   const clerkUserId = opts?.userId ?? "";
+  /**
+   * NOT AN OPTION, AND THAT IS THE POINT (ADR 0094). Company scoping is
+   * enforced by policy, a policy has to know who is asking, and an argument
+   * that grants every company when omitted would be forgotten somewhere among
+   * 877 call sites — silently, and in the direction that leaks. Resolved from
+   * the session instead, so no call site can leave it out. Empty outside a
+   * request, which `app_entity_scope()` reads as unrestricted: scripts, seeds,
+   * crons and the isolation suite keep exactly what they had.
+   */
+  const actingUser = await actingClerkUserId();
   return getDb().transaction(async (tx) => {
     // ONE STATEMENT, NOT FOUR, and the reason is latency rather than tidiness.
     //
@@ -96,7 +114,11 @@ export async function withTenant<T>(
       sql`select set_config('app.role', 'member', true),
                  set_config('app.tenant_id', ${tenantId}, true),
                  set_config('app.tenant_role', ${tenantRole}, true),
-                 set_config('app.clerk_user_id', ${clerkUserId}, true)`,
+                 set_config('app.clerk_user_id', ${clerkUserId}, true),
+                 set_config('app.acting_user', ${actingUser}, true),
+                 set_config('app.entity_ids',
+                            app_entity_ids_for(${tenantId}::uuid, ${actingUser}),
+                            true)`,
     );
     return fn(tx);
   });

@@ -310,6 +310,31 @@ export const memberships = pgTable(
      */
     accessLevelId: uuid("access_level_id"),
     /**
+     * WHICH COMPANIES' BOOKS THIS PERSON MAY SEE (ADR 0094). Empty = all of
+     * them, which every membership reads as today and keeps.
+     *
+     * **THIS ONE IS NOT A MENU.** The access level beside it decides which
+     * SCREENS somebody may open, and application code answers that. This
+     * decides which ROWS they may read, and **Postgres answers it** — a
+     * restrictive policy on every table that carries an `entity_id`, and on
+     * every table that inherits one through its parent. A bill belonging to
+     * Prefab is not returned to somebody scoped to Premier, whatever the page
+     * asked for, and a page with a forgotten `where` gets nothing rather than
+     * somebody else's money.
+     *
+     * A `uuid[]` and not a join table: the list can only ever NARROW a query
+     * that is already tenant-scoped, so a stale or foreign id cannot widen
+     * anything — it simply matches no row. Companies are never deleted either
+     * (deactivated only; `journal_entries`' FK is NO ACTION), so there is no
+     * cascade for a join table to carry.
+     *
+     * Its escalation is the same one `access_level_id` has, and is closed by
+     * the same policy: `memberships_member_update` is owners-only since
+     * `drizzle/0385`. Empty means unrestricted, so a staff member who could
+     * write this row would be one statement from every set of books.
+     */
+    entityIds: uuid("entity_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    /**
      * When this row's Clerk-derived role was last confirmed against Clerk —
      * by the membership webhook or by reconcileTenantMemberships().
      *

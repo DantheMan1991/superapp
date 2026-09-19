@@ -19,6 +19,17 @@ export interface NavItem {
   icon: string;
   /** exact = highlight only on exact path match (for index routes) */
   exact?: boolean;
+  /**
+   * Paths under this row that belong to a DIFFERENT row, so standing in one
+   * does not light both.
+   *
+   * Every other pair in this rail is separated by making the PARENT `exact` —
+   * "Business settings" does it so "Taking payments" can live beneath it. A
+   * module row cannot: every page inside Accounting has to light Accounting.
+   * So the one sub-path that is somebody else's says so here, and the module
+   * defers. Two filled pills is "you are here" pointing at two places.
+   */
+  excludes?: string[];
   /** Unread count. Absent or 0 renders nothing — a zero badge is noise. */
   badge?: number;
   /**
@@ -145,7 +156,8 @@ function SidebarNav({
               const Icon = getIcon(item.icon);
               const active = item.exact
                 ? pathname === item.href
-                : pathname === item.href || pathname.startsWith(item.href + "/");
+                : inside(item.href) &&
+                  !(item.excludes ?? []).some((href) => inside(href));
               return (
                 <Link
                   key={item.href}

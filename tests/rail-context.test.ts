@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  companyKey,
   divisionKey,
   hiddenPacks,
   industryKey,
   railContexts,
   resolveContext,
+  type CompanyView,
   type DivisionView,
   type ProfileView,
 } from "@/lib/packs/rail-context";
 
 /**
- * WHICH SIDE OF THE BUSINESS THE RAIL IS SHOWING (ADR 0090, 0091).
+ * WHICH SIDE OF THE BUSINESS THE RAIL IS SHOWING (ADR 0090, 0091, 0092).
  *
  * Every assertion here is about being wrong in the SAFE direction. This is a
  * view preference with nothing behind it — no query, no policy — so its only
@@ -28,9 +30,9 @@ const PROFILES: ProfileView[] = [
   { slug: "agency", name: "Agency", packs: ["professional-services"] },
 ];
 
-const BOTH = [
-  { name: "Shrock Premier", industry: "construction" },
-  { name: "Hilltop Farm", industry: "homestead-farm" },
+const BOTH: CompanyView[] = [
+  { id: "c1", name: "Shrock Premier", industry: "construction" },
+  { id: "c2", name: "Hilltop Farm", industry: "homestead-farm" },
 ];
 
 /** The founder's own: three divisions on ONE company's books. */
@@ -48,8 +50,8 @@ describe("the sides on offer", () => {
   });
 
   it("gathers every company working in the same industry", () => {
-    const three = [...BOTH, { name: "Oak Row LLC", industry: "construction" }];
-    expect(railContexts(three, PROFILES)[0].companies).toEqual(["Shrock Premier", "Oak Row LLC"]);
+    const three = [...BOTH, { id: "c3", name: "Oak Row LLC", industry: "construction" }];
+    expect(railContexts(three, PROFILES)[0].hint).toBe("Shrock Premier, Oak Row LLC");
   });
 
   it("carries the packs the industry lists", () => {
@@ -60,16 +62,19 @@ describe("the sides on offer", () => {
   it("offers nothing when there is only one side", () => {
     expect(railContexts([BOTH[0]], PROFILES)).toEqual([]);
     expect(
-      railContexts([BOTH[0], { name: "Oak Row LLC", industry: "construction" }], PROFILES),
+      railContexts(
+        [BOTH[0], { id: "c3", name: "Oak Row LLC", industry: "construction" }],
+        PROFILES,
+      ),
     ).toEqual([]);
   });
 
   it("offers nothing when nobody has said anything", () => {
-    expect(railContexts([{ name: "A", industry: null }], PROFILES, [])).toEqual([]);
+    expect(railContexts([{ id: "c1", name: "A", industry: null }], PROFILES, [])).toEqual([]);
   });
 
   it("ignores a company whose profile no longer exists", () => {
-    const gone = [...BOTH, { name: "Old Co", industry: "taxidermy" }];
+    const gone = [...BOTH, { id: "c3", name: "Old Co", industry: "taxidermy" }];
     expect(railContexts(gone, PROFILES).map((c) => c.label)).toEqual([
       "Construction",
       "Homestead Farm",
@@ -84,7 +89,7 @@ describe("a division is a side of its own", () => {
    * no cabinet-shop profile and there will never be one.
    */
   it("offers a division even when every company is in the same industry", () => {
-    const premier = [{ name: "Shrock Premier", industry: "construction" }];
+    const premier = [BOTH[0]];
     const contexts = railContexts(premier, PROFILES, SHROCK);
     expect(contexts.map((c) => c.label)).toEqual([
       "Construction",
@@ -112,6 +117,79 @@ describe("a division is a side of its own", () => {
     ];
     const slugs = railContexts([], PROFILES, twins).map((c) => c.slug);
     expect(new Set(slugs).size).toBe(2);
+  });
+});
+
+describe("a company may say its own tools", () => {
+  /**
+   * The case ADR 0092 exists for. Shrock Prefab and Shrock Premier are BOTH in
+   * construction, and only one of them runs a factory — so the trade cannot be
+   * the answer for both, and the one that overrode it cannot share the other's
+   * row, because that row is named after the trade.
+   */
+  const PREFAB: CompanyView = {
+    id: "c9",
+    name: "Shrock Prefab",
+    industry: "construction",
+    packs: ["jobs", "production", "inventory"],
+  };
+
+  it("splits a company out of its trade once it has overridden it", () => {
+    const contexts = railContexts([BOTH[0], PREFAB], PROFILES);
+    expect(contexts.map((c) => c.label)).toEqual(["Construction", "Shrock Prefab"]);
+    expect(contexts[1].slug).toBe(companyKey("c9"));
+  });
+
+  it("carries the packs the company picked, not its trade's", () => {
+    const [, prefab] = railContexts([BOTH[0], PREFAB], PROFILES);
+    expect(prefab.packs).toEqual(["jobs", "production", "inventory"]);
+  });
+
+  /** The label is the company, so the line under it says which trade. */
+  it("keeps its line of business as the hint", () => {
+    const [, prefab] = railContexts([BOTH[0], PREFAB], PROFILES);
+    expect(prefab.hint).toBe("Construction");
+  });
+
+  /**
+   * THE INFERENCE IS THE DEFAULT AND IT STAYS THAT WAY. Opening the Edit dialog
+   * and saving writes `[]`, and `[]` has to mean "ask the profile" — otherwise
+   * an unrelated rename would quietly convert every company into an override
+   * and freeze its menu against the next pack the profile gains.
+   */
+  it("leaves a company that has not said where it was", () => {
+    const quiet = [{ ...PREFAB, packs: [] }, BOTH[1]];
+    const contexts = railContexts(quiet, PROFILES);
+    expect(contexts.map((c) => c.label)).toEqual(["Construction", "Homestead Farm"]);
+    expect(contexts[0].packs).toEqual(["assets", "inventory", "jobs"]);
+  });
+
+  /**
+   * A company nobody gave a trade is not a side — until it names its own tools,
+   * which is the whole point: Shrock Restoration answers to no profile.
+   */
+  it("offers a company with tools and no trade, under its own name alone", () => {
+    const orphan: CompanyView = {
+      id: "c8",
+      name: "Shrock Restoration",
+      industry: null,
+      packs: ["jobs"],
+    };
+    const [, restoration] = railContexts([BOTH[0], orphan], PROFILES);
+    expect(restoration.label).toBe("Shrock Restoration");
+    expect(restoration.hint).toBe("");
+  });
+
+  it("keys a company by id, so it can never collide with a division", () => {
+    const twin: DivisionView = { id: "c9", name: "Cabinet Shop", packs: ["jobs"] };
+    const slugs = railContexts([BOTH[0], PREFAB], PROFILES, [twin]).map((c) => c.slug);
+    expect(new Set(slugs).size).toBe(3);
+  });
+
+  it("hides the packs the company did not pick", () => {
+    const contexts = railContexts([BOTH[0], PREFAB], PROFILES);
+    const ON = ["land", "assets", "inventory", "production", "jobs"];
+    expect(hiddenPacks(companyKey("c9"), ON, contexts)).toEqual(["land", "assets"]);
   });
 });
 

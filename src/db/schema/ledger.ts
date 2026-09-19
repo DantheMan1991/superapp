@@ -363,6 +363,33 @@ export const entities = pgTable(
      * read as "not said" rather than break the books' table.
      */
     industry: text("industry"),
+    /**
+     * THE TOOLS THIS COMPANY ACTUALLY WORKS WITH, when its line of business
+     * does not describe them (ADR 0092). Empty means "not said", and not said
+     * means the profile above answers instead.
+     *
+     * `industry` is a SHORTCUT, not the fact. A profile lists the packs a
+     * TRADE uses, and a company is one business inside one: Shrock Prefab and
+     * Shrock Premier are both in construction and only one of them runs a
+     * factory. So the inference stays the default and this is the override —
+     * the same list `enterprises.packs` carries for a division (ADR 0091),
+     * because the question is the same question one rung up.
+     *
+     * A company that says its own tools becomes a side of the business named
+     * after ITSELF rather than after its trade, since it no longer shares a
+     * menu with the others in that trade.
+     *
+     * **A RAIL PREFERENCE AND NOTHING ELSE**, exactly like `industry` above:
+     * no query filters on it, no policy reads it, the books are untouched and
+     * every page stays reachable by URL. Core tools are never in the list —
+     * every company here is in one workspace and keeps the same books, mail
+     * and documents.
+     *
+     * Text, not a foreign key: a pack is a slug in a registry, not a row, and
+     * a slug for a pack that was never built or has been switched off is
+     * ignored when the rail reads it rather than made to break the books.
+     */
+    packs: text("packs").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -28,7 +28,7 @@ const EVERYTHING = "__all__";
  * half of them. Same weight as that one — a display preference, readable by
  * script, `Lax`, scoped to the app.
  *
- * It renders nothing below two industries. One side of the business is not a
+ * It renders nothing below two sides. One side of the business is not a
  * choice, and `railContexts` returns an empty list rather than making the
  * single-industry client learn the idea exists.
  */
@@ -77,10 +77,13 @@ export function RailContextSwitcher({
             <SelectItem key={c.slug} value={c.slug}>
               <span className="flex flex-col items-start">
                 <span>{c.label}</span>
-                {/* The companies, so the industry word is grounded in a name
-                    somebody recognises — without the control calling itself a
-                    company picker, which is what accounting's already is. */}
-                <span className="text-xs text-muted-foreground">{c.companies.join(", ")}</span>
+                {/* Whatever grounds the label in something somebody recognises:
+                    the companies under an industry word, the trade a company
+                    works in. A division has nothing to add and draws no second
+                    line rather than an empty one. */}
+                {c.hint !== "" && (
+                  <span className="text-xs text-muted-foreground">{c.hint}</span>
+                )}
               </span>
             </SelectItem>
           ))}

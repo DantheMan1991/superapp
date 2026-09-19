@@ -402,6 +402,13 @@ export async function updateEntity(
      * and its meaning lives entirely in `lib/packs/rail-context.ts`.
      */
     industry?: string;
+    /**
+     * The tools it actually works with (ADR 0092), or `[]` to unsay it and go
+     * back to whatever its line of business uses. Shape-checked at the action;
+     * a slug nothing answers to is ignored by the rail rather than refused, the
+     * way `industry` is.
+     */
+    packs?: string[];
   },
 ): Promise<Entity> {
   requireOwnerRole(ctx);
@@ -433,6 +440,7 @@ export async function updateEntity(
           : input.industry.trim() === ""
             ? null
             : input.industry.trim(),
+      packs: input.packs ?? entity.packs,
       updatedAt: new Date(),
     })
     .where(

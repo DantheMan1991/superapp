@@ -138,7 +138,17 @@ export default async function DashboardLayout({
     ctx.tenant.id,
     (tx) =>
       tx
-        .select({ name: schema.entities.name, industry: schema.entities.industry })
+        .select({
+          id: schema.entities.id,
+          name: schema.entities.name,
+          industry: schema.entities.industry,
+          /**
+           * The tools it actually works with, when its trade does not describe
+           * them (ADR 0092) — Shrock Prefab is in construction and runs a
+           * factory. Empty is the ordinary case and means the profile answers.
+           */
+          packs: schema.entities.packs,
+        })
         .from(schema.entities)
         .where(eq(schema.entities.tenantId, ctx.tenant.id)),
     { role: ctx.role },
@@ -180,6 +190,21 @@ export default async function DashboardLayout({
   const hiddenHrefs = hiddenPacks(activeContext, packSlugs, contexts).map(
     (slug) => `/dashboard/m/${slug}`,
   );
+
+  /**
+   * THE COMPANIES SCREEN IS LISTED TWICE ON PURPOSE — once as the accounting
+   * card that has always led to it, once as a Settings row, because it is where
+   * a company says what line of business it is in and nobody could find it.
+   *
+   * It only exists while accounting does: the page requires the module, and a
+   * rail row that redirects is worse than no row. The module row gives the path
+   * up so the two do not light at once.
+   */
+  const COMPANIES_HREF = "/dashboard/m/accounting/companies";
+  const accountingNav = coreItems.find(
+    (item) => item.href === "/dashboard/m/accounting",
+  );
+  if (accountingNav) accountingNav.excludes = [COMPANIES_HREF];
 
   const navGroups: NavGroup[] = [
     {
@@ -236,6 +261,24 @@ export default async function DashboardLayout({
           label: "Taking payments",
           icon: "payments",
         },
+        /**
+         * THE SETS OF BOOKS, AND WHERE A COMPANY SAYS WHAT IT DOES.
+         *
+         * An accounting screen listed under Settings, which is unusual and is
+         * the point: it had exactly ONE entry point, a stat card on the
+         * accounting overview, deliberately not an eleventh tab on a strip that
+         * already wrapped. That is a fine place to notice it and a hopeless one
+         * to look for it — the founder went hunting for "where do I set the
+         * industry per company", and it is in that row's Edit dialog. A
+         * division is configured one row below; the company that holds it
+         * should not be somewhere else entirely.
+         *
+         * Only when accounting is on, because the page requires the module and
+         * a rail row that redirects is worse than none.
+         */
+        ...(accountingNav
+          ? [{ href: COMPANIES_HREF, label: "Companies", icon: "building" }]
+          : []),
         // The parts of the business the money is reported against. Under
         // Settings rather than in a module because four packs name one and none
         // of them owns it; see src/db/schema/enterprises.ts.

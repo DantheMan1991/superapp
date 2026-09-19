@@ -513,6 +513,15 @@ back, with the mirror checked at each step.
 Mirrored into **`dimension_members`** with `dimension_type = 'enterprise'`, in
 the same transaction as every write.
 
+`packs` (`text[]`, `0382`) is the one column here that is not about reporting:
+the Layer 2a tools this division works with, a rail preference and nothing else
+(ADR 0091). **A company carries the same list one rung up** — `entities.packs`,
+ADR 0092 — with one difference: a company also has `entities.industry`, so its
+list can be INFERRED from the profile and the explicit one is an override. A
+division has no trade to infer from, so its list is always a choice. Both read
+as "not said" when empty, and the shared picker is
+`src/components/app/pack-field.tsx`.
+
 **Not columns, deliberately:**
 
 - **No `parent_id`.** A hierarchy is a tree, a tree needs a rolled-up report, and

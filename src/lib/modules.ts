@@ -3,6 +3,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { withTenant, schema, type Tx } from "@/db";
 import type { Module, TenantModule } from "@/db/schema";
+import { deniedFor } from "@/lib/access/current";
+import { reaches } from "@/lib/access/can";
 
 export interface ActiveModule {
   module: Module;
@@ -48,12 +50,64 @@ export async function isModuleEnabled(
   });
 }
 
-/** 404s when the module isn't switched on for this tenant. */
+/**
+ * 404s when the module isn't switched on for this tenant, **or when this
+ * person's access level does not reach it** (ADR 0093).
+ *
+ * ── WHY THE PERSON CHECK LIVES HERE ─────────────────────────────────────────
+ *
+ * 349 call sites already do this, because it has been step 4 of the
+ * add-a-module workflow since the beginning. Putting the second question in the
+ * same function means every page and every action that follows the existing
+ * convention is gated without being edited, and a module page written next year
+ * is gated by following the same convention rather than by remembering a new
+ * one. The alternative — a second call beside this one — is 349 edits now and
+ * one forgotten call later, and the forgotten one is a silent hole.
+ *
+ * **`notFound()` FOR BOTH, and the same `notFound()`.** A person who may not
+ * open Reports gets exactly what they get for a module the business never
+ * bought: nothing. Distinguishing "no such thing" from "not for you" tells them
+ * what exists, which is a thing an owner deliberately did not tell them.
+ *
+ * **IT IS A SCREEN GATE, NOT A ROW GATE**, and the distinction is load-bearing
+ * (ADR 0093). Which COMPANY's rows somebody may read is answered by Postgres,
+ * because Reports and Purchases read the same `journal_lines` and no gate on a
+ * screen can tell those rows apart. This closes the door; RLS is what makes the
+ * wall.
+ */
 export async function requireModuleEnabled(
   tenantId: string,
   moduleId: string,
 ): Promise<void> {
   if (!(await isModuleEnabled(tenantId, moduleId))) notFound();
+  if (!reaches(await deniedFor(tenantId), moduleId)) notFound();
+}
+
+/**
+ * The same gate for an AREA inside a module — `accounting:reports`.
+ *
+ * Separate from the call above rather than folded into it, because the module
+ * half has 349 callers that must not learn a second argument. A screen with an
+ * area calls both, in the order they are written here: what the business has,
+ * then what this person has.
+ */
+export async function requireAreaReachable(
+  tenantId: string,
+  areaKey: string,
+): Promise<void> {
+  if (!reaches(await deniedFor(tenantId), areaKey)) notFound();
+}
+
+/**
+ * The non-throwing form, for a nav strip deciding which tabs to draw.
+ *
+ * A row this returns false for is not drawn AND its page 404s — the two read
+ * the same list through `deniedFor`, which is cached per request, so they
+ * cannot disagree. A menu that hides what a page still serves is the failure
+ * mode that makes a permission screen worthless.
+ */
+export async function canReach(tenantId: string, key: string): Promise<boolean> {
+  return reaches(await deniedFor(tenantId), key);
 }
 
 /**

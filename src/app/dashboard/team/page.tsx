@@ -1,4 +1,5 @@
 import { OrganizationProfile } from "@clerk/nextjs";
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { reconcileTenantMemberships } from "@/lib/membership-sync";
@@ -11,7 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AccountantToggle } from "./team-roles";
+import { AccountantToggle, AccessLevelPicker } from "./team-roles";
+import { listAccessLevels } from "@/lib/access/levels";
 import { PageHeader } from "@/components/app/page-header";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +36,9 @@ export default async function TeamPage() {
     email: string;
     clerkUserId: string;
     role: "owner" | "staff" | "expert";
+    accessLevelId: string | null;
   }> = [];
+  let levels: { id: string; name: string }[] = [];
 
   if (ctx.role === "owner" && ctx.tenant.clerkOrgId) {
     // Idempotent sync so the panel works even before the webhook is configured
@@ -53,6 +57,7 @@ export default async function TeamPage() {
           email: schema.profiles.email,
           clerkUserId: schema.profiles.clerkUserId,
           role: schema.memberships.role,
+          accessLevelId: schema.memberships.accessLevelId,
         })
         .from(schema.memberships)
         .innerJoin(
@@ -62,6 +67,13 @@ export default async function TeamPage() {
         .where(eq(schema.memberships.tenantId, ctx.tenant.id))
         .orderBy(schema.profiles.email),
     );
+    levels = (
+      await withTenant(
+        ctx.tenant.id,
+        (tx) => listAccessLevels(tx, ctx.tenant.id),
+        { role: ctx.role },
+      )
+    ).map((l) => ({ id: l.id, name: l.name }));
   }
 
   return (
@@ -124,6 +136,71 @@ export default async function TeamPage() {
                 </li>
               ))}
             </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {/*
+        WHAT EACH PERSON CAN REACH (ADR 0093).
+        
+        Only once a level exists: a card offering a choice with one option in it
+        is furniture, and a workspace that has never wanted this should not have
+        to learn the idea. The link is how they get the first one.
+      */}
+      {ctx.role === "owner" && members.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>What people can reach</CardTitle>
+            <CardDescription>
+              Everyone reaches every tool you have switched on. Put somebody on a
+              level to take some of it away — the tools are gone from their menu,
+              and the pages answer as if they were not there. Owners always reach
+              everything.{" "}
+              <Link href="/dashboard/settings/access" className="underline">
+                Manage levels
+              </Link>
+              .
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {levels.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No levels yet. Make one under{" "}
+                <Link href="/dashboard/settings/access" className="underline">
+                  Access
+                </Link>{" "}
+                and it will appear here for every member.
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {members.map((m) => (
+                  <li
+                    key={m.membershipId}
+                    className="flex items-center justify-between gap-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {m.name || m.email}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {m.email}
+                      </p>
+                    </div>
+                    {m.role === "owner" ? (
+                      <Badge variant="secondary">Reaches everything</Badge>
+                    ) : m.clerkUserId === ctx.userId ? (
+                      <Badge variant="secondary">You</Badge>
+                    ) : (
+                      <AccessLevelPicker
+                        membershipId={m.membershipId}
+                        levelId={m.accessLevelId}
+                        levels={levels}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       )}

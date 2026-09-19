@@ -1,15 +1,16 @@
 # Team
 
-> Who can get into your workspace, how to invite someone, and how to give an outside accountant read-only access to the books.
+> Who can get into your workspace, how to invite someone, how to limit what a person can open, and how to give an outside accountant read-only access to the books.
 > **Route:** /dashboard/team
 > **Order:** 10
 
-Open **Team** under `Business` in the sidebar. The large panel is your business's membership, run by the sign-in service Yosher uses. Owners invite people and set roles there. Under it, owners mark an outside accountant.
+Open **Team** under `Business` in the sidebar. The large panel is your business's membership, run by the sign-in service Yosher uses. Owners invite people and set roles there. Under it, owners mark an outside accountant and set what each person can open.
 
 ## What you see
 
 - **The membership panel.** Three areas. `Members` lists everyone who has joined, with their role. `Invitations` is where you bring someone in, and where pending invitations wait. `General` holds the business's name and logo, and the options to leave or delete the organization where you are allowed to.
 - **Roles.** Two kinds. An owner can change anything in Yosher, including the settings pages. A member is staff: they use the tools but cannot change business settings or approve money.
+- **`What people can reach`.** Owners only, and only once somebody is a member. The card explains that everyone reaches every tool you have switched on, and that putting somebody on a level takes some of it away. Each row is a person, with `Reaches everything` on an owner, `You` on your own row, or a select naming their level. `Manage levels` opens Access. Until you have made a level the card says so and links you there.
 - **`Accounting access`.** Owners only. The card reads `Mark your outside accountant or bookkeeper. Accountants can read everything, review and sign off closes, and export the books — they can never post or change anything.` It lists every member with their name and email. At the right of each row is one of three things: `Owner`, because owners always have full access; `You`, on your own row, because you cannot change your own access; or the caption `Accountant` with a switch.
 
 ## How to invite someone
@@ -22,6 +23,18 @@ Open **Team** under `Business` in the sidebar. The large panel is your business'
 
 1. Open `Members` in the panel.
 2. Change the member's role, or remove them. Staff can see the list but cannot change it.
+
+## How to limit what somebody can open
+
+1. Make a level first, under `Settings` → **Access** — a job with the tools that job does not need switched off. See the Access guide.
+2. Back here, find the person under `What people can reach`.
+3. Pick their level. You see `Access level set.`
+4. To take it off, pick `Everything`. You see `Back to reaching everything.`
+
+- **It reaches them on their next page load.** Nobody is signed out.
+- **Owners always reach everything** and cannot be put on a level. Make somebody staff first if you want to limit them.
+- **You cannot change your own**, the same rule as accountant access — a locked-out owner with nobody else to unlock them is a problem nothing in the product can fix.
+- **It decides which screens they can open**, in the menu and by address. It does not yet decide which company's books they see.
 
 ## How to give an accountant read-only access
 
@@ -42,4 +55,4 @@ Roles are kept by the sign-in service and copied into Yosher when an owner opens
 
 ## Who can do what
 
-Owners manage members, invitations and accountant access. Staff see the membership list, cannot change it, and do not see `Accounting access`.
+Owners manage members, invitations, access levels and accountant access. Staff see the membership list, cannot change it, and see neither `Accounting access` nor `What people can reach`.

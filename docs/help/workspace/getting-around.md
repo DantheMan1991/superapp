@@ -18,7 +18,7 @@ Yosher opens on the **Overview** page. The sidebar on the left takes you to ever
   - `Modules`. One row for each core tool switched on: Accounting, CRM, Mail, Documents, Scheduling, Work. A tool that is not switched on has no row.
   - Your industry's name, such as `Homestead Farm`. The add-ons built for it: Land, Assets, Inventory, Livestock, Production, Retail. A business with no industry set sees `Add-ons` instead. With no add-ons switched on, the group is not shown.
   - `Business`. `Hours`, your retainer and the work log, and `Team`.
-  - `Settings`. Owners only. `Email setup`, `Billing`, `Taking payments`, `Companies` (while Accounting is on), your {{enterprise|plural|lower}}, and `Business settings`.
+  - `Settings`. Owners only. `Email setup`, `Billing`, `Taking payments`, `Companies` (while Accounting is on), `Access`, your {{enterprise|plural|lower}}, and `Business settings`.
 - **The row you are on** is filled in. A tool's row keeps its color whether or not you are on it.
 - **The count on `Mail`.** A number at the right end of the row is your unread mail across every connected mailbox, up to `99+`. A red dot instead of a number means a mailbox needs reconnecting, so the count cannot be trusted. No other row carries a mark, and an accountant never sees one, because that role has no mail.
 - **The business switcher.** At the bottom of the sidebar, showing the business you are in. See how to switch, below.

@@ -217,6 +217,65 @@ export const profiles = pgTable(
   (t) => [uniqueIndex("profiles_clerk_user_id_idx").on(t.clerkUserId)],
 );
 
+/**
+ * A NAMED SET OF WHAT SOMEBODY MAY REACH (ADR 0093). "Field crew",
+ * "Bookkeeper", "Shop lead" — a job, defined once and given to people.
+ *
+ * **NOT CALLED A ROLE**, and the collision is not hypothetical:
+ * `memberships.role` is already owner/staff/expert, Clerk owns the owner half
+ * of it, and a second thing called a role in the same table would be read
+ * wrongly by somebody inside a year. "Job" was the other candidate and collides
+ * with the `jobs` pack, where a job is a construction project.
+ *
+ * ── WHAT IT HOLDS ───────────────────────────────────────────────────────────
+ *
+ * `denied` is a list of KEYS this level cannot reach: a module slug
+ * (`marketing`), or an area inside one (`accounting:reports`, ADR 0093's
+ * second slice). Stored as what is OFF, so a screen built next year is
+ * reachable by everybody rather than silently missing for every level in every
+ * workspace — and so that switching this on changes nobody's access on the day
+ * it ships. An area sensitive enough to want the other direction says so in
+ * code, where the area is declared, rather than in every tenant's rows.
+ *
+ * Text, not a foreign key: a module is a slug in a registry and an area is a
+ * constant in code, so a key for something retired is ignored rather than made
+ * to break a workspace's access list.
+ *
+ * ── WHAT IT DOES NOT HOLD ───────────────────────────────────────────────────
+ *
+ * **WHICH COMPANIES.** That is on the membership, not here, because a job and a
+ * place of work vary independently: three companies by four jobs is twelve
+ * levels to maintain and four more the day a company is added. A level says
+ * what Dave does; his membership says whose books he does it in.
+ */
+export const accessLevels = pgTable(
+  "access_levels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What the owner calls it. Unique per tenant, enforced in code. */
+    name: text("name").notNull(),
+    /** Why it exists, for the owner who inherits it. Never shown to staff. */
+    notes: text("notes").notNull().default(""),
+    /** The keys this level may NOT reach. Empty = reaches everything. */
+    denied: text("denied").array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // The target of the composite FK from memberships, so a membership can
+    // never point at another tenant's level.
+    uniqueIndex("access_levels_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("access_levels_tenant_idx").on(t.tenantId),
+  ],
+);
+
 /** Who belongs to which tenant, with what role. Synced from Clerk org memberships. */
 export const memberships = pgTable(
   "memberships",
@@ -229,6 +288,27 @@ export const memberships = pgTable(
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
     role: membershipRole("role").notNull().default("staff"),
+    /**
+     * WHICH ACCESS LEVEL THIS PERSON IS ON (ADR 0093), or null for none.
+     *
+     * **NULL IS UNRESTRICTED, AND THAT IS WHAT MAKES THIS SHIPPABLE.** Every
+     * membership that existed before this column reads as null and keeps
+     * exactly the access it had; an owner takes things away deliberately, one
+     * person at a time. A permission system that changed everybody's access on
+     * the day it deployed would be found out by a client, not by us.
+     *
+     * **AN OWNER IS NEVER ON ONE**, and the database already agrees: Clerk owns
+     * owner-vs-member (security.md S6), and `memberships_member_update`
+     * (`drizzle/0085`) refuses tenant context any UPDATE on a row whose role is
+     * `owner`. So this cannot be set on an owner without `withSystem`, which no
+     * user-facing action here uses.
+     *
+     * Composite FK on `(tenant_id, access_level_id)`, and NO ACTION rather than
+     * SET NULL on purpose: deleting a level somebody is on would silently make
+     * them UNRESTRICTED, which is the one direction a permission system must
+     * never fail in. The database refuses, and the screen says who is on it.
+     */
+    accessLevelId: uuid("access_level_id"),
     /**
      * When this row's Clerk-derived role was last confirmed against Clerk —
      * by the membership webhook or by reconcileTenantMemberships().
@@ -261,6 +341,13 @@ export const memberships = pgTable(
   (t) => [
     uniqueIndex("memberships_tenant_profile_idx").on(t.tenantId, t.profileId),
     index("memberships_tenant_idx").on(t.tenantId),
+    // TENANT-SCOPED, so a membership can never name another workspace's level,
+    // and NO ACTION so a level nobody may delete out from under its people.
+    foreignKey({
+      name: "memberships_access_level_fk",
+      columns: [t.tenantId, t.accessLevelId],
+      foreignColumns: [accessLevels.tenantId, accessLevels.id],
+    }),
   ],
 );
 
@@ -882,6 +969,7 @@ export type Tenant = typeof tenants.$inferSelect;
 export type Profile = typeof profiles.$inferSelect;
 
 export type Membership = typeof memberships.$inferSelect;
+export type AccessLevel = typeof accessLevels.$inferSelect;
 
 export type NotificationDigestLog = typeof notificationDigestLog.$inferSelect;
 

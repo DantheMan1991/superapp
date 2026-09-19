@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
-import { isModuleEnabled } from "@/lib/modules";
+import { routeGate } from "@/lib/modules";
 import { loadOrderPaper, renderOrderPaper } from "@/packs/jobs/paper";
 import { PACK } from "@/packs/jobs/vocabulary";
 
@@ -19,7 +19,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const ctx = await resolveTenantContext();
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!(await isModuleEnabled(ctx.tenant.id, PACK))) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // The BUSINESS has the tool AND this PERSON may reach it (ADR 0096).
+  const refused = await routeGate(ctx.tenant.id, PACK, ["jobs:commitments", "jobs:ordered"]);
+  if (refused) return refused;
 
   const loaded = await withTenant(ctx.tenant.id, (tx) => loadOrderPaper(tx, ctx.tenant.id, id), { role: ctx.role });
   if (!loaded) return NextResponse.json({ error: "not found" }, { status: 404 });

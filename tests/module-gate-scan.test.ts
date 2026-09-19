@@ -23,6 +23,24 @@ import { describe, expect, it } from "vitest";
 
 const MODULE_PAGES = "src/app/dashboard/m";
 const ACTION_ROOTS = ["src/modules", "src/packs"];
+const ROUTE_ROOT = "src/app/api";
+
+/**
+ * Routes that read tenant data WITHOUT a signed-in person, and so cannot be
+ * gated on one. Each is listed with what authorises it instead, because an
+ * allowlist nobody has to justify is a hole with a comment on it.
+ */
+const NOT_A_SESSION: Record<string, string> = {
+  "src/app/api/inbound/resend/route.ts": "inbound mail webhook, signature-verified",
+  "src/app/api/device/tell/route.ts": "a device grant, not a session (ADR 0048)",
+  "src/app/api/marketing/sites/live/route.ts": "a published site, public by design",
+  "src/app/api/marketing/sites/images/[id]/route.ts": "an image on a published site",
+  "src/app/api/marketing/social/posts/[id]/image/route.ts": "a published post's image",
+  "src/app/api/marketing/brand/[id]/logo/route.ts": "a logo on a published site",
+  "src/app/api/payments/square/start/route.ts": "OAuth start; its own state token",
+  "src/app/api/feedback/attachments/[id]/route.ts":
+    "the reporter's own attachment; feedback is not a module (ADR 0053)",
+};
 
 function walk(dir: string, match: (f: string) => boolean): string[] {
   const out: string[] = [];
@@ -98,5 +116,50 @@ describe("every server action that opens a transaction is gated", () => {
       reachesGate(readFileSync(path, "utf8")),
       `${path} opens a transaction without reaching requireModuleEnabled`,
     ).toBe(true);
+  });
+});
+
+describe("every route handler that reads tenant data is gated", () => {
+  /**
+   * **THE SURFACE NOBODY WAS LOOKING AT.** Pages and server actions were gated
+   * from the day access levels shipped, because both go through
+   * `requireModuleEnabled`. Route handlers went through neither, and this test
+   * did not look at them: an audit found nineteen reading tenant data and **not
+   * one** calling the gate. Twelve asked `isModuleEnabled`, which is a question
+   * about the BUSINESS and never about the person — so somebody whose level
+   * denied Accounting could still fetch an invoice PDF by its uuid.
+   *
+   * A handler cannot `notFound()`, so it calls `routeGate` and returns what it
+   * gets back.
+   */
+  const handlers = walk(ROUTE_ROOT, (f) => f === "route.ts").filter((path) =>
+    /withTenant/.test(readFileSync(path, "utf8")),
+  );
+
+  it("finds the handlers at all", () => {
+    expect(handlers.length).toBeGreaterThan(10);
+  });
+
+  it.each(handlers)("%s calls routeGate, or is not a session at all", (path) => {
+    const src = readFileSync(path, "utf8");
+    if (src.includes("routeGate(")) return;
+    expect(
+      Object.keys(NOT_A_SESSION),
+      `${path} reads tenant data without routeGate. If it has no signed-in caller, add it to NOT_A_SESSION with the reason.`,
+    ).toContain(path);
+  });
+
+  /**
+   * And nothing may go back to the weaker question. `isModuleEnabled` asks
+   * whether the business has the tool; on a route with a session that is
+   * exactly the check that let the invoice PDF out.
+   */
+  it.each(handlers)("%s does not settle for isModuleEnabled", (path) => {
+    const src = readFileSync(path, "utf8");
+    if (path in NOT_A_SESSION) return;
+    expect(
+      src.includes("isModuleEnabled"),
+      `${path} still calls isModuleEnabled; routeGate asks the person too`,
+    ).toBe(false);
   });
 });

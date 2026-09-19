@@ -107,11 +107,23 @@ export default async function AccessPage() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
+                    <TableCell className="hidden max-w-[22rem] text-sm text-muted-foreground sm:table-cell">
                       {off.length === 0 ? (
                         <span className="text-subtle-foreground">Nothing — reaches everything</span>
                       ) : (
-                        off.join(", ")
+                        /*
+                          NAMED UP TO FOUR, THEN COUNTED. A level that takes away
+                          eleven tools listed them all and pushed the actions
+                          column off the side of the table — and "Accounting,
+                          Assets, Inventory, Land, Livestock, Mail, Marketing,
+                          Production, Retail, Scheduling, Work" is not a sentence
+                          anybody reads anyway. The dialog is where the full list
+                          belongs, one tick box at a time.
+                        */
+                        <span title={off.join(", ")}>
+                          {off.slice(0, 4).join(", ")}
+                          {off.length > 4 && ` and ${off.length - 4} more`}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm tabular-nums">

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { areaForPath, areaKeys, moduleSlugFromPath } from "@/lib/access/areas";
+import {
+  areaForPath,
+  areaKeys,
+  deniedAreaPaths,
+  moduleSlugFromPath,
+} from "@/lib/access/areas";
 import { reaches } from "@/lib/access/can";
 import { featureRegistry } from "@/lib/features";
 import type { AreaDefinition } from "@/modules/types";
@@ -99,6 +104,55 @@ describe("the area a path is in", () => {
   });
 });
 
+describe("a wildcard segment", () => {
+  /**
+   * **THE GAP THE FOUNDER FOUND BY OPENING THE SCREEN.** A job's real features
+   * are tabs on a job, not top-level pages: estimating lives at
+   * `/dashboard/m/jobs/<the job>/estimates`. An area that could only name the
+   * first segment offered Setup, Cost codes and WIP — everything the pack has
+   * except the work.
+   */
+  const JOB: AreaDefinition[] = [
+    { key: "estimates", name: "Estimates", paths: ["*/estimates"] },
+    { key: "warranty", name: "Warranty", paths: ["warranty", "*/warranty"] },
+    { key: "wip", name: "Work in progress" },
+  ];
+
+  it("matches a tab under a record's id", () => {
+    expect(areaForPath("/dashboard/m/jobs/abc-123/estimates", JOB)).toBe("jobs:estimates");
+    expect(areaForPath("/dashboard/m/jobs/00000000-0000/estimates/2", JOB)).toBe(
+      "jobs:estimates",
+    );
+  });
+
+  it("does NOT match the same word at the top level", () => {
+    expect(areaForPath("/dashboard/m/jobs/estimates", JOB)).toBeNull();
+  });
+
+  it("lets one area own both the cross-job list and the tab on one job", () => {
+    expect(areaForPath("/dashboard/m/jobs/warranty", JOB)).toBe("jobs:warranty");
+    expect(areaForPath("/dashboard/m/jobs/abc-123/warranty", JOB)).toBe("jobs:warranty");
+  });
+
+  /** The record's own page is not a tab, so it is never taken away. */
+  it("leaves the record's own page alone", () => {
+    expect(areaForPath("/dashboard/m/jobs/abc-123", JOB)).toBeNull();
+  });
+
+  /**
+   * ONE SEGMENT, NOT MANY. A greedy wildcard would let this claim paths it
+   * never named, and an area that owns more than it says is how a screen
+   * disappears for a reason nobody can find.
+   */
+  it("spans exactly one segment", () => {
+    expect(areaForPath("/dashboard/m/jobs/a/b/estimates", JOB)).toBeNull();
+  });
+
+  it("still refuses a partial segment", () => {
+    expect(areaForPath("/dashboard/m/jobs/abc/estimatesx", JOB)).toBeNull();
+  });
+});
+
 describe("every tool's declared areas", () => {
   /**
    * **EACH AREA MUST BE REACHABLE**, which is the whole point of declaring it:
@@ -131,5 +185,45 @@ describe("every tool's declared areas", () => {
         expect(reaches([slug], key), `${key} survives denying ${slug}`).toBe(false);
       }
     }
+  });
+});
+
+describe("the patterns handed to the client", () => {
+  const JOB: AreaDefinition[] = [
+    { key: "estimates", name: "Estimates", paths: ["*/estimates"] },
+    { key: "wip", name: "Work in progress" },
+  ];
+  const areasFor = (slug: string) => (slug === "jobs" ? JOB : undefined);
+
+  it("turns an area key into a route pattern", () => {
+    expect(deniedAreaPaths(["jobs:estimates"], areasFor)).toEqual([
+      "/dashboard/m/jobs/*/estimates",
+    ]);
+    expect(deniedAreaPaths(["jobs:wip"], areasFor)).toEqual(["/dashboard/m/jobs/wip"]);
+  });
+
+  /** A whole tool is already gone from the rail; its strip never renders. */
+  it("leaves whole-tool denials out", () => {
+    expect(deniedAreaPaths(["jobs"], areasFor)).toEqual([]);
+  });
+
+  it("ignores a key no area answers to", () => {
+    expect(deniedAreaPaths(["jobs:retired-last-year"], areasFor)).toEqual([]);
+    expect(deniedAreaPaths(["nosuchtool:x"], areasFor)).toEqual([]);
+  });
+
+  /**
+   * **THE JOIN, ASSERTED.** The server produces these and the client matches a
+   * real URL against them. A pattern that never matched would leave a tab in
+   * the strip while its page refused — the failure that makes the whole screen
+   * worthless — and nothing else in the suite covers both halves at once.
+   */
+  it("match the URLs the job tab strip actually links to", () => {
+    const [pattern] = deniedAreaPaths(["jobs:estimates"], areasFor);
+    const href = "/dashboard/m/jobs/9f1c2b7e-1111-2222-3333-444455556666/estimates";
+    const segments = href.split("/");
+    const parts = pattern.split("/");
+    expect(parts.length).toBeLessThanOrEqual(segments.length);
+    expect(parts.every((p, i) => p === "*" || p === segments[i])).toBe(true);
   });
 });

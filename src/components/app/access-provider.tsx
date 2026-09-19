@@ -50,7 +50,15 @@ export function useIsDenied(): (href: string) => boolean {
   const denied = useContext(DeniedPaths);
   return (href: string) => {
     if (denied.length === 0) return false;
-    const clean = href.replace(/\/+$/, "");
-    return denied.some((p) => clean === p || clean.startsWith(p + "/"));
+    const segments = href.replace(/\/+$/, "").split("/");
+    return denied.some((pattern) => {
+      const parts = pattern.split("/");
+      if (parts.length > segments.length) return false;
+      // `*` matches one segment, so a job's tabs — which live under the job's
+      // own id — can be named at all. Without it the client would compare
+      // `/dashboard/m/jobs/*/estimates` against a real uuid and never match,
+      // and the tab would stay in the strip while its page refused.
+      return parts.every((p, i) => p === "*" || p === segments[i]);
+    });
   };
 }

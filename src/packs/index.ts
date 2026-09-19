@@ -334,13 +334,50 @@ export const packRegistry: Record<string, PackDefinition> = {
    */
   jobs: {
     slug: "jobs",
+    /**
+     * A JOB'S REAL FEATURES ARE TABS ON A JOB, NOT TOP-LEVEL PAGES (ADR 0095).
+     *
+     * The first cut of this list was walked off the route tree and found six
+     * sections — Setup, Cost codes, WIP, Subcontractors, Bonding, Warranty —
+     * which is everything the pack has EXCEPT the work. Estimating, change
+     * orders and selections live at `/dashboard/m/jobs/<the job>/…`, so they
+     * were invisible to a walk that only saw the first segment. The founder
+     * found it by opening the screen and asking where estimating was.
+     *
+     * Hence `*`, which matches the job's own id. The tab labels are
+     * `TAB_COPY`'s, so the access screen and the job's own strip call the same
+     * thing the same thing.
+     *
+     * **THE JOB'S OWN PAGE IS NOT AN AREA.** `/dashboard/m/jobs/<id>` is the
+     * overview, and a level that takes every tab away still opens a job rather
+     * than a page that says it does not exist.
+     *
+     * **`cost` IS DENIABLE HERE THOUGH ADR 0089 CALLS IT NON-NEGOTIABLE**, and
+     * the two rules are about different questions. That one says a BUSINESS
+     * cannot switch Job cost off, because a pack whose claim is cost-against-
+     * budget would have been the wrong thing to install. This says one PERSON
+     * may be kept out of it — which is the most ordinary restriction in
+     * construction: the crew sees the job, the office sees the margin.
+     */
     areas: [
-      { key: "setup", name: "Setup" },
-      { key: "cost-codes", name: "Cost codes" },
+      { key: "estimates", name: "Estimates", paths: ["*/estimates"] },
+      { key: "contracts", name: "Contracts", paths: ["*/contracts"] },
+      { key: "changes", name: "Changes", paths: ["*/changes"] },
+      { key: "selections", name: "Selections", paths: ["*/selections"] },
+      { key: "cost", name: "Job cost", paths: ["*/cost"] },
+      { key: "ordered", name: "Ordered", paths: ["*/ordered"] },
+      { key: "schedule", name: "Schedule", paths: ["*/schedule"] },
+      { key: "log", name: "Field", paths: ["*/log"] },
+      { key: "drawings", name: "Drawings", paths: ["*/drawings"] },
+      { key: "commitments", name: "Commitments", paths: ["*/commitments"] },
+      // The cross-job list and the tab on one job are the same feature seen two
+      // ways, so one area owns both paths rather than two that can disagree.
+      { key: "warranty", name: "Warranty", paths: ["warranty", "*/warranty"] },
       { key: "wip", name: "Work in progress" },
       { key: "subcontractors", name: "Subcontractors" },
       { key: "bonding", name: "Bonding" },
-      { key: "warranty", name: "Warranty" },
+      { key: "cost-codes", name: "Cost codes" },
+      { key: "setup", name: "Setup" },
     ],
     name: "Jobs",
     icon: "hard-hat",

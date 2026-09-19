@@ -13,6 +13,7 @@ import {
   Factory,
   FolderOpen,
   HardHat,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
   Mail,
@@ -95,6 +96,9 @@ export const ICONS: Record<string, LucideIcon> = {
   // Jobs. Added WITH the pack, per the header above: five packs once shipped
   // showing a generic box because their key was never added here.
   "hard-hat": HardHat,
+  // What each person may open (ADR 0093). A key, not a lock: the screen
+  // is about handing access out, not about shutting people out.
+  key: KeyRound,
   mail: Mail,
   // The feedback console, and the button on every client screen (ADR 0053).
   message: MessageSquarePlus,

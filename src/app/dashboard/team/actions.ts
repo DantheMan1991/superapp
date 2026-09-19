@@ -26,6 +26,16 @@ export async function setMemberAccountantAction(
   const { membershipId, accountant } = parsed.data;
 
   try {
+    /**
+     * `{ role }` IS LOAD-BEARING HERE, not decoration (ADR 0093). The
+     * memberships UPDATE policy is owners-only in the database now
+     * (`drizzle/0385`), because `access_level_id` lives on this row and a staff
+     * member who could write their own would be one UPDATE from unrestricted.
+     * Without this option `withTenant` defaults `app.tenant_role` to `staff` —
+     * the least privileged value, by design — and this action would be refused
+     * by Postgres. The value comes from `requireTenantOwner()` and nowhere else
+     * (security.md S3).
+     */
     const result = await withTenant(ctx.tenant.id, async (tx) => {
       const [row] = await tx
         .select({
@@ -67,7 +77,7 @@ export async function setMemberAccountantAction(
         meta: { profileId: row.profileId, accountant },
       });
       return { ok: true as const };
-    });
+    }, { role: ctx.role });
     if ("error" in result) return result;
     revalidatePath("/dashboard/team");
     return { ok: true };

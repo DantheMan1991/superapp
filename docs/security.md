@@ -139,6 +139,20 @@ Server actions and route handlers each authorize independently. A page having
 authorized its own render grants nothing to the action it submits to. Client
 state is never evidence.
 
+Since [ADR 0093](decisions/0093-what-somebody-may-open-is-a-gate-which-company-s-rows-they-may-read-is-postgres.md)
+this is also **what a PERSON may open**, and it is answered in the same place
+the module gate already was: `requireModuleEnabled()` asks both "has the
+business got this" and "may this person reach it", so all 349 existing call
+sites gained the second question without being edited.
+`tests/module-gate-scan.test.ts` keeps the convention honest in both directions
+— every module page calls it or reads nothing, and every `"use server"` file
+that opens a transaction reaches it.
+
+**A screen gate is not a row gate, and the two must not be confused.** Which
+company's rows somebody may read is RLS, because Reports and a bill's detail
+page read the same `journal_lines` and no gate on a screen can tell those rows
+apart.
+
 **S5 — Zod-validate every boundary.**
 Server actions, route handlers, webhooks, JMAP responses, AI tool output. Parse
 into a typed shape; never index into unvalidated input.
@@ -154,7 +168,13 @@ without one (crons, sweeps) has no such authority to consult, so it reads
 
 - `role = 'owner'` is writable **only under `withSystem()`** — the member
   UPDATE policy is narrowed to non-owner rows and staff/expert values
-  (`drizzle/0085`). A tenant transaction cannot mint an owner.
+  (`drizzle/0085`), **and since `drizzle/0385` the whole policy also requires
+  `app_current_tenant_role() = 'owner'`**. That second narrowing is what makes
+  `memberships.access_level_id` mean anything ([ADR 0093](decisions/0093-what-somebody-may-open-is-a-gate-which-company-s-rows-they-may-read-is-postgres.md)):
+  null on that column is UNRESTRICTED, so while tenant context had a general
+  UPDATE on non-owner rows, a restricted staff member was one statement away
+  from the run of the workspace. A tenant transaction can now neither mint an
+  owner nor edit anybody's access but as one.
 - `clerk_role_synced_at` records when Clerk last confirmed the row. A job that
   intends to act as somebody **reconciles first**
   (`reconcileTenantMemberships()`) and treats a stale row as `staff`.

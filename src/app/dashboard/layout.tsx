@@ -11,6 +11,8 @@ import { LaunchOverlay } from "@/components/app/launch-overlay";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
+import { deniedFor } from "@/lib/access/current";
+import { reaches } from "@/lib/access/can";
 import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { schema, withTenant } from "@/db";
@@ -86,11 +88,27 @@ export default async function DashboardLayout({
       ctx.support ? Promise.resolve(0) : countUnreadReplies(ctx),
     ]);
 
-  // Only features that are both switched on AND renderable appear in nav. A
-  // capability pack can be declared, installed by a profile and switched on
-  // while still having no `Component` — that is the empty-slot state, and it
-  // must never reach the rail.
-  const renderable = active.filter(({ module }) => getRenderableFeature(module.id));
+  /**
+   * Only features that are both switched on AND renderable appear in nav. A
+   * capability pack can be declared, installed by a profile and switched on
+   * while still having no `Component` — that is the empty-slot state, and it
+   * must never reach the rail.
+   *
+   * **AND ONLY WHAT THIS PERSON MAY REACH** (ADR 0093). Read through the same
+   * `deniedFor` the gate in `requireModuleEnabled` uses, cached for this
+   * request, so the menu and the page cannot disagree — a row missing here
+   * whose page still served would make the whole screen worthless, and a row
+   * present here whose page 404s is a dead end somebody will report as a bug.
+   *
+   * This is NOT the same filter as `hiddenHrefs` further down. That one is the
+   * "Working on" view preference, which this person chose and can undo; this
+   * one is what an owner decided, and there is no control for it anywhere in
+   * the rail. They are deliberately computed apart and never merged.
+   */
+  const denied = await deniedFor(ctx.tenant.id);
+  const renderable = active.filter(
+    ({ module }) => getRenderableFeature(module.id) && reaches(denied, module.id),
+  );
   const toNavItem = ({ module }: (typeof renderable)[number]): NavItem => ({
     href: `/dashboard/m/${module.id}`,
     label: module.name,
@@ -279,6 +297,15 @@ export default async function DashboardLayout({
         ...(accountingNav
           ? [{ href: COMPANIES_HREF, label: "Companies", icon: "building" }]
           : []),
+        /**
+         * WHAT EACH PERSON MAY OPEN (ADR 0093). Owners only, like the rest of
+         * this group, and unconditional: there is no "nothing below two" rule
+         * here, because a workspace with one member today hires its second
+         * without anybody thinking to come looking for a screen they have never
+         * seen. Team is where you put somebody on a level; this is where the
+         * levels are made.
+         */
+        { href: "/dashboard/settings/access", label: "Access", icon: "key" },
         // The parts of the business the money is reported against. Under
         // Settings rather than in a module because four packs name one and none
         // of them owns it; see src/db/schema/enterprises.ts.

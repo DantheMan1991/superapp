@@ -24,15 +24,59 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
   },
   accounting: {
     slug: "accounting",
+    /**
+     * ACCOUNTING IS SPLIT TO THE LEAF (ADR 0097), because the founder's two
+     * examples are both leaves: *"a project manager might need the invoicing
+     * and bills but shouldn't see anything else"*, and *"an office person might
+     * have access to journal entries, but not certain reports."* Twelve
+     * sections could express neither.
+     *
+     * **A SECTION'S LANDING PAGE BELONGS TO NO AREA, AND REDIRECTS TO THE
+     * FIRST CHILD THE READER CAN OPEN.** `/accounting/sales` used to redirect
+     * to `sales/invoices` flatly. Giving that landing page to `invoices` was
+     * the first thing tried here and it was worse: denying Invoices would hide
+     * the Sales tab, stranding Customers — reachable by URL, with no door.
+     * Leaving it unclaimed and redirecting past what somebody cannot open
+     * means any combination of children works.
+     *
+     * **LONGEST MATCH WINS**, which is what lets `banking/deposits` carve
+     * itself out of `banking`, and each report out of the Reports index. The
+     * index itself is deliberately NOT an area: it is the section's front door,
+     * and it filters its own list to what the reader can open.
+     */
     areas: [
       { key: "receipts", name: "Inbox" },
+      // The register list, one register, its import and its reconcile. The two
+      // children below carve themselves out by being longer.
       { key: "banking", name: "Banking" },
-      { key: "sales", name: "Sales" },
-      { key: "purchases", name: "Purchases" },
+      { key: "deposits", name: "Deposits", paths: ["banking/deposits"] },
+      { key: "bank-rules", name: "Bank rules", paths: ["banking/rules"] },
+      { key: "invoices", name: "Invoices", paths: ["sales/invoices"] },
+      { key: "customers", name: "Customers", paths: ["sales/customers"] },
+      { key: "credit-memos", name: "Credit memos", paths: ["sales/credit-memos"] },
+      { key: "catalogue", name: "Catalogue", paths: ["sales/catalogue"] },
+      {
+        key: "invoice-recurring",
+        name: "Recurring invoices",
+        paths: ["sales/recurring"],
+      },
+      { key: "reminders", name: "Reminders", paths: ["sales/reminders"] },
+      { key: "bills", name: "Bills", paths: ["purchases/bills"] },
+      { key: "vendors", name: "Vendors", paths: ["purchases/vendors"] },
       { key: "accounts", name: "Chart of accounts" },
       { key: "journal", name: "Journal" },
-      { key: "recurring", name: "Recurring" },
-      { key: "reports", name: "Reports" },
+      { key: "recurring", name: "Recurring entries" },
+      { key: "pnl", name: "Profit & loss", paths: ["reports/pnl"] },
+      { key: "balance-sheet", name: "Balance sheet", paths: ["reports/balance-sheet"] },
+      {
+        key: "general-ledger",
+        name: "General ledger",
+        paths: ["reports/general-ledger"],
+      },
+      { key: "ar-aging", name: "Who owes you", paths: ["reports/ar-aging"] },
+      { key: "ap-aging", name: "What you owe", paths: ["reports/ap-aging"] },
+      { key: "cash", name: "Cash", paths: ["reports/cash"] },
+      { key: "sales-tax", name: "Sales tax", paths: ["reports/sales-tax"] },
       { key: "trial-balance", name: "Trial balance" },
       { key: "opening", name: "Opening balances" },
       { key: "close", name: "Close" },

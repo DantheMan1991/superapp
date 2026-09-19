@@ -5,9 +5,10 @@
 > first — the whole design turns on one distinction and the file makes no sense
 > without it.
 
-**FOURTEEN TOOLS, SIXTY-ONE AREAS, AND 49 POLICIES.** Three slices, three
-ADRs: 0093 the levels and the module gate, 0094 the company scope in Postgres,
-0095 the parts of every tool.
+**FOURTEEN TOOLS, SEVENTY-FIVE AREAS, AND 49 POLICIES.** Five ADRs: 0093 the
+levels and the module gate, 0094 the company scope in Postgres, 0095 the parts
+of every tool, 0096 the route handlers nobody had gated, 0097 accounting to the
+leaf plus the starters.
 
 **THE DISTINCTION.** Which SCREENS somebody may open is a gate in application
 code. Which ROWS they may read is RLS. Reports, Journal, Trial balance and a
@@ -17,6 +18,51 @@ which screen is asking, and Postgres has no concept of that. So areas are gated
 becomes theatre.
 
 ## Build log
+
+### 2026-09-19 — Accounting to the leaf, and somewhere to start (`claude/accounting-areas`, ADR 0097)
+
+Neither of the founder's examples fitted inside Accounting's twelve sections:
+*"a project manager might need the invoicing and bills but shouldn't see
+anything else"*, and *"an office person might have access to journal entries,
+but not certain reports."*
+
+**Twelve areas became twenty-six.** Banking into registers, Deposits and Bank
+rules; Sales into Invoices, Customers, Credit memos, Catalogue, Recurring
+invoices and Reminders; Purchases into Bills and Vendors; Reports into its seven
+statements, each its own switch.
+
+**A SECTION'S LANDING PAGE BELONGS TO NO AREA AND REDIRECTS PAST WHAT SOMEBODY
+CANNOT OPEN.** `/accounting/sales` redirected flatly to `sales/invoices`, which
+became a 404 for anybody without Invoices. Giving the landing page to the
+Invoices area was tried first **and was worse** — denying Invoices hid the Sales
+tab entirely, stranding Customers: reachable by URL, with no door in the
+product. That is the shape this codebase has shipped before, where the only way
+to a thing was through a thing you did not have.
+
+The reports INDEX filters its own list, because it links to the seven reports
+directly rather than through a nav primitive, and says so plainly when none are
+open to the reader. `FilterPills` filters too — accounting's sub-navigation is
+pills rather than the `CategoryStrip` ADR 0095 covered, and a pill is exactly as
+much a menu as a tab.
+
+**AND A LEVEL HAS SOMEWHERE TO START.** Five starters, offered under the table
+while their name is free. QuickBooks ships fixed user types below its top tier
+and free-form permissions are an Advanced feature, because free-form permissions
+are work and work nobody does is a feature nobody has. Picking one creates an
+ORDINARY level — no special row, nothing that reasserts itself — and the denied
+list is computed on the SERVER from what that business actually has, so one list
+serves a farm and a builder.
+
+**Driving it found a bug the tests did not.** `tools: ["documents"]` allowed the
+tool and none of its seven parts, so the level's only reachable Documents page
+was the front door. Every test passed — the TOOL was allowed — and it was the
+screen reading *"Documents (some)"* where it should have said nothing that gave
+it away. Naming a tool now allows its parts, with a test that reads the real
+registry.
+
+Driven end to end: the *Invoicing and bills* starter creates a level whose
+Accounting is Inbox, Invoices, Customers, Credit memos, Bills and Vendors —
+and no journal, no bank, no reports, no chart of accounts, no close.
 
 ### 2026-09-19 — A route handler is a door too (`claude/gate-route-handlers`, ADR 0096)
 
@@ -250,6 +296,8 @@ workspace has one member and they are the owner — so it is certified by
   the tool, in `src/modules/index.ts` and `src/packs/index.ts`.
 - `src/lib/access/areas.ts` — **pure.** `areaForPath` turns a pathname into a
   key, on segment boundaries so `report` cannot claim `reports`.
+- `src/lib/access/starters.ts` — **pure.** The five levels an owner can start
+  from, and `allowedKeys`. Names the job, never the trade (ADR 0004).
 - `src/components/app/access-provider.tsx` — the server hands the client
   finished route prefixes; `CategoryStrip` filters on them.
 - `src/db/acting-user.ts` — who is making this request, resolved from `auth()`
@@ -319,6 +367,12 @@ workspace has one member and they are the owner — so it is certified by
 - ~~**Areas inside a module are declared but unbuilt.**~~ — **done
   2026-09-19**, ADR 0095, and for every tool rather than the twelve accounting
   keys first imagined: fourteen tools, sixty-one areas.
+- **An area's name is fixed in code**, so a tenant who renames customers to
+  clients still reads "Customers" on the Access screen. `LabelDefinition` is the
+  machinery that would fix it and the areas do not use it.
+- **On or off, never view-versus-edit.** QuickBooks Advanced has that axis and
+  this does not. Every case so far is about visibility; the first that genuinely
+  needs *"can raise an invoice, cannot void one"* is when to design it.
 - **Server actions are not gated by area.** The gate derives the area from
   `x-yosher-path`, and for an action that is the SUBMITTING PAGE's path, not the
   action's own — so it is defence in depth for writes rather than a boundary. It

@@ -17,6 +17,14 @@ Everyone on your team reaches every tool you have switched on. That is the start
 - **When there are none**, the page says `No levels yet` with the same definition and one button.
 - **The card at the bottom** says three things plainly, and they are worth reading before you rely on this. It is rewritten whenever any of them changes.
 
+## Starting from one we wrote
+
+Under the table there is a row of levels you can start from — `Sales and customers`, `Bills and purchases`, `Invoicing and bills`, `Bookkeeping`, `Time only`. Click one and it becomes a real level you own: rename it, change what it opens, delete it. Nothing about it stays special.
+
+Each disappears from the row once you have a level by that name, so the row empties as you use it.
+
+Most businesses start here and adjust, rather than working through every tick box on the first day.
+
 ## How to make a level
 
 1. {button:Add a level|primary}.
@@ -34,6 +42,10 @@ Everyone on your team reaches every tool you have switched on. That is the start
 **A tool's own front page always stays** while the tool is ticked, so they always land somewhere rather than on a page that says it does not exist.
 
 **Some tools have no parts** — Assets and Mail are one screen each — so for those it is the whole tool or nothing.
+
+**Accounting splits furthest**, because it has the most in it: the Inbox, Banking with its Deposits and Bank rules, Invoices, Customers, Credit memos, Catalogue, Recurring invoices, Reminders, Bills, Vendors, the Chart of accounts, the Journal, Recurring entries, each of the seven reports on its own, the Trial balance, Opening balances, Close and Companies. So *invoicing and bills and nothing else* is a real setting, and so is *the journal but not the profit and loss*.
+
+**A section lands wherever they can go.** Somebody with Customers but not Invoices still clicks `Sales` and arrives at Customers. If every part of a section is closed to them, the section is closed to them.
 
 **Overview, `What needs you`, Guides, their own hours and their own phone are always there.** They are not tools you switched on; they are how a person uses the product at all.
 

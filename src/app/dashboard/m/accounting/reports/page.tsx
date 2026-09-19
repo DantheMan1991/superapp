@@ -8,7 +8,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { canReach, requireModuleEnabled } from "@/lib/modules";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { labelsForTenant } from "@/lib/packs/tenant-context";
@@ -16,9 +16,16 @@ import { partyWords, type PartyWords } from "@/lib/parties/vocabulary";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Each tile carries the area key that guards its own page (ADR 0097), because
+ * this index links to the seven reports directly rather than through a nav
+ * primitive — so nothing else would filter it, and a tile onto a page that
+ * refuses is the failure that makes a permission screen worthless.
+ */
 const REPORTS = [
   {
     href: "/dashboard/m/accounting/reports/pnl",
+    area: "accounting:pnl",
     icon: BarChart3,
     title: "Profit & Loss",
     description:
@@ -26,6 +33,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/balance-sheet",
+    area: "accounting:balance-sheet",
     icon: Landmark,
     title: "Balance Sheet",
     description:
@@ -33,6 +41,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/general-ledger",
+    area: "accounting:general-ledger",
     icon: BookOpen,
     title: "General Ledger",
     description:
@@ -40,6 +49,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/cash",
+    area: "accounting:cash",
     icon: Wallet,
     title: "Cash Activity",
     description:
@@ -47,6 +57,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/ar-aging",
+    area: "accounting:ar-aging",
     icon: Hourglass,
     title: "A/R Aging",
     description:
@@ -54,6 +65,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/ap-aging",
+    area: "accounting:ap-aging",
     icon: Hourglass,
     title: "A/P Aging",
     // The one description naming a party. A function of the tenant's word rather
@@ -63,6 +75,7 @@ const REPORTS = [
   },
   {
     href: "/dashboard/m/accounting/reports/sales-tax",
+    area: "accounting:sales-tax",
     icon: Percent,
     title: "Sales Tax Summary",
     description:
@@ -74,6 +87,11 @@ export default async function ReportsHubPage() {
   const ctx = await requireTenant();
   const words = partyWords(labelsForTenant(ctx.tenant));
   await requireModuleEnabled(ctx.tenant.id, "accounting");
+  const reports = (
+    await Promise.all(
+      REPORTS.map(async (r) => ((await canReach(ctx.tenant.id, r.area)) ? r : null)),
+    )
+  ).filter((r): r is (typeof REPORTS)[number] => r !== null);
 
   return (
     <div className="space-y-6">
@@ -82,8 +100,15 @@ export default async function ReportsHubPage() {
         description={`Financial statements for ${ctx.tenant.name}, computed live from the ledger.`}
       />
       <AccountingNav />
+      {reports.length === 0 && (
+        // Not an empty grid: an owner has closed every report to this person,
+        // and saying so is better than a page that looks broken.
+        <p className="rounded-xl bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          No reports are open to you. Ask an owner if you need one.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {REPORTS.map((r) => (
+        {reports.map((r) => (
           <Link
             key={r.href}
             href={r.href}

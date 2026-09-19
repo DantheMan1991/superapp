@@ -188,7 +188,13 @@ export async function deleteAccessLevel(
 }
 
 /**
- * Put somebody on a level, or take them off it (`null`).
+ * Put somebody on a level and say which companies they may see — in ONE write,
+ * because they are one decision about one person and two writers to a
+ * capability row is how a codebase acquires a privilege bug nobody can
+ * reproduce.
+ *
+ * `levelId: null` is no level; `entityIds: []` is every company. Both are the
+ * unrestricted value, and both are what every membership reads as today.
  *
  * **AN OWNER CANNOT BE PUT ON ONE.** Refused here with a sentence, and refused
  * again by `memberships_member_update` (`drizzle/0085`, narrowed by `0385`),
@@ -196,12 +202,13 @@ export async function deleteAccessLevel(
  * The app-layer check exists so the person gets an explanation rather than a
  * failed transaction.
  */
-export async function setMemberAccessLevel(
+export async function setMemberAccess(
   tx: Tx,
   tenantId: string,
   membershipId: string,
-  levelId: string | null,
+  input: { levelId: string | null; entityIds: string[] },
 ): Promise<void> {
+  const { levelId, entityIds } = input;
   const member = await tx.query.memberships.findFirst({
     where: and(
       eq(schema.memberships.tenantId, tenantId),
@@ -224,9 +231,29 @@ export async function setMemberAccessLevel(
     });
     if (!level) throw new AccessError("NOT_FOUND", "That level no longer exists.");
   }
+  /**
+   * WHICH COMPANIES, CHECKED AGAINST THIS TENANT'S OWN (ADR 0094).
+   *
+   * The composite FK that guards `access_level_id` has no equivalent for an
+   * array, so the check is here — and it is not decoration: a uuid from
+   * somewhere else would be a company nobody can name, sitting in a list an
+   * owner thinks they understand. Read under the caller's tx, so it is the
+   * companies THEY can see, and an owner can see all of them.
+   */
+  if (entityIds.length > 0) {
+    const theirs = await tx
+      .select({ id: schema.entities.id })
+      .from(schema.entities)
+      .where(eq(schema.entities.tenantId, tenantId));
+    const known = new Set(theirs.map((e) => e.id));
+    const stranger = entityIds.find((id) => !known.has(id));
+    if (stranger) {
+      throw new AccessError("NOT_FOUND", "One of those companies no longer exists.");
+    }
+  }
   await tx
     .update(schema.memberships)
-    .set({ accessLevelId: levelId })
+    .set({ accessLevelId: levelId, entityIds: [...new Set(entityIds)].sort() })
     .where(
       and(
         eq(schema.memberships.tenantId, tenantId),

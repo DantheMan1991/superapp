@@ -24,17 +24,24 @@ Open **Team** under `Business` in the sidebar. The large panel is your business'
 1. Open `Members` in the panel.
 2. Change the member's role, or remove them. Staff can see the list but cannot change it.
 
-## How to limit what somebody can open
+## How to limit what somebody can reach
 
-1. Make a level first, under `Settings` → **Access** — a job with the tools that job does not need switched off. See the Access guide.
-2. Back here, find the person under `What people can reach`.
-3. Pick their level. You see `Access level set.`
-4. To take it off, pick `Everything`. You see `Back to reaching everything.`
+Each person's row under `What people can reach` has a button showing where they stand today — `Every tool · every company` for most people. Click it to open **Access for** that person.
+
+Two settings, and they are not the same kind of thing:
+
+**`Level`** — which screens they can open. Pick one of your levels, or `Every tool`. Make levels under `Settings` → **Access**; see the Access guide.
+
+**`Companies`** — which books they can see. Only appears once you keep more than one company. Tick the ones they work in; tick nothing and they see them all.
+
+Then {button:Save|primary}.
 
 - **It reaches them on their next page load.** Nobody is signed out.
-- **Owners always reach everything** and cannot be put on a level. Make somebody staff first if you want to limit them.
+- **Owners always reach everything** and cannot be limited. Make somebody staff first if you want to.
 - **You cannot change your own**, the same rule as accountant access — a locked-out owner with nobody else to unlock them is a problem nothing in the product can fix.
-- **It decides which screens they can open**, in the menu and by address. It does not yet decide which company's books they see.
+- **`Level` hides menus. `Companies` hides money.** A level takes screens away. Companies goes deeper: entries, invoices, bills, bank rows and reports for a company they are not on are not given to them at all, on any screen, including ones built later.
+- **Somebody on exactly one company stops seeing the company control entirely.** Reports, lists and statements simply cover their company, the way they do for a business that only ever had one.
+- **What is shared stays shared.** Your chart of accounts, contacts, {{customer|plural|lower}} and {{vendor|plural|lower}} are one list for the whole business, so everybody still sees those.
 
 ## How to give an accountant read-only access
 

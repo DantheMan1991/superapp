@@ -67,6 +67,13 @@ export interface EnterpriseInput {
   name: string;
   kind?: string;
   notes?: string;
+  /**
+   * The Layer 2a packs this division works with — a RAIL PREFERENCE and
+   * nothing else (ADR 0091). Empty means it has not said, and a division that
+   * has not said is never offered as a side to switch to. Core tools are never
+   * in here: every division posts to the same books.
+   */
+  packs?: string[];
 }
 
 export async function listEnterprises(
@@ -243,6 +250,16 @@ export async function updateEnterprise(
   }
   if (input.kind !== undefined) patch.kind = cleanKind(input.kind);
   if (input.notes !== undefined) patch.notes = input.notes.trim();
+  /**
+   * Deduplicated and sorted, so the stored value does not churn on every save
+   * just because the boxes were ticked in a different order. Nothing here
+   * checks the slugs against the registry — a pack that was never built, or one
+   * switched off later, is ignored when the rail reads the list rather than
+   * made to break a division.
+   */
+  if (input.packs !== undefined) {
+    patch.packs = [...new Set(input.packs.map((p) => p.trim()).filter(Boolean))].sort();
+  }
 
   const rows = await tx
     .update(schema.enterprises)

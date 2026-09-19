@@ -96,6 +96,28 @@ export const enterprises = pgTable(
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is safe. */
     metadata: jsonb("metadata").notNull().default({}),
+    /**
+     * THE PACKS THIS DIVISION WORKS WITH — a rail preference, nothing more
+     * (ADR 0091). Empty means "not said", and a division that has not said is
+     * never offered as a side to switch to.
+     *
+     * **A LIST, NOT AN INDUSTRY**, and that is the difference from
+     * `entities.industry`. A company IS in a line of business, so its packs
+     * follow from the profile. A division is not: *Cabinet Shop* is not an
+     * industry and there will never be a cabinet-shop profile — it wants Jobs
+     * for its change orders and its estimates, Production for the runs, and
+     * Inventory for the sheet goods, which is a set nothing can infer. So it is
+     * picked.
+     *
+     * **CORE TOOLS ARE NOT IN HERE.** Every division keeps Accounting, Mail,
+     * Documents and the rest, because every division posts to the same books.
+     * Only Layer 2a packs are ever put away.
+     *
+     * Text, not a foreign key: a pack is a slug in a registry, not a row, and a
+     * slug for a pack that was never built or has been switched off is ignored
+     * rather than made to break a division.
+     */
+    packs: text("packs").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

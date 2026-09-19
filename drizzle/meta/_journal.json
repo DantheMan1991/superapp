@@ -2675,6 +2675,13 @@
       "when": 1789774391787,
       "tag": "0381_cooing_sister_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 382,
+      "version": "7",
+      "when": 1789778671861,
+      "tag": "0382_fat_warlock",
+      "breakpoints": true
     }
   ]
 }

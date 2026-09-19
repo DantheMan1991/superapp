@@ -50,6 +50,24 @@ half a margin, waiting on slice 4 for the other half.
 
 ## Build log
 
+### 2026-09-18 — A division says which tools it works with (`claude/a-division-has-its-own-tools`, ADR 0091)
+
+`enterprises.packs`, `text[]` default `{}` (migration `0382`). The Layer 2a
+packs this division works with — **a rail preference and nothing else**. No
+query filters on it, no report groups by it, no policy reads it.
+
+It is the only thing in this table that is not about reporting, and that is
+worth stating rather than hiding: a division is the thing a builder points at
+when he says "the cabinet shop", so it is where "the cabinet shop's tools"
+belongs. A second table keyed on the same row would be a join for one array.
+
+Empty means not said, and a division that has not said is never offered as a
+side to switch to. Core tools are never in the list — every division posts to
+the same books — and the picker on the settings screen does not offer them.
+
+The screen gained its first tenant guide at the same time
+(`docs/help/settings/enterprises.md`); it had none.
+
 ### 2026-09-01 — A standing instruction says what it was for (`claude/a-standing-instruction-says-what-it-was-for`)
 
 The last surface, and the only one where nobody is watching when the tag is

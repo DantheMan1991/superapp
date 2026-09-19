@@ -1,0 +1,1 @@
+ALTER TABLE "enterprises" ADD COLUMN "packs" text[] DEFAULT '{}'::text[] NOT NULL;

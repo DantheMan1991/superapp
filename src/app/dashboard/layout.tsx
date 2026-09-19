@@ -11,7 +11,7 @@ import { LaunchOverlay } from "@/components/app/launch-overlay";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { schema, withTenant } from "@/db";
 import { getIndustryProfile, listIndustryProfiles } from "@/industries";
@@ -148,12 +148,36 @@ export default async function DashboardLayout({
     name: p.name,
     packs: p.packs,
   }));
-  const contexts = railContexts(companies, profileViews);
+  /**
+   * A DIVISION IS A SIDE OF THE BUSINESS TOO (ADR 0091), and it has to be:
+   * Shrock Premier is one company on one set of books whose Cabinet Shop,
+   * Excavation and Construction divisions want different tools. No industry can
+   * express that, so the division carries its own pack list.
+   */
+  const divisions = await withTenant(
+    ctx.tenant.id,
+    (tx) =>
+      tx
+        .select({
+          id: schema.enterprises.id,
+          name: schema.enterprises.name,
+          packs: schema.enterprises.packs,
+        })
+        .from(schema.enterprises)
+        .where(
+          and(
+            eq(schema.enterprises.tenantId, ctx.tenant.id),
+            eq(schema.enterprises.status, "active"),
+          ),
+        ),
+    { role: ctx.role },
+  );
+  const contexts = railContexts(companies, profileViews, divisions);
   const activeContext = resolveContext(
     (await cookies()).get(RAIL_CONTEXT_COOKIE)?.value,
     contexts,
   );
-  const hiddenHrefs = hiddenPacks(activeContext, packSlugs, contexts, profileViews).map(
+  const hiddenHrefs = hiddenPacks(activeContext, packSlugs, contexts).map(
     (slug) => `/dashboard/m/${slug}`,
   );
 

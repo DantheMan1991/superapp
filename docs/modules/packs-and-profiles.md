@@ -9,6 +9,53 @@
 
 ## Build log
 
+### 2026-09-18 — A division is a side of the business too (`claude/a-division-has-its-own-tools`, ADR 0091)
+
+ADR 0090 shipped in the morning and met the case it could not express by the
+afternoon. The founder: *"Shrock Premier has 3 divisions within it.
+Construction, Excavation, and Cabinet Shop. These are all on the premier books.
+Not separate books… it would be nice for the cabinet shop division to only see
+the cabinet shop modules."*
+
+**One company, one set of books, three different menus.** `entities.industry`
+cannot say that — the company is one thing and it is in construction.
+
+**A DIVISION CARRIES THE PACK LIST ITSELF** (`enterprises.packs`, `text[]`,
+migration `0382`, live on dev and prod before the merge). The company's tag
+stays an INFERENCE — a company IS in a line of business, so its packs follow
+from the profile — and a division's is a CHOICE, because nothing can infer it:
+there is no cabinet-shop profile and there should never be one. A profile lists
+packs for a whole trade; "cabinet shop" is a way of working inside one, and
+inventing profiles per division is how Layer 2b becomes a dumping ground.
+
+`railContexts` now returns a context carrying its own `packs`, so an industry
+and a division are the same shape by the time anything reads them and
+`hiddenPacks` no longer needs the profiles at all.
+
+**Core tools are never in the list** — the founder's own words, *"It will need
+all of the core tools too"*, and the reason is structural: every division posts
+to the same books. The picker does not offer them.
+
+**Empty means not said, and not said means not offered**, which is what keeps
+the idea invisible to a business with one way of working. The context key is
+prefixed by kind (`industry:construction`, `division:<uuid>`) because an id and
+a slug share one cookie; ADR 0090's unprefixed values read as "everything",
+which is the safe fallback rather than a migration.
+
+Driven on Hilltop Farm: a division given Jobs, Inventory and Production — a set
+no profile lists — appeared in the switcher beside the two company industries
+and produced exactly that rail, with every core tool still there. Clearing it
+proved the fallback by accident: the cookie still named it, it was no longer on
+offer, and the rail came back whole.
+
+**What it deliberately does NOT do**, and the next question it raises, is in the
+ADR: a division config rung is a third layer on `profile → tenant`, and it is
+not built because the merge semantics are shapeless without one real case — and
+because the *major* half of "a division's own layer" is a plugin system, which
+the model already refuses (`Layer 3 — data only, never code`). The sanctioned
+route is P5, and the lesson written into the last one is that what a provider
+may do must be **deliberately tiny**.
+
 ### 2026-09-18 — "Working on": which side of the business the rail shows (`claude/working-on-this-side`, ADR 0090)
 
 The founder, running a farm and a building company out of one workspace:

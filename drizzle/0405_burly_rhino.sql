@@ -1,0 +1,2 @@
+ALTER TABLE "job_estimates" DROP CONSTRAINT "job_estimates_format_valid";--> statement-breakpoint
+ALTER TABLE "job_estimates" ADD CONSTRAINT "job_estimates_format_valid" CHECK ("job_estimates"."format" in ('letter', 'brochure', 'price_sheet'));

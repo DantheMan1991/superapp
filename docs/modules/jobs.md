@@ -120,6 +120,56 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — The price sheet (`claude/the-price-sheet`)
+
+The document the founder actually hands clients, which he sent as a 195-row
+PDF and which everything since has been groundwork for: **one running list,
+numbered straight through, with the parts of the bid as rows of their own.**
+A third format beside the letter and the brochure.
+
+**IT ARRANGES; IT NEVER COMPUTES.** Every amount comes from `price.rows`,
+which is the model's — the rule `proposal-sections.ts` has held since E5a,
+because two things that both work out a total is how they come to disagree.
+`ProposalRow` gained `groupId` so a format can group rows by item without
+re-deriving a penny, and a test asserts the sheet's amounts are the model's
+own list.
+
+**A ROW AT `$0.00` IS PRINTED.** Roughly sixty of his 195 rows are zero on
+purpose — *"By Owner"*, *"(N/A)"*, *"Supplied by Turkel"*, *"Included in
+Plumbing Quote"* — and they are the document's exclusions, said where the
+client reads them. Dropping an item because it costs nothing would throw away
+the most careful part of the sheet. (The same realisation that corrected X4's
+zero-line rule a few hours earlier.)
+
+**THE NUMBER RUNS THROUGH THE HEADINGS TOO**, because the numbers exist so
+somebody can say *"look at 102"* on the phone, and a scheme that skipped the
+headings would not survive one section being added.
+
+### The bug driving it found, which no test would have
+
+An item with **no** section, on a sheet where others have one, printed
+directly under the previous heading — `Loft framing` sat under `FINISHES`
+having never been put there. **A client document saying something nobody
+meant.** The file's own comment claimed unsectioned items came first; it
+described an intention nobody had implemented. They are now headed `Other`,
+the word the `codes` presentation already uses for money with no code, and
+only when the sheet uses sections at all — an estimate with none is still the
+plain numbered list it always was.
+
+### Printing
+
+`price_sheet` prints through its own HTML like the brochure, not through
+react-pdf. **Every format with a layout of its own prints through its own
+HTML**; writing each a second layout is how two documents that should be
+identical stop being so. The price is the Chromium pack — a price sheet's
+PDF answers 503 in production until `CHROMIUM_PACK_URL` is set, exactly as
+the brochure's does, and the on-screen document works either way.
+
+Migration 0405 widens the format CHECK. Driven on dev against a ten-item
+estimate across three sections with four rows at zero: headings numbered in
+line, qualifiers beside the names, `OTHER` over the two unsectioned items,
+and the total matching the model.
+
 ### 2026-09-20 — An estimate item has a section, and says what the client sees of it (`claude/price-sheet-shape`)
 
 The shape of the founder's own price sheet, which he sent as a 195-row PDF:

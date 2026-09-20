@@ -47,6 +47,12 @@ export interface ProposalLineInput extends EstimateLineFigures {
 export interface ProposalGroupInput extends EstimateGroupFigures {
   name: string;
   clientNote: string;
+  /**
+   * The heading it prints under, on a format that has headings. Absent on
+   * every estimate written before sections existed, which then prints as
+   * one plain list — what it always was.
+   */
+  section?: string;
 }
 
 export interface ProposalInput {
@@ -95,6 +101,13 @@ export interface ProposalRow {
   note?: string;
   /** An item's name over the lines beneath it: no amount, and no money of its own. */
   heading?: boolean;
+  /**
+   * The item this row belongs to, or null on a loose line. **Carried so a
+   * format can ARRANGE the rows without re-deriving any money** — the price
+   * sheet groups them under headings and numbers them, and takes every
+   * figure from here rather than working one out a second way.
+   */
+  groupId?: string | null;
 }
 
 export interface ProposalModel {
@@ -193,6 +206,7 @@ export function buildProposalModel(input: ProposalInput): ProposalModel {
         amount: r.heading ? "" : money(r.scheduledCents),
         note: r.groupId === null ? "" : (noteOf.get(r.groupId) ?? ""),
         heading: r.heading,
+        groupId: r.groupId,
       };
     });
     const shown = scheduled.reduce((sum, r) => (r.heading ? sum : sum + r.scheduledCents), 0);

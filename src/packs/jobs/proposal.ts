@@ -219,9 +219,17 @@ export async function proposalHtml(
  */
 export async function proposalPdf(loaded: LoadedProposal): Promise<{ bytes: Uint8Array; filename: string }> {
   const brand = await brandFor(loaded);
-  const bytes =
-    loaded.data.row.estimate.format === "brochure"
-      ? await printHtmlToPdf(htmlOf(loaded, brand))
-      : await renderProposalPdf(proposalInputFrom(loaded.data, brand));
+  /**
+   * **EVERY FORMAT WITH A LAYOUT OF ITS OWN PRINTS THROUGH ITS OWN HTML.**
+   * The letter has a react-pdf renderer because it predates the HTML one;
+   * the brochure and the price sheet do not, and writing each a second
+   * layout is how two documents that should be identical stop being so.
+   * The price of that is the Chromium pack — see the runbook, and the open
+   * item in this module's dossier.
+   */
+  const viaHtml = loaded.data.row.estimate.format !== "letter";
+  const bytes = viaHtml
+    ? await printHtmlToPdf(htmlOf(loaded, brand))
+    : await renderProposalPdf(proposalInputFrom(loaded.data, brand));
   return { bytes, filename: proposalFilename(loaded.data) };
 }

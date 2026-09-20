@@ -30,7 +30,11 @@ export type AttemptKind =
   /** A token at /p/… that resolved to nothing. */
   | "proposal_probe"
   /** An acceptance posted to a proposal link, good or bad. */
-  | "proposal_sign";
+  | "proposal_sign"
+  /** A token at /bid/… that resolved to nothing (X3). */
+  | "bid_probe"
+  /** A number posted to a bid link, good or bad. */
+  | "bid_reply";
 
 /**
  * Guesses tolerated from one IP per hour, per kind.
@@ -45,6 +49,12 @@ const HOURLY_IP_CAP: Record<AttemptKind, number> = {
   share_unlock_fail: 20,
   proposal_probe: 60,
   proposal_sign: 10,
+  bid_probe: 60,
+  /**
+   * Tighter than a probe and looser than a signature: a subcontractor posts
+   * once, but several of them may be behind one contractor's office IP.
+   */
+  bid_reply: 20,
 };
 
 /** Unknown-token guesses tolerated from one IP per hour. */

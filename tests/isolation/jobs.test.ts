@@ -2712,6 +2712,207 @@ d("jobs tables (RLS)", () => {
     );
   });
 
+  it("cannot read or change another tenant's BID REQUESTS; a token_hash is globally unique; one ask per sub and one award per package; a reply is whole; an award needs a number; and they go with the job", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const party = await tx
+        .insert(schema.parties)
+        .values({ tenantId: tenantA, kind: "organization", displayName: "A sparky" })
+        .returning();
+      const pkg = await tx
+        .insert(schema.jobBidPackages)
+        .values({ tenantId: tenantA, projectId: projectA, title: "Electrical", costCode: "5200" })
+        .returning();
+      const inv = await tx
+        .insert(schema.jobBidInvitations)
+        .values({
+          tenantId: tenantA,
+          packageId: pkg[0].id,
+          partyId: party[0].id,
+          tokenHash: `hash-${process.pid}-a`,
+          tokenCiphertext: "cipher",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        })
+        .returning();
+      return { partyId: party[0].id, packageId: pkg[0].id, invitationId: inv[0].id };
+    });
+
+    // Tenant B sees neither and changes neither.
+    const seen = await asOtherTenant(async (tx) => ({
+      packages: await tx
+        .select()
+        .from(schema.jobBidPackages)
+        .where(eq(schema.jobBidPackages.id, seeded.packageId)),
+      invitations: await tx
+        .select()
+        .from(schema.jobBidInvitations)
+        .where(eq(schema.jobBidInvitations.id, seeded.invitationId)),
+      changed: await tx
+        .update(schema.jobBidInvitations)
+        .set({ amountCents: 1 })
+        .where(eq(schema.jobBidInvitations.id, seeded.invitationId))
+        .returning(),
+    }));
+    expect(seen.packages).toEqual([]);
+    expect(seen.invitations).toEqual([]);
+    expect(seen.changed).toEqual([]);
+
+    // Member work: asking for a number is estimating.
+    const mine = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.jobBidPackages)
+        .where(eq(schema.jobBidPackages.id, seeded.packageId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    /**
+     * **`token_hash` IS GLOBALLY UNIQUE, WITH NO TENANT PREFIX** — the public
+     * lookup has no tenant to scope by, so two businesses cannot hold the
+     * same hash and have the resolver pick one.
+     */
+    await expect(
+      withSystem(async (tx) => {
+        const party = await tx
+          .insert(schema.parties)
+          .values({ tenantId: tenantB, kind: "organization", displayName: "Their sparky" })
+          .returning();
+        const pkg = await tx
+          .insert(schema.jobBidPackages)
+          .values({ tenantId: tenantB, projectId: projectB, title: "Electrical" })
+          .returning();
+        return tx.insert(schema.jobBidInvitations).values({
+          tenantId: tenantB,
+          packageId: pkg[0].id,
+          partyId: party[0].id,
+          tokenHash: `hash-${process.pid}-a`,
+          tokenCiphertext: "cipher",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        });
+      }),
+    ).rejects.toThrow();
+
+    // One ask per subcontractor per package: asking twice is one ask.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobBidInvitations).values({
+          tenantId: tenantA,
+          packageId: seeded.packageId,
+          partyId: seeded.partyId,
+          tokenHash: `hash-${process.pid}-dup`,
+          tokenCiphertext: "cipher",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **A REPLY IS A WHOLE FACT OR NONE OF ONE** (ADR 0085's shape). A number
+     * with no date cannot be placed; a date with neither a number nor a
+     * decline says only that something happened.
+     */
+    const halves: Record<string, unknown>[] = [
+      { amountCents: 1_000 },
+      { repliedAt: new Date() },
+      { repliedAt: new Date(), repliedName: "Bo", amountCents: 1_000, declined: true },
+      { repliedAt: new Date(), amountCents: 1_000 },
+      { repliedAt: new Date(), repliedName: "Bo" },
+    ];
+    for (const bad of halves) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .update(schema.jobBidInvitations)
+            .set(bad as Partial<typeof schema.jobBidInvitations.$inferInsert>)
+            .where(eq(schema.jobBidInvitations.id, seeded.invitationId)),
+        ),
+        JSON.stringify(bad),
+      ).rejects.toThrow();
+    }
+    // A whole one is fine, either way round.
+    await withSystem((tx) =>
+      tx
+        .update(schema.jobBidInvitations)
+        .set({ repliedAt: new Date(), repliedName: "Bo", amountCents: 1_250_000 })
+        .where(eq(schema.jobBidInvitations.id, seeded.invitationId)),
+    );
+
+    /**
+     * **YOU CANNOT AWARD A NUMBER NOBODY GAVE.** Awarding a silence would put
+     * a price on an estimate with nothing behind it.
+     */
+    const silent = await withSystem(async (tx) => {
+      const party = await tx
+        .insert(schema.parties)
+        .values({ tenantId: tenantA, kind: "organization", displayName: "A quiet one" })
+        .returning();
+      return tx
+        .insert(schema.jobBidInvitations)
+        .values({
+          tenantId: tenantA,
+          packageId: seeded.packageId,
+          partyId: party[0].id,
+          tokenHash: `hash-${process.pid}-b`,
+          tokenCiphertext: "cipher",
+          expiresAt: new Date(Date.now() + 86_400_000),
+        })
+        .returning();
+    });
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobBidInvitations)
+          .set({ isAwarded: true })
+          .where(eq(schema.jobBidInvitations.id, silent[0].id)),
+      ),
+    ).rejects.toThrow();
+
+    // ONE AWARD PER PACKAGE, by the partial unique index.
+    await withSystem((tx) =>
+      tx
+        .update(schema.jobBidInvitations)
+        .set({ isAwarded: true })
+        .where(eq(schema.jobBidInvitations.id, seeded.invitationId)),
+    );
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobBidInvitations)
+          .set({ repliedAt: new Date(), repliedName: "Q", amountCents: 9, isAwarded: true })
+          .where(eq(schema.jobBidInvitations.id, silent[0].id)),
+      ),
+    ).rejects.toThrow();
+
+    // A blank title, and a status nothing understands.
+    for (const bad of [{ title: "  " }, { status: "maybe" }]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .insert(schema.jobBidPackages)
+            .values({
+              tenantId: tenantA,
+              projectId: projectA,
+              title: "x",
+              ...bad,
+            } as typeof schema.jobBidPackages.$inferInsert),
+        ),
+        JSON.stringify(bad),
+      ).rejects.toThrow();
+    }
+
+    // The invitations go with the package, and the package goes with the job.
+    await withSystem((tx) =>
+      tx.delete(schema.jobBidPackages).where(eq(schema.jobBidPackages.id, seeded.packageId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobBidInvitations)
+          .where(eq(schema.jobBidInvitations.id, seeded.invitationId)),
+      ),
+    ).toEqual([]);
+  });
+
   it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
     const seeded = await withSystem(async (tx) => {
       const e = await tx

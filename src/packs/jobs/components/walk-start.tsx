@@ -110,6 +110,13 @@ export function WalkStart({
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => router.push(`/dashboard/m/jobs/${projectId}/bids`)}
+        >
+          Prices from subs
+        </Button>
         <Select value={outlineId} onValueChange={setOutlineId}>
           <SelectTrigger className="w-48" aria-label="Which outline to walk">
             <SelectValue />

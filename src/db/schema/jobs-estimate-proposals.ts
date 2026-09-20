@@ -44,7 +44,7 @@ import { tenants } from "./platform";
 import { jobEstimateInterviews } from "./jobs-estimate-interviews";
 
 /** Where the money on a line came from. Blank on a line nobody walked. */
-export const LINE_BASES = ["assembly", "memory", "said", "none"] as const;
+export const LINE_BASES = ["assembly", "memory", "said", "sub", "none"] as const;
 /** Where the quantity came from. */
 export const QUANTITY_BASES = ["said", "derived", "none"] as const;
 
@@ -108,7 +108,7 @@ export const jobEstimateProposedLines = pgTable(
     ),
     check(
       "job_estimate_proposed_lines_basis_valid",
-      sql`${t.basis} in ('assembly', 'memory', 'said', 'none')`,
+      sql`${t.basis} in ('assembly', 'memory', 'said', 'sub', 'none')`,
     ),
     check(
       "job_estimate_proposed_lines_quantity_basis_valid",

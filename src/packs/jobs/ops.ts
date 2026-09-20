@@ -170,7 +170,9 @@ export class JobsError extends Error {
       /** The walk has gone on long enough — the backstop on a runaway. */
       | "WALK_CAPPED"
       /** A question marked always-ask cannot be skipped by the walk. */
-      | "MUST_ASK",
+      | "MUST_ASK"
+      /** This subcontractor has already been asked for this scope (X3). */
+      | "ALREADY_ASKED",
     message: string,
   ) {
     super(message);

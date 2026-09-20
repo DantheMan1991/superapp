@@ -258,6 +258,10 @@ interface GroupDraft {
   key: string;
   name: string;
   clientNote: string;
+  /** The heading it prints under. A label, never a code. */
+  section: string;
+  /** Whether the client sees what is in it. */
+  showLines: boolean;
   priceMode: GroupPriceMode;
   fixedPrice: string;
 }
@@ -268,6 +272,8 @@ const emptyGroup = (): GroupDraft => ({
   key: `new-item-${(nextKey += 1)}`,
   name: "",
   clientNote: "",
+  section: "",
+  showLines: true,
   priceMode: "rollup",
   fixedPrice: "",
 });
@@ -352,6 +358,8 @@ export interface EditableEstimate {
     id: string;
     name: string;
     clientNote: string;
+    section: string;
+    showLines: boolean;
     priceMode: string;
     fixedPriceCents: number | null;
   }>;
@@ -596,6 +604,8 @@ export function EstimateEditor({
       key: g.id,
       name: g.name,
       clientNote: g.clientNote,
+      section: g.section,
+      showLines: g.showLines,
       priceMode: g.priceMode === "fixed" ? "fixed" : "rollup",
       fixedPrice: g.fixedPriceCents === null ? "" : (g.fixedPriceCents / 100).toFixed(2),
     })),
@@ -604,6 +614,7 @@ export function EstimateEditor({
   const groupFigures = named.map((g) => ({
     id: g.key,
     priceMode: g.priceMode,
+    showLines: g.showLines,
     fixedPriceCents: g.priceMode === "fixed" ? toCents(g.fixedPrice) : null,
   }));
   /** Only a named item can hold a line: a blank row is ignored, so its lines are loose. */
@@ -936,7 +947,16 @@ export function EstimateEditor({
       const key = `new-${Date.now()}`;
       setGroups((prev) => [
         ...prev,
-        { key, id: null, name: res.name, clientNote: res.clientNote, priceMode: "rollup", fixedPrice: "" },
+        {
+          key,
+          id: null,
+          name: res.name,
+          clientNote: res.clientNote,
+          section: "",
+          showLines: true,
+          priceMode: "rollup",
+          fixedPrice: "",
+        },
       ]);
       setLines((prev) => [
         ...prev,
@@ -1134,7 +1154,7 @@ export function EstimateEditor({
     const fixed = g.priceMode === "fixed" ? toCents(g.fixedPrice) : null;
     const costCents = groupCostCents(children);
     const priceCents = groupPriceCents(
-      { id: g.key, priceMode: g.priceMode, fixedPriceCents: fixed },
+      { id: g.key, priceMode: g.priceMode, showLines: g.showLines, fixedPriceCents: fixed },
       children,
       terms.markupPpm,
     );
@@ -1182,6 +1202,8 @@ export function EstimateEditor({
                 key: g.key,
                 name: g.name.trim(),
                 clientNote: g.clientNote.trim(),
+                section: g.section,
+                showLines: g.showLines,
                 priceMode: g.priceMode,
                 fixedPriceCents: g.priceMode === "fixed" ? g.fixedPrice : "",
               })),
@@ -2222,6 +2244,15 @@ export function EstimateEditor({
                   <span />
                 </div>
 
+                {/**
+                  * The sections already on this estimate, offered as you type,
+                  * so `Structural` does not become `structural` on row nine.
+                  */}
+                <datalist id="estimate-section-names">
+                  {[...new Set(groups.map((x) => x.section.trim()).filter(Boolean))].map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
                 {groups.map((g, gi) => {
                   const m = groupMoney(g);
                   const own = rowsOf(g.key);
@@ -2298,6 +2329,66 @@ export function EstimateEditor({
                               )}
                               disabled={!editable}
                             />
+                            {/**
+                              * THE HEADING THIS ITEM PRINTS UNDER. Free text,
+                              * suggesting the sections already on this estimate
+                              * so they stay spelled the same.
+                              */}
+                            <Input
+                              aria-label={`Section, item ${gi + 1}`}
+                              value={g.section}
+                              onChange={(e) => setGroup(g.key, { section: e.target.value })}
+                              placeholder="Section"
+                              maxLength={120}
+                              list="estimate-section-names"
+                              className={cn("h-[34px] w-[124px] shrink-0 text-xs", BARE)}
+                              disabled={!editable}
+                            />
+                            {/**
+                              * **ONE PRICE, OR WHAT IS IN IT** — the founder's
+                              * own words, and both halves of his price sheet.
+                              * A typed price or a hidden line closes an item
+                              * whatever this says (ADR 0080), so the control
+                              * says so rather than lying about what it does.
+                              */}
+                            {(() => {
+                              const forced =
+                                g.priceMode === "fixed" ||
+                                lines.some((l) => l.groupKey === g.key && !l.clientVisible);
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={!editable || forced}
+                                  onClick={() => setGroup(g.key, { showLines: !g.showLines })}
+                                  title={
+                                    forced
+                                      ? g.priceMode === "fixed"
+                                        ? "A price you typed is always shown on its own."
+                                        : "A line kept off the proposal means this is always one price."
+                                      : g.showLines
+                                        ? "The client sees what is in this item. Press to show one price."
+                                        : "The client sees one price. Press to show what is in it."
+                                  }
+                                  aria-label={`What the client sees of item ${gi + 1}`}
+                                  className={cn(
+                                    "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors disabled:opacity-60",
+                                    g.showLines && !forced
+                                      ? "border border-border text-muted-foreground hover:bg-muted"
+                                      : "bg-muted text-muted-foreground",
+                                  )}
+                                >
+                                  {g.showLines && !forced ? (
+                                    <>
+                                      <Eye className="size-3" /> Shows its lines
+                                    </>
+                                  ) : (
+                                    <>
+                                      <EyeOff className="size-3" /> One price
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
                             {/* The two modes are a binary; a chip switches faster than a select. */}
                             <button
                               type="button"

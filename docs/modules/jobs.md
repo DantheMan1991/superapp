@@ -120,6 +120,60 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — An estimate item has a section, and says what the client sees of it (`claude/price-sheet-shape`)
+
+The shape of the founder's own price sheet, which he sent as a 195-row PDF:
+**sections over client items over the material and labour behind them.** Two
+of the three levels already existed — an item IS the client-facing row and its
+lines ARE what is behind it. This adds the third and makes the second sayable.
+
+**A SECTION ON THE ITEM, AND IT IS NOT THE COST CODE'S CATEGORY.** Arrives
+from the outline step that produced the item, editable afterwards, because his
+own sheet is the disproof: `Siding Labor` is accounted under `04. Structural`
+and printed under *Labour*, since Turkel supplied the material and labour is
+what he sold. The code says where the money goes; the section says where the
+row is read.
+
+**ONE PRICE, OR WHAT IS IN IT — HIS WORDS, AND BOTH ALREADY WORKED.** *"There
+are times I want something like a group from framing and then the material,
+labor etc are in it. Then there are times where I want to show the client the
+labor and material separate."* His sheet does both: `DRYWALL, INCL. LABOR` is
+one row; `SIDING (Material only)` and `LABOR ON METAL SIDING` are two. The
+tool could do both — **by hiding a line, which collapsed the item as a side
+effect.** Nobody would ever have found that. `show_lines` is the same decision
+said out loud.
+
+**IT IS A REASON TO COLLAPSE, NEVER A REASON TO EXPAND.** A typed price and a
+hidden line still close an item whatever the switch says, because those are
+the two cases where the build-up would print rows that do not add up to the
+price above them (ADR 0080, unchanged). Default TRUE, so nothing already
+printed moves. The chip greys out and says which of the two is holding it.
+
+### Three places a column like this gets lost, and all three bit
+
+- **`applyProposal` rebuilds every existing item** to post the whole form. A
+  column missing from that map is a column reset to its default on every walk
+  apply. Caught by reading, not by a test.
+- **Zod strips what it does not declare.** The editor posted `section` and
+  `show_lines` correctly and `estimateGroupSchema` dropped them both on the
+  floor. Found by saving in the browser and reading the row back: the toast
+  said *Estimate saved* and the columns were still at their defaults.
+- **`proposal.ts` builds its own group figures**, so without the switch there
+  the chip would have set on the estimate and done nothing on the document the
+  client actually reads.
+
+A proposed line also now records `step_section` beside `step_title`, for the
+reason `step_title` exists: re-sectioning an outline next month must not
+silently re-section a bid that already went out.
+
+Migrations 0403 (the item) and 0404 (the proposed line). Driven on dev: set a
+section, flipped the chip, saved, read the row back — `section="04.
+Structural"`, `show_lines=false`.
+
+**Not built: the printed sheet itself** — headings, running numbers, and the
+`$0.00` rows with their reasons. That is the next slice and this is what it
+reads.
+
 ### 2026-09-20 — Bringing one outline's questions onto another's steps (`claude/bring-questions-across`)
 
 Reading an outline off a chart gives the right steps, codes and sections and
@@ -5386,6 +5440,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` — CHECK lines / codes / **groups** (E1, ADR 0079) / sum, the live definition being in `0373`, which drops and re-adds it — and the proposal's `scope`, `exclusions` and `terms`: the words fixed with the money, the presentation free. An accepted estimate's ITEMS are fixed with its lines and its rates. Since E2 also `show_code_numbers` (ADR 0080), off by default and free on an accepted estimate, being a printing choice. |
 | `job_estimate_groups` | **The item the client buys** (E1, ADR 0079): a name in the client's words, an optional `client_note` paragraph, `price_mode` — `rollup` (its lines sum) or `fixed` (the price is typed, and sits OUTSIDE the overhead-and-profit spread) — `fixed_price_cents`, sort order. One level deep, by the shape rather than by a rule. | Cascade from the estimate. CHECK: name present and ≤ 200, note ≤ 4,000, mode on the list, price ≥ 0, and **`(price_mode = 'fixed') = (fixed_price_cents is not null)`** so the mode and the number cannot disagree. Nothing stores a total; the item's cost, price and margin come from `estimate-math.ts`. |
+| `job_estimate_groups.section` / `.show_lines` | **Which heading an item prints under, and whether the client sees what is in it.** The section arrives from the outline step and is editable, because it is NOT the cost code's category — `Siding Labor` is accounted under `04. Structural` and printed under *Labour*. `show_lines` defaults true and is an extra reason to collapse, never a reason to expand: a typed price or a hidden line still closes an item (ADR 0080). |
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement.  Since X2b also `basis` / `basis_detail` (ADR 0098): where the number came from, BLANK on every line anybody typed — blank is not `none`, which means a walk produced it and could not price it. The input treats an absent basis as *leave what is there*, so the editor's autosave cannot strip it. |
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |

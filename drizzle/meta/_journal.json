@@ -2822,6 +2822,20 @@
       "when": 1789933171693,
       "tag": "0402_hard_anita_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 403,
+      "version": "7",
+      "when": 1789937444725,
+      "tag": "0403_early_clea",
+      "breakpoints": true
+    },
+    {
+      "idx": 404,
+      "version": "7",
+      "when": 1789937640245,
+      "tag": "0404_certain_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

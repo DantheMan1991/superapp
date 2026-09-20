@@ -286,6 +286,8 @@ Two things worth knowing. Anything you type *while* a save is in flight is not i
 | {key:⌄} | Hides this item's lines, so you can see the shape of a long estimate. The bar and its price stay; nothing is deleted. |
 | The dot | The colour this item has on the rail. |
 | `Item name` | What the client reads — `Tile flooring, master and hall baths`. Required: **an item with no name is ignored when you save**, the way a line with no description is, and its lines are saved as ordinary loose lines. |
+| `Section` | The heading this item is printed under — `Infrastructure`, `Structural`, `Finishes`, `Labour`, whatever you head your own price sheet with. Optional; leave it blank and the item has no heading. As you type it offers the sections already on this estimate so they stay spelled the same. An item a walk puts on arrives with the section its outline step carried. |
+| The visibility chip | {chip:Shows its lines|outline} or {chip:One price|outline}. **Click it to swap.** See below. |
 | The price chip | {chip:Lines add up|outline} or {chip:Priced by hand|good}. **Click it to swap.** See below. |
 | The margin | `10.7% margin` — what this item leaves you. **Red if it is negative.** This is the number that tells you whether a round price was a safe one, and it is here because here is where you decide to move it. |
 | The price | What the client is asked for this item. A box you can type in when it is priced by hand; otherwise the sum of its lines. |
@@ -298,6 +300,22 @@ With **Client wording** on, a second line appears under the bar for the sentence
 
 - **{chip:Lines add up|outline}** — the item is worth what its lines are worth, and each line takes the markup, the overhead and the profit exactly as any line does. This is the ordinary case.
 - **{chip:Priced by hand|good}** — you type what the client pays and **that is the number that prints**. Overhead and profit are *not* added to it again: typing $8,400 means the client is asked $8,400, and the margin beside it shows what that leaves you against the $6,950 behind it. Use it when you sell round numbers, or when the build-up is yours alone. Every line inside such an item reads *in the item* in place of its own price, because that line's price never reaches the client.
+
+**What the client sees of an item.**
+
+- **{chip:Shows its lines|outline}** — the client reads the material, the labour and whatever else is in it, each on its own row, under the item's name. The ordinary case, and what every item did before this chip existed.
+- **{chip:One price|outline}** — the client reads the item and its total, and nothing about how it was built.
+
+Most price sheets want both, row by row. *Drywall, including labour* is one
+price; *Siding, material only* and *Labour on metal siding* are two items
+shown separately. That is the same estimate either way — only the chip
+differs.
+
+**Two things close an item whatever the chip says**, and the chip goes grey
+and tells you which:
+
+- an item **priced by hand** — the build-up is not what the client was quoted, so printing it would show rows that do not add up to the price above them;
+- an item with a line **kept off the proposal** — the same problem for the same reason.
 
 If you want a lump you have *costed* — "the plumbing subcontract is $12,000 and I mark it up like everything else" — that is a **line** with a blank quantity, not an item priced by hand.
 

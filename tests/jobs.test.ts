@@ -1526,6 +1526,77 @@ describe("items on an estimate", () => {
     });
   });
 
+  /**
+   * ONE PRICE, OR WHAT IS IN IT — THE FOUNDER'S OWN WORDS.
+   *
+   * *"There are times I want something like a group from framing and then the
+   * material, labor etc are in it. Then there are times where I want to show
+   * the client the labor and material separate."* His own price sheet does
+   * both: `DRYWALL, INCL. LABOR` is one row, while `SIDING (Material only)`
+   * and `LABOR ON METAL SIDING` are two.
+   *
+   * Both already worked. Neither was SAYABLE — you got one price by hiding a
+   * line and the item collapsed as a side effect.
+   */
+  describe("show what is in an item, or do not", () => {
+    const rollup = { id: "g", priceMode: "rollup", fixedPriceCents: null };
+    const line = {
+      quantityThousandths: 1_000,
+      unitCostCents: 100_00,
+      markupPpm: null,
+      unitPriceCents: null,
+      groupId: "g",
+      clientVisible: true,
+    };
+
+    it("shows its lines by default, which is every item written before the switch", () => {
+      expect(itemCollapses(rollup, [line])).toBe(false);
+      expect(itemCollapses({ ...rollup, showLines: undefined }, [line])).toBe(false);
+    });
+
+    it("is one price when the switch says so", () => {
+      expect(itemCollapses({ ...rollup, showLines: false }, [line])).toBe(true);
+    });
+
+    /**
+     * **THE SWITCH IS A REASON TO COLLAPSE, NEVER A REASON TO EXPAND.** A
+     * typed price and a hidden line both collapse an item whatever it says,
+     * because those are the two cases where the build-up would print rows
+     * that do not add up to the price above them (ADR 0080).
+     */
+    it("cannot expand an item a typed price or a hidden line has closed", () => {
+      const typed = { id: "g", priceMode: "fixed", fixedPriceCents: 500_00, showLines: true };
+      expect(itemCollapses(typed, [line])).toBe(true);
+
+      const hidden = { ...line, clientVisible: false };
+      expect(itemCollapses({ ...rollup, showLines: true }, [line, hidden])).toBe(true);
+    });
+
+    it("reaches the takeoff shape, which is where the client reads it", () => {
+      const full = { ...line, description: "A line", unit: "ea", costCodeId: null };
+      const both = [
+        { ...full, groupId: "shown" },
+        { ...full, groupId: "hidden-away", unitCostCents: 200_00 },
+      ];
+      const groups = [
+        { id: "shown", name: "Shown", priceMode: "rollup", fixedPriceCents: null, showLines: true },
+        {
+          id: "hidden-away",
+          name: "One price",
+          priceMode: "rollup",
+          fixedPriceCents: null,
+          showLines: false,
+        },
+      ];
+      const terms = { markupPpm: 0, overheadPpm: 100_000, profitPpm: 100_000 };
+      const rows = scheduleRows(both, terms, groups, "line");
+      /** The first prints its line; the second prints itself, once. */
+      expect(rows).toHaveLength(2);
+      expect(itemCollapses(groups[0], [both[0]])).toBe(false);
+      expect(itemCollapses(groups[1], [both[1]])).toBe(true);
+    });
+  });
+
   describe("an item that adds up its lines", () => {
     const TERMS = { markupPpm: 100_000, overheadPpm: 100_000, profitPpm: 0 };
     const paint = { id: "g-paint", name: "Paint, whole house", priceMode: "rollup", fixedPriceCents: null };

@@ -95,6 +95,21 @@ export const jobEstimateInterviews = pgTable(
     pendingQuestionId: uuid("pending_question_id"),
     /** The buttons under it, which for an off-outline question are the walk's own. */
     pendingQuickReplies: jsonb("pending_quick_replies").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * THE PROPOSED LINE WHOSE PRICE IS BEING ASKED FOR (X6).
+     *
+     * When this is set the walk is talking about MONEY, not scope, and the
+     * next answer is read as a figure by `walk-price-math.ts` rather than
+     * handed to the model. That split is deliberate: the model gathers and
+     * never prices — its own rule 2 — and a number that reaches a bid should
+     * come from a person or from this business's own record, never from a
+     * sentence somebody interpreted.
+     *
+     * Null whenever the conversation is about the job rather than the price.
+     * No FK, like every other reference on this table: a proposal cleared
+     * underneath it must not take the interview with it.
+     */
+    pendingPriceLineId: uuid("pending_price_line_id"),
     startedByClerkUserId: text("started_by_clerk_user_id"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /**

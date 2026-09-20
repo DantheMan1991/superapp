@@ -87,6 +87,13 @@ export const jobEstimateProposedLines = pgTable(
     /** The arithmetic, when it was derived: "2 baths at 3 fixtures each". */
     quantityNote: text("quantity_note").notNull().default(""),
 
+    /**
+     * WHEN SOMEBODY WAS ASKED FOR THIS PRICE AND SAID NOT NOW (X6). Without
+     * it the walk asks the same unpriced line forever; with it a pass is a
+     * decision that sticks, and the line shows up unpriced in the reckoning
+     * where it belongs.
+     */
+    pricePassedAt: timestamp("price_passed_at", { withTimezone: true }),
     sortOrder: integer("sort_order").notNull().default(0),
     /** The line it became, once the estimator put it on the estimate. */
     estimateLineId: uuid("estimate_line_id"),

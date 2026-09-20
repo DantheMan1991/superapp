@@ -120,6 +120,82 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — The money is part of the conversation (`claude/the-money-in-the-conversation`, X6)
+
+The founder, having walked a real bid: *"I'm still not seeing how the estimate
+is built with pricing etc. Seems like I am just answering questions."*
+
+He was right, and it was **three faults deep**:
+
+1. **The walk was forbidden to touch money.** Its own rule 2 —
+   `GATHER, NEVER PRICE` — written to stop it INVENTING a figure, and it also
+   stopped it ASKING for one. Asking is the opposite of inventing.
+2. **Pricing had nothing to read.** It resolves from a saved assembly, an
+   awarded bid, what the business charged last time, or a figure somebody
+   said. His tenant had **0 assemblies and 1 priced line in the whole
+   system**, so every line came back `needs a price` at nothing.
+3. **And it sat behind two buttons** he had to remember, twice a phase,
+   thirty-three times. He had pressed them three times and applied none.
+
+**A PHASE NOW ENDS IN MONEY.** Its questions settle, the lines are worked
+out with no button, every price the pack cannot find is asked for one at a
+time, and the item goes on the estimate before the walk moves on — and it
+says what the phase came to, because money that lands silently may as well
+not have.
+
+**THE MODEL IS STILL NOWHERE NEAR A FIGURE.** It works out WHAT to price,
+which is reading a transcript. The question is written from the line, the
+answer is read by a parser, and it is written to the row whose id was on the
+screen. `ai/propose.ts` still has no price field.
+
+**ONE NUMBER, ONE MEANING.** The question names what it wants — *per lf* with
+a quantity, the amount outright on a lump — because `$3,400` read as a rate
+against 240 lf is **$816,000**. Two figures in one answer is not an answer
+and gets asked again; averaging *"twelve, maybe fourteen"* would be the pack
+inventing a price. A pass is a real answer and sticks (`price_passed_at`), so
+the line shows unpriced in the reckoning rather than being asked forever.
+
+### Two bugs driving it found, both about WHICH step
+
+- **`currentStep` has already left the finished phase.** `proposeForStep`
+  read the step off the walk, so a phase was priced against the questions of
+  the phase AFTER it — proposed nothing, and the walk sailed straight past
+  the money. The step is passed explicitly now.
+- **`moveToStep`'s must-ask guard checked the derived step too**, so leaving
+  a finished phase was refused because a LATER phase had an always-ask
+  outstanding. `guardStepId` names the phase being left.
+
+### And one about trusting the model
+
+The first cut hung the pricing on `turn.stepDone`. Driving it showed **the
+model simply does not say so reliably** — it answers and carries on. Coverage
+is a fact this code can check, so it does: a phase is finished when
+`currentStep` has moved off it, whatever the model claimed.
+
+### Driven
+
+On dev, end to end. `Who's doing the roofing?` → *In-house* → the phase
+closes, the lines are worked out, and it asks:
+
+```
+Roofing labor — what are you getting for that?        7250
+Roofing material — what are you getting for that?    11400
+```
+
+and the estimate gains an item:
+
+```
+ITEM "Roofing" — 2 lines
+   Roofing labor      1 ls @ $7,250.00  = $7,250.00   [said]
+   Roofing material   1 ls @ $11,400.00 = $11,400.00  [said]
+                                  total  $18,650.00
+→ walk moved on to: Plumbing
+```
+
+Migration 0406. **Not built yet: the takeoff from a question**, which he
+asked for in the same breath — *"there are numerous times it asks for a sq
+footage. I need the takeoff tool to get that a lot of the time."* Next slice.
+
 ### 2026-09-20 — A turn cannot fail into a wrong answer (`claude/a-turn-cannot-fail-wrong`)
 
 The founder, with a screenshot: *"I keep having issues with it showing an

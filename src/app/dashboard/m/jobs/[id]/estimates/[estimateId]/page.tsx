@@ -11,6 +11,10 @@ import { listEstimateShares } from "@/packs/jobs/estimate-shares";
 import { listAssemblies } from "@/packs/jobs/assembly-ops";
 import { formatQuantity } from "@/packs/jobs/billing-math";
 import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
+import { WalkStart } from "@/packs/jobs/components/walk-start";
+import { interviewGateFrom } from "@/packs/jobs/interview-gate";
+import { listOutlines } from "@/packs/jobs/outline-ops";
+import { loadWalk } from "@/packs/jobs/walk-ops";
 import { PACK, slugLabel } from "@/packs/jobs/vocabulary";
 
 /**
@@ -53,7 +57,19 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       // The client links on this estimate, each standing read off the facts
       // against the version the estimate is at right now (E5c, ADR 0085).
       const shares = await listEstimateShares(tx, ctx.tenant.id, estimateId, row.estimate.version);
-      return { project, row, contracts, codes, labels: pack.labels, units, prices, assemblies, shares };
+      /**
+       * THE WALK IS A LAYER, so it is read here and drawn ABOVE the editor —
+       * never threaded through it (X2a, ADR 0098). Off, and none of this is
+       * fetched and nothing is rendered.
+       */
+      const gate = interviewGateFrom(pack.config);
+      const walk = gate.available
+        ? {
+            outlines: await listOutlines(tx, ctx.tenant.id),
+            running: await loadWalk(tx, ctx.tenant.id, estimateId),
+          }
+        : null;
+      return { project, row, contracts, codes, labels: pack.labels, units, prices, assemblies, shares, walk };
     },
     { role: ctx.role },
   );
@@ -95,7 +111,39 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
     .filter(Boolean)
     .join(" · ");
 
+  /** Only offered on an estimate a walk could actually write to. */
+  const walkable =
+    data.walk !== null && canEdit && row.estimate.status !== "accepted";
+  const running =
+    data.walk?.running && data.walk.running.interview.status === "running"
+      ? data.walk.running
+      : null;
+
   return (
+    <>
+      {walkable && (
+        <WalkStart
+          projectId={project.id}
+          estimateId={row.estimate.id}
+          outlines={(data.walk?.outlines ?? [])
+            .filter((o) => o.outline.isActive && o.summary.steps > 0)
+            .map((o) => ({
+              id: o.outline.id,
+              name: o.outline.name,
+              isDefault: o.outline.isDefault,
+              steps: o.summary.steps,
+            }))}
+          running={
+            running
+              ? {
+                  stepTitle: running.step?.title ?? "",
+                  covered: running.progress.covered,
+                  steps: running.progress.steps,
+                }
+              : null
+          }
+        />
+      )}
     <EstimateEditor
       key={`${row.estimate.id}:${row.estimate.version}`}
       projectId={project.id}
@@ -169,5 +217,6 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       isOwner={isOwner}
       symbol={symbol}
     />
+    </>
   );
 }

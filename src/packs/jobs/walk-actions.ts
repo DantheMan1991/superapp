@@ -1,0 +1,486 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { withTenant } from "@/db";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import { logAuditInTx } from "@/lib/audit";
+import { labelFor } from "@/lib/packs/resolve";
+import { packContext } from "@/lib/packs/tenant-context";
+import { takeWalkTurn, walkSystemPrompt } from "./ai/walk";
+import { JobsError, type JobsCtx } from "./ops";
+import { interviewGateFrom } from "./interview-gate";
+import {
+  claimTurn,
+  closeWalk,
+  getWalk,
+  moveToStep,
+  recordAnswers,
+  savePendingTurn,
+  startWalk,
+  walkView,
+} from "./walk-ops";
+import { currentStep, nextStep, type WalkAnswer } from "./walk-math";
+import { PACK } from "./vocabulary";
+
+/**
+ * THE WALK'S DOORS (X2a, ADR 0098).
+ *
+ * ── THE HOUSE PATTERN, IN THREE ACTS ────────────────────────────────────────
+ *
+ * `takeWalkTurnAction` is the one that matters and the shape is the setup
+ * interview's: **gather and claim in one transaction, call the model with no
+ * transaction open, persist in another.** Holding a transaction across model
+ * latency is how a pool dies, and a walk is forty-five minutes of them.
+ *
+ * ── THE GATE IS CHECKED AT EVERY DOOR ───────────────────────────────────────
+ *
+ * Not only on the page. A business whose grant is withdrawn mid-walk stops
+ * being able to take a turn, which is what "a layer that can be turned off"
+ * has to mean if it means anything.
+ */
+
+const BASE = "/dashboard/m/jobs";
+
+interface WalkCtx extends JobsCtx {
+  /** Carried from the gate so nothing has to call `requireTenant` again
+   *  inside an open transaction. Blank when the tenant has no profile. */
+  industry: string;
+}
+
+async function gate(): Promise<WalkCtx> {
+  const tenant = await requireTenant();
+  await requireModuleEnabled(tenant.tenant.id, PACK);
+  return {
+    tenantId: tenant.tenant.id,
+    userId: tenant.userId,
+    role: tenant.role,
+    industry: tenant.tenant.industry ?? "",
+  };
+}
+
+function sentence(message: string): string {
+  const m = message.trim();
+  return m.charAt(0).toUpperCase() + m.slice(1) + (m.endsWith(".") ? "" : ".");
+}
+
+function toResult(err: unknown): { error: string } {
+  if (err instanceof JobsError) {
+    switch (err.code) {
+      case "FORBIDDEN":
+        return { error: "You cannot change this estimate." };
+      case "NOT_FOUND":
+        return { error: "That walk is no longer here. Reload the page." };
+      case "ESTIMATE_ACCEPTED":
+        return { error: sentence(err.message) };
+      case "WALK_RUNNING":
+        return { error: "Somebody is already walking this estimate." };
+      case "WALK_CLOSED":
+        return { error: "This walk is finished. Start a new one to go again." };
+      case "WALK_COOLDOWN":
+        return { error: "Give it a moment, then send that again." };
+      case "WALK_CAPPED":
+        return { error: "That is as long as one walk goes. Finish it and start another." };
+      case "MUST_ASK":
+        return { error: sentence(err.message) };
+      case "INVALID_VALUE":
+        return { error: sentence(err.message) };
+      default:
+        return { error: "That did not work. Try again." };
+    }
+  }
+  /** An API key that is not set, a model that is down: say so honestly. */
+  if (err instanceof Error && err.message.includes("ANTHROPIC_API_KEY")) {
+    return { error: "Walking an estimate is not switched on for this server yet." };
+  }
+  return { error: "It could not answer just then. Try sending that again." };
+}
+
+/**
+ * The layer's own gate, at every door and not only on the page. A business
+ * whose grant is withdrawn mid-walk stops being able to take a turn, which is
+ * what "a layer that can be turned off" has to mean if it means anything.
+ */
+async function requireWalkGranted(ctx: WalkCtx): Promise<void> {
+  const available = await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+      return interviewGateFrom(pack.config).available;
+    },
+    { role: ctx.role },
+  );
+  if (!available) throw new JobsError("NOT_FOUND", "walking an estimate is not switched on");
+}
+
+const startSchema = z.object({
+  estimateId: z.string().uuid(),
+  outlineId: z.string().uuid(),
+  projectId: z.string().uuid(),
+});
+
+export async function startWalkAction(input: unknown) {
+  const parsed = startSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const walk = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const started = await startWalk(tx, ctx, {
+          estimateId: parsed.data.estimateId,
+          outlineId: parsed.data.outlineId,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "jobs.estimate_walk.started",
+          targetType: "job_estimate",
+          targetId: parsed.data.estimateId,
+          meta: { outlineId: parsed.data.outlineId },
+        });
+        return started;
+      },
+      { role: ctx.role },
+    );
+    /**
+     * THE OPENING QUESTION, asked here so the screen arrives with something on
+     * it. A failure is not fatal to the start: the walk exists either way, and
+     * the screen can ask again.
+     */
+    try {
+      await runTurn(ctx, walk.id, undefined);
+    } catch {
+      // The walk stands; its first question can be asked from the screen.
+    }
+    revalidatePath(`${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`, "layout");
+    return { ok: true as const, interviewId: walk.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const turnSchema = z.object({
+  interviewId: z.string().uuid(),
+  /** Blank on the first turn of a step: the walk opens the conversation. */
+  said: z.string().trim().max(2000).optional(),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+/** How much of the earlier steps goes into the prompt as context. */
+const EARLIER_CONTEXT = 30;
+
+/**
+ * ONE TURN, shared by the two doors that need one.
+ *
+ * **THE OPENING QUESTION IS ASKED BY THE SERVER**, when the walk starts,
+ * rather than by the screen on mount. The first draft had the component fire
+ * a turn from an effect and it was wrong twice over: `setState` inside an
+ * effect is an error in this repo (cascading renders), and a screen that has
+ * to bootstrap itself shows an empty panel for as long as the model takes. A
+ * walk now arrives already asking something.
+ */
+async function oneTurn(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+  opts: { ignoreCooldown?: boolean } = {},
+) {
+  {
+
+    /* ── Act one: gather and claim, in one transaction ───────────────────── */
+    const gathered = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await claimTurn(tx, ctx, interviewId, opts);
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+        const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+        const estimate = await tx.query.jobEstimates.findFirst({
+          where: (e, { and: a, eq: q }) =>
+            a(q(e.tenantId, ctx.tenantId), q(e.id, walk.interview.estimateId)),
+          columns: { number: true, projectId: true },
+        });
+        const project = estimate
+          ? await tx.query.jobProjects.findFirst({
+              where: (p, { and: a, eq: q }) =>
+                a(q(p.tenantId, ctx.tenantId), q(p.id, estimate.projectId)),
+              columns: { name: true, number: true },
+            })
+          : null;
+        return {
+          walk,
+          labels: pack.labels,
+          estimateNumber: estimate?.number ?? "",
+          jobName: project ? `${project.number} ${project.name}` : "",
+          pendingSay: walk.interview.pendingSay,
+        };
+      },
+      { role: ctx.role },
+    );
+
+    /**
+     * **COVERAGE IS NOT THE END OF THE WALK**, and driving it is what found
+     * this. `currentStep` goes null the moment every outline question is
+     * settled, and the first draft closed the walk right there — mid-sentence,
+     * with *"what's the cast-in-place work on this one, slab, footings, piers
+     * or all of it?"* still on the screen and the header already reading
+     * `Finished`.
+     *
+     * The outline is a FLOOR. A walk ends when it says it is done and is not
+     * asking anything, which is the `stepDone` branch below; until then it
+     * stays on the last step so it can keep going past the list. An outline
+     * with no steps at all is the only thing that ends here.
+     */
+    /** `loadWalk` already rides out the last step while the walk is running,
+     *  so a null here means an outline with nothing in it. */
+    const step = gathered.walk.step;
+    if (!step) {
+      await withTenant(ctx.tenantId, (tx) => closeWalk(tx, ctx, interviewId, "finished"), {
+        role: ctx.role,
+      });
+      return { ok: true as const, view: null, finished: true as const };
+    }
+
+    const asWalk: WalkAnswer[] = gathered.walk.answers.map((a) => ({
+      questionId: a.questionId,
+      stepId: a.stepId,
+      prompt: a.prompt,
+      answer: a.answer,
+      skipped: a.skipped,
+      skipReason: a.skipReason,
+    }));
+    const settledHere = asWalk.filter((a) => a.stepId === step.id);
+    const earlier = asWalk.filter((a) => a.stepId !== step.id).slice(-EARLIER_CONTEXT);
+    const stepNumber = gathered.walk.steps.findIndex((s) => s.id === step.id) + 1;
+
+    const system = walkSystemPrompt({
+      jobName: gathered.jobName,
+      estimateNumber: gathered.estimateNumber,
+      outlineName: gathered.walk.outlineName,
+      step,
+      stepNumber,
+      stepCount: gathered.walk.steps.length,
+      settledHere,
+      earlier,
+      projectWord: labelFor(gathered.labels, "project", "Project"),
+    });
+
+    /* ── Act two: the model, with NO transaction open ─────────────────────── */
+    const history: { role: "user" | "assistant"; content: string }[] = [];
+    if (gathered.pendingSay.trim() !== "") {
+      history.push({ role: "assistant", content: gathered.pendingSay });
+    }
+    if (said && said.trim() !== "") history.push({ role: "user", content: said.trim() });
+
+    const turn = await takeWalkTurn({ system, history, step });
+    if (!turn) return { error: "It could not answer just then. Try sending that again." };
+
+    /* ── Act three: persist ──────────────────────────────────────────────── */
+    const after = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const entries = [
+          ...turn.record.map((r) => ({
+            questionId: r.questionId ?? null,
+            stepId: step.id,
+            stepTitle: step.title,
+            prompt: r.prompt,
+            answer: r.answer,
+          })),
+          ...turn.skip.map((sk) => ({
+            questionId: sk.questionId,
+            stepId: step.id,
+            stepTitle: step.title,
+            prompt:
+              step.questions.find((q) => q.id === sk.questionId)?.prompt ?? "a question",
+            skipped: true,
+            skipReason: sk.reason,
+          })),
+        ];
+        if (entries.length > 0) await recordAnswers(tx, ctx, interviewId, entries);
+
+        await savePendingTurn(tx, ctx, interviewId, {
+          say: turn.say,
+          questionId: turn.askingQuestionId ?? null,
+          quickReplies: turn.quickReplies,
+        });
+
+        /**
+         * MOVING ON IS A REQUEST, NOT A DECISION. `moveToStep` refuses while
+         * a must-ask question of this step is outstanding, so the walk cannot
+         * talk its way past one by claiming it is done.
+         */
+        if (turn.stepDone) {
+          const reread = await getWalk(tx, ctx.tenantId, interviewId);
+          const answers = (reread?.answers ?? []).map((a) => ({
+            questionId: a.questionId,
+            stepId: a.stepId,
+            prompt: a.prompt,
+            answer: a.answer,
+            skipped: a.skipped,
+            skipReason: a.skipReason,
+          }));
+          const onward = nextStep(reread?.steps ?? [], answers, step.id);
+          const here = currentStep(reread?.steps ?? [], answers, step.id);
+          if (!here || here.id !== step.id) {
+            await moveToStep(tx, ctx, interviewId, onward?.id ?? null);
+            if (!onward) await closeWalk(tx, ctx, interviewId, "finished");
+          }
+        }
+        return getWalk(tx, ctx.tenantId, interviewId);
+      },
+      { role: ctx.role },
+    );
+
+    return {
+      ok: true as const,
+      /** The whole fresh view, so the screen needs no second round trip. */
+      view: after ? walkView(after) : null,
+      finished: after?.interview.status !== "running",
+      /** The step this turn was ABOUT, so a caller can see it has moved on. */
+      ranOn: step.id,
+    };
+  }
+}
+
+/**
+ * A TURN, AND THE OPENING QUESTION OF THE NEXT STEP WHEN THIS ONE ENDS.
+ *
+ * Driving it found the reason: asked to move on, the model set `stepDone`
+ * AND asked a follow-up in the same breath, so the screen showed *"Cast in
+ * place concrete, step 2 of 2"* over a question about the framing. Both
+ * halves of what it said were honoured and they contradicted each other.
+ *
+ * **A STEP IS NOT DONE IF SOMETHING IS STILL BEING ASKED.** So when the step
+ * changes, the question left pending belonged to the step just closed, and a
+ * second turn is taken immediately to ask the new step's own first question.
+ * One logical turn, two calls; the cooldown is waived for the second because
+ * nobody is hammering anything.
+ */
+async function runTurn(ctx: WalkCtx, interviewId: string, said: string | undefined) {
+  const first = await oneTurn(ctx, interviewId, said);
+  if (!first.ok || first.finished || !first.view) return first;
+  const movedOn = first.view.stepTitle !== "" && first.ranOn !== undefined;
+  if (!movedOn) return first;
+
+  /** Did the step actually change? Compare what it ran on with where it is. */
+  const stillHere = await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      return walk?.step?.id ?? null;
+    },
+    { role: ctx.role },
+  );
+  /** `null` means coverage is complete and the walk is riding out the last
+   *  step; that is not a transition and needs no second turn. */
+  if (stillHere === first.ranOn || stillHere === null) return first;
+
+  const second = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+  return second.ok ? second : first;
+}
+
+export async function takeWalkTurnAction(input: unknown) {
+  const parsed = turnSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const out = await runTurn(ctx, parsed.data.interviewId, parsed.data.said);
+    revalidatePath(
+      `${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`,
+      "layout",
+    );
+    return out;
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const skipSchema = z.object({
+  interviewId: z.string().uuid(),
+  questionId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+/**
+ * A PERSON skipping a question, which is a different act from the walk doing
+ * it — a person may skip one marked always-ask, because the mark guards
+ * against judgement and not against a decision made with eyes open.
+ */
+export async function skipQuestionAction(input: unknown) {
+  const parsed = skipSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const walk = await getWalk(tx, ctx.tenantId, parsed.data.interviewId);
+        if (!walk?.step) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+        const question = walk.step.questions.find((q) => q.id === parsed.data.questionId);
+        if (!question) throw new JobsError("NOT_FOUND", "that question is not on this step");
+        await recordAnswers(
+          tx,
+          ctx,
+          parsed.data.interviewId,
+          [
+            {
+              questionId: question.id,
+              stepId: walk.step.id,
+              stepTitle: walk.step.title,
+              prompt: question.prompt,
+              skipped: true,
+              skipReason: "passed over by the estimator",
+            },
+          ],
+          { byPerson: true },
+        );
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const closeSchema = z.object({
+  interviewId: z.string().uuid(),
+  status: z.enum(["finished", "abandoned"]),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+export async function closeWalkAction(input: unknown) {
+  const parsed = closeSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await closeWalk(tx, ctx, parsed.data.interviewId, parsed.data.status);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: `jobs.estimate_walk.${parsed.data.status}`,
+          targetType: "job_estimate",
+          targetId: parsed.data.estimateId,
+        });
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}

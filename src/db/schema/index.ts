@@ -69,6 +69,7 @@ export * from "./jobs-compliance";
 export * from "./jobs-selections";
 export * from "./jobs-estimates";
 export * from "./jobs-estimate-outlines";
+export * from "./jobs-estimate-interviews";
 export * from "./jobs-schedule";
 export * from "./jobs-drawings";
 export * from "./jobs-markups";

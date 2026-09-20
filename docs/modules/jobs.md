@@ -120,6 +120,26 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — A zero with a reason is a decision (`claude/zero-with-a-reason`, [ADR 0099](../decisions/0099-a-walk-is-finished-when-nothing-is-outstanding-not-when-the-questions-run-out.md))
+
+X4 shipped a rule that a line at zero is not a price. **The founder's own
+price sheet is the counter-example**, and he sent it the day after: a 195-row
+new-home worksheet in which roughly SIXTY rows are `$0.00` on purpose —
+*"Supplied by Turkel"*, *"By Owner"*, *"(N/A)"*, *"Not Included"*, *"Included
+in Plumbing Quote"*. Those rows are the document's exclusions, stated in place
+where the client reads them, and they are some of the most useful lines on it.
+X4 would have flagged every one as a hole.
+
+`basis` is the distinction and X2b had already written it down: **`none` means
+a walk produced the line and could not price it; BLANK means nobody recorded a
+basis**, which is every line a person has ever typed. So `zeroLines` now counts
+only a walk's own unpriceable line. Price something at nothing yourself and
+that is your call, which it always was.
+
+**The lesson is the one this layer keeps teaching**: a rule derived from one
+walk's data met a real document and was too broad. The rule was right — an
+unexplained zero really is a hole — and its REACH was wrong.
+
 ### 2026-09-20 — X4: the whole bid, and the way back into it (`claude/walk-reckoning`, [ADR 0099](../decisions/0099-a-walk-is-finished-when-nothing-is-outstanding-not-when-the-questions-run-out.md))
 
 Four slices in and the pieces did not touch each other. The founder's verdict

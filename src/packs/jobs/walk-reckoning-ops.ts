@@ -64,6 +64,8 @@ async function appliedByStep(
       id: schema.jobEstimateLines.id,
       quantityThousandths: schema.jobEstimateLines.quantityThousandths,
       unitCostCents: schema.jobEstimateLines.unitCostCents,
+      /** Whether the WALK made this line and could not price it. See below. */
+      basis: schema.jobEstimateLines.basis,
     })
     .from(schema.jobEstimateLines)
     .where(
@@ -72,20 +74,45 @@ async function appliedByStep(
         inArray(schema.jobEstimateLines.id, ids),
       ),
     );
-  const costById = new Map(lines.map((l) => [l.id, lineCostCents({ ...l, markupPpm: null, unitPriceCents: null })]));
+  const byId = new Map(
+    lines.map((l) => [
+      l.id,
+      {
+        cents: lineCostCents({ ...l, markupPpm: null, unitPriceCents: null }),
+        basis: l.basis,
+      },
+    ]),
+  );
 
   for (const row of applied) {
     if (!row.stepId || !row.estimateLineId) continue;
-    const cost = costById.get(row.estimateLineId);
-    if (cost === undefined) continue;
+    const line = byId.get(row.estimateLineId);
+    if (line === undefined) continue;
     const at = out.get(row.stepId) ?? { appliedLines: 0, appliedCents: 0, zeroLines: 0 };
     at.appliedLines += 1;
-    at.appliedCents += cost;
-    /** A line the walk could not price lands at zero. It is not a price. */
-    if (cost <= 0) at.zeroLines += 1;
+    at.appliedCents += line.cents;
+    if (line.cents <= 0 && unexplainedZero(line.basis)) at.zeroLines += 1;
     out.set(row.stepId, at);
   }
   return out;
+}
+
+/**
+ * **A ZERO WITH A REASON IS A DECISION; A ZERO WITH NOTHING BEHIND IT IS A
+ * HOLE.** X4 flagged every line at nothing, and the founder's own price sheet
+ * is the disproof: roughly sixty of its rows are `$0.00` on purpose —
+ * *"Supplied by Turkel"*, *"By Owner"*, *"(N/A)"*, *"Included in Plumbing
+ * Quote"*. Those rows are the exclusions, stated in place where the client
+ * reads them, and they are some of the most useful lines on the document.
+ *
+ * `basis` is exactly the distinction, and X2b already wrote it down: **`none`
+ * means a walk produced the line and could not price it**, while BLANK means
+ * nobody recorded a basis, which is every line a person ever typed. So only a
+ * walk's own unpriceable line counts against the phase. Price something at
+ * nothing yourself and that is your call, which it always was.
+ */
+function unexplainedZero(basis: string): boolean {
+  return basis === "none";
 }
 
 function codeKey(code: string): string {

@@ -12,7 +12,7 @@ import { takeWalkTurn, walkSystemPrompt } from "./ai/walk";
 import { proposeSystemPrompt, takeProposal } from "./ai/propose";
 import { listAssemblies } from "./assembly-ops";
 import { listCostCodes } from "./ops";
-import { applyProposal, proposeLines } from "./walk-lines-ops";
+import { applyProposal, listProposal, proposeLines } from "./walk-lines-ops";
 import { JobsError, type JobsCtx } from "./ops";
 import { interviewGateFrom } from "./interview-gate";
 import {
@@ -33,8 +33,16 @@ import {
   type WalkView,
 } from "./walk-ops";
 import { outlineCanCarry, outlineTurn } from "./walk-fallback";
+import { priceQuestionFor, readPriceReply } from "./walk-price-math";
+import {
+  askNextPrice,
+  passPrice,
+  pendingPriceLine,
+  recordSaidPrice,
+  setPriceAsk,
+} from "./walk-price-ops";
 import { reckoningFor } from "./walk-reckoning-ops";
-import { currentStep, live, nextStep, type WalkAnswer } from "./walk-math";
+import { currentStep, live, nextStep, type WalkAnswer, type WalkStep } from "./walk-math";
 import { PACK } from "./vocabulary";
 
 /**
@@ -401,25 +409,36 @@ async function oneTurn(
          */
         const steps = gathered.walk.steps;
         const outlineName = gathered.walk.outlineName;
-        let interview = await readInterview(tx, ctx.tenantId, interviewId);
+        const interview = await readInterview(tx, ctx.tenantId, interviewId);
         const answerRows = await readAnswers(tx, ctx.tenantId, interviewId);
         if (!interview) return null;
 
         /**
-         * MOVING ON IS A REQUEST, NOT A DECISION. `moveToStep` refuses while
-         * a must-ask question of this step is outstanding, so the walk cannot
-         * talk its way past one by claiming it is done.
+         * **THE STEP DOES NOT MOVE HERE ANY MORE.** It used to, the moment
+         * the model said the phase was done — and that is what made the walk
+         * a questionnaire: the conversation swept past a phase without ever
+         * saying what it cost. Moving on is now `runTurn`'s, AFTER the money
+         * has been asked for (X6). All this reports is that the phase's
+         * questions are finished.
+         *
+         * `moveToStep`'s must-ask guard still applies wherever it is called:
+         * the walk cannot talk its way past a question marked always-ask.
          */
-        if (turn.stepDone) {
-          const answers = asWalkAnswers(answerRows);
-          const onward = nextStep(steps, answers, step.id);
-          const here = currentStep(steps, answers, step.id);
-          if (!here || here.id !== step.id) {
-            interview = await moveToStep(tx, ctx, interviewId, onward?.id ?? null);
-            if (!onward) interview = await closeWalk(tx, ctx, interviewId, "finished");
-          }
-        }
-        return { steps, outlineName, interview, answerRows };
+        /**
+         * **COVERAGE DECIDES THIS, NOT THE MODEL.** The first cut waited for
+         * `stepDone`, and driving it showed the model simply does not say so
+         * reliably — it answers and carries straight on to the next thing.
+         * Hanging the pricing on a claim it may never make meant the walk
+         * sailed past every phase without asking what any of it cost, which
+         * is the exact complaint this slice exists to answer.
+         *
+         * A phase is finished when its questions are settled, which is a
+         * fact this code can check: `currentStep` has moved off it.
+         */
+        const answers = asWalkAnswers(answerRows);
+        const here = currentStep(steps, answers, step.id);
+        const stepFinished = !here || here.id !== step.id;
+        return { steps, outlineName, interview, answerRows, stepFinished };
       },
       { role: ctx.role },
     );
@@ -433,6 +452,9 @@ async function oneTurn(
       finished: after?.interview.status !== "running",
       /** The step this turn was ABOUT, so a caller can see it has moved on. */
       ranOn: step.id,
+      /** Its questions are all settled: time to work out what it costs. */
+      stepFinished: after?.stepFinished ?? false,
+      step,
     };
   }
 }
@@ -451,6 +473,310 @@ async function oneTurn(
  * One logical turn, two calls; the cooldown is waived for the second because
  * nobody is hammering anything.
  */
+
+/* ------------------------------------------------------------------------
+ * THE MONEY, AS PART OF THE WALK (X6).
+ *
+ * The founder, having walked a real bid: *"I'm still not seeing how the
+ * estimate is built with pricing etc. Seems like I am just answering
+ * questions."* He was right. The conversation gathered scope and stopped;
+ * working out the lines and putting them on were two buttons he had to
+ * remember, twice a phase, thirty-three times — and everything they
+ * produced came back `needs a price`, because his tenant had no assemblies
+ * and one priced line in the whole system.
+ *
+ * So a phase now ENDS in money. Its questions finish, the lines are worked
+ * out, **every price the pack cannot find is asked for**, and the item goes
+ * on the estimate before the walk moves on.
+ *
+ * ── THE MODEL IS NOT IN THE PRICING PATH ────────────────────────────────────
+ *
+ * It works out WHAT to price — the shapes — which is reading a transcript.
+ * It never sees a figure and never attributes one: the question is written
+ * from the line, the answer is read by a parser, and it is written to the
+ * row whose id was on the screen. `ai/propose.ts` has had no price field
+ * since X2b, and that stays true.
+ * ---------------------------------------------------------------------- */
+
+/** Work out the lines for a step, without the button. Null when it cannot. */
+async function proposeForStep(
+  ctx: WalkCtx,
+  interviewId: string,
+  /**
+   * **THE STEP, EXPLICITLY.** Reading it off the walk was wrong and driving
+   * it found out: once a phase is covered, `currentStep` has already moved
+   * to the NEXT one, so a phase was priced against the questions of the
+   * phase after it — which proposed nothing, and the walk sailed past the
+   * money it was supposed to be asking for.
+   */
+  step: WalkStep,
+): Promise<{ lines: number } | null> {
+  try {
+    const gathered = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        if (!walk) return null;
+        const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+        const estimate = await tx.query.jobEstimates.findFirst({
+          where: (e, { and: a, eq: q }) =>
+            a(q(e.tenantId, ctx.tenantId), q(e.id, walk.interview.estimateId)),
+          columns: { projectId: true },
+        });
+        const project = estimate
+          ? await tx.query.jobProjects.findFirst({
+              where: (p, { and: a, eq: q }) =>
+                a(q(p.tenantId, ctx.tenantId), q(p.id, estimate.projectId)),
+              columns: { id: true, name: true, number: true, costCodeSetId: true },
+            })
+          : null;
+        const assemblies = await listAssemblies(tx, ctx.tenantId);
+        const codes = project?.costCodeSetId
+          ? await listCostCodes(tx, ctx.tenantId, project.costCodeSetId)
+          : [];
+        return {
+          walk,
+          step,
+          labels: pack.labels,
+          jobName: project ? `${project.number} ${project.name}` : "",
+          projectId: project?.id,
+          assemblies: assemblies.map((a) => ({
+            name: a.assembly.name,
+            per:
+              a.assembly.drivingQuantityThousandths === 1000 && a.assembly.drivingUnit === ""
+                ? "each"
+                : `per ${a.assembly.drivingQuantityThousandths / 1000} ${a.assembly.drivingUnit}`.trim(),
+          })),
+          costCodes: codes.filter((c) => c.isActive).map((c) => ({ code: c.code, name: c.name })),
+        };
+      },
+      { role: ctx.role },
+    );
+    if (!gathered) return null;
+
+    const here = gathered.walk.answers.filter((a) => a.stepId === gathered.step.id);
+    const proposal = await takeProposal({
+      system: proposeSystemPrompt({
+        projectWord: labelFor(gathered.labels, "project", "Project"),
+        jobName: gathered.jobName,
+        step: gathered.step,
+        answers: live(asWalkAnswers(here)),
+        assemblies: gathered.assemblies,
+        costCodes: gathered.costCodes,
+      }),
+    });
+    if (!proposal) return null;
+
+    const rows = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        proposeLines(tx, ctx, {
+          interviewId,
+          step: gathered.step,
+          shapes: proposal.lines,
+          /** Only what was actually SAID counts as having been said. */
+          answers: here.filter((a) => !a.skipped).map((a) => a.answer),
+          today: new Date().toISOString().slice(0, 10),
+          projectId: gathered.projectId,
+        }),
+      { role: ctx.role },
+    );
+    return { lines: rows.length };
+  } catch {
+    /**
+     * **PRICING NEVER BLOCKS THE WALK.** If the shapes cannot be worked out,
+     * the phase goes on the reckoning unpriced and the conversation carries
+     * on — the same rule as the outline fallback. A walk that stops dead is
+     * worse than a walk with a hole somebody can see.
+     */
+    return null;
+  }
+}
+
+/**
+ * Put this step's priced lines on the estimate, then let the walk move on,
+ * and say what the phase came to — **money that lands silently may as well
+ * not have landed**, which was half of what "it seems like I am just
+ * answering questions" meant.
+ */
+async function applyAndMoveOn(
+  ctx: WalkCtx,
+  interviewId: string,
+  stepId: string,
+): Promise<{ name: string; cents: number } | null> {
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      if (!walk) return null;
+      const proposed = await listProposal(tx, ctx.tenantId, interviewId, stepId);
+      let put: { name: string; cents: number } | null = null;
+      /** Nothing worth writing is not a failure; the phase is simply empty. */
+      if (proposed.some((r) => r.unitCostCents > 0)) {
+        const estimate = await tx.query.jobEstimates.findFirst({
+          where: (e, { and: a, eq: q }) =>
+            a(q(e.tenantId, ctx.tenantId), q(e.id, walk.interview.estimateId)),
+          columns: { id: true },
+        });
+        if (estimate) {
+          const out = await applyProposal(tx, ctx, {
+            interviewId,
+            estimateId: estimate.id,
+            stepId,
+          });
+          put = {
+            name: out.groupName,
+            cents: proposed.reduce(
+              (n, r) => n + Math.round((r.quantityThousandths * r.unitCostCents) / 1_000),
+              0,
+            ),
+          };
+        }
+      }
+      const answers = asWalkAnswers(walk.answers);
+      const onward = nextStep(walk.steps, answers, stepId);
+      /** The guard belongs to the phase being LEFT, which is this one. */
+      await moveToStep(tx, ctx, interviewId, onward?.id ?? null, { guardStepId: stepId });
+      if (!onward) await closeWalk(tx, ctx, interviewId, "finished");
+      return put;
+    },
+    { role: ctx.role },
+  );
+}
+
+/**
+ * A PRICE ANSWER — deterministic, and never near the model.
+ *
+ * Returns the fresh view, or null when no price was pending and the turn
+ * should be handled as an ordinary one.
+ */
+async function answerPrice(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+): Promise<{
+  ok: true;
+  view: WalkView | null;
+  finished: boolean;
+  /** The phase that just went on the estimate, and what it came to. */
+  put?: { name: string; cents: number } | null;
+} | null> {
+  const state = await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const interview = await readInterview(tx, ctx.tenantId, interviewId);
+      if (!interview?.pendingPriceLineId) return null;
+      const line = await pendingPriceLine(tx, ctx.tenantId, interview.pendingPriceLineId);
+      return line ? { interview, line } : null;
+    },
+    { role: ctx.role },
+  );
+  if (!state) return null;
+
+  const ask = priceQuestionFor({
+    id: state.line.id,
+    description: state.line.description,
+    unit: state.line.unit,
+    quantityThousandths: state.line.quantityThousandths,
+    unitCostCents: state.line.unitCostCents,
+    basis: state.line.basis,
+  });
+  const reply = readPriceReply(said ?? "", ask);
+
+  /** Unreadable is not an error: it asks again, in the same words. */
+  if (reply.kind === "unclear") {
+    const view = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await savePendingTurn(tx, ctx, interviewId, {
+          say: `${ask.prompt} — one figure, please.`,
+          questionId: null,
+          quickReplies: ["Skip this one"],
+        });
+        await setPriceAsk(tx, ctx, interviewId, ask.lineId);
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        return walk ? walkView(walk) : null;
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, view, finished: false };
+  }
+
+  const stepId = state.line.stepId;
+  await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      if (reply.kind === "price") {
+        await recordSaidPrice(tx, ctx, interviewId, state.line.id, reply.unitCostCents);
+      } else {
+        await passPrice(tx, ctx, interviewId, state.line.id);
+      }
+    },
+    { role: ctx.role },
+  );
+
+  /** Next price on the phase, or the phase is done and goes on the estimate. */
+  const next = stepId
+    ? await withTenant(ctx.tenantId, (tx) => askNextPrice(tx, ctx, interviewId, stepId), {
+        role: ctx.role,
+      })
+    : null;
+  if (next) {
+    const view = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        return walk ? walkView(walk) : null;
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, view, finished: false };
+  }
+
+  const put = stepId ? await applyAndMoveOn(ctx, interviewId, stepId) : null;
+  /** Open the phase the walk has just arrived at. */
+  const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+  if (opened.ok) {
+    return { ok: true, view: opened.view ?? null, finished: !!opened.finished, put };
+  }
+  const view = await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      return walk ? walkView(walk) : null;
+    },
+    { role: ctx.role },
+  );
+  return { ok: true, view, finished: false };
+}
+
+/**
+ * A phase's questions are finished: work out what it costs, and start
+ * asking. Returns the view when there is a price to ask for.
+ */
+async function priceTheStep(
+  ctx: WalkCtx,
+  interviewId: string,
+  step: WalkStep,
+): Promise<WalkView | null> {
+  await proposeForStep(ctx, interviewId, step);
+  const stepId = step.id;
+  const ask = await withTenant(
+    ctx.tenantId,
+    (tx) => askNextPrice(tx, ctx, interviewId, stepId),
+    { role: ctx.role },
+  );
+  if (!ask) return null;
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      return walk ? walkView(walk) : null;
+    },
+    { role: ctx.role },
+  );
+}
+
 /**
  * **NOTHING AFTER THE FIRST TURN MAY UNDO IT.** The first turn commits; the
  * continuation is a convenience. A throw in either of the two calls below
@@ -466,6 +792,28 @@ async function runTurn(
 ) {
   const first = await oneTurn(ctx, interviewId, said, { answering });
   if (!first.ok || first.finished || !first.view || first.resynced) return first;
+
+  /**
+   * **A PHASE ENDS IN MONEY, NOT IN SILENCE.** Its questions are settled, so
+   * the lines get worked out and every price the pack cannot find is asked
+   * for. Only when they are all in does `answerPrice` put the item on the
+   * estimate and let the walk move on.
+   */
+  if (first.stepFinished && first.step) {
+    try {
+      const pricing = await priceTheStep(ctx, interviewId, first.step);
+      if (pricing) return { ...first, view: pricing };
+      /** Nothing to price: put on whatever there is and carry on. */
+      await applyAndMoveOn(ctx, interviewId, first.step.id);
+    } catch {
+      /** Pricing never blocks: move on and let the reckoning show the hole. */
+      try {
+        await applyAndMoveOn(ctx, interviewId, first.step.id);
+      } catch {
+        return first;
+      }
+    }
+  }
   const movedOn = first.view.stepTitle !== "" && first.ranOn !== undefined;
   if (!movedOn) return first;
 
@@ -496,6 +844,16 @@ export async function takeWalkTurnAction(input: unknown) {
   if (!parsed.success) return { error: "Check the form and try again.", view: null };
   try {
     const ctx = await gate();
+    /**
+     * **A PRICE ANSWER NEVER REACHES THE MODEL.** When the walk is asking
+     * what something costs, the reply is one figure read by a parser and
+     * written to the row whose id was on the screen. Nothing interprets it,
+     * nothing attributes it, and the walk's own rule 2 — gather, never
+     * price — stays true of the model all the way through.
+     */
+    const priced = await answerPrice(ctx, parsed.data.interviewId, parsed.data.said);
+    if (priced) return priced;
+
     /** The grant is checked inside the turn, off a read it makes anyway. */
     const out = await runTurn(
       ctx,

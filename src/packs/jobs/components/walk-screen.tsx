@@ -219,6 +219,16 @@ export function WalkScreen({
         if ("resynced" in result && result.resynced) {
           toast.message("That had already moved on — here is where it is.");
         }
+        /**
+         * **A PHASE THAT LANDED SAYS SO.** Money that goes on silently may
+         * as well not have gone on, which was half of what "it seems like I
+         * am just answering questions" meant.
+         */
+        if ("put" in result && result.put) {
+          toast.success(
+            `${result.put.name} — ${formatMoney(result.put.cents, symbol)} on the estimate.`,
+          );
+        }
         /** A proposal is about the answers as they were; another answer
          *  makes it out of date, so it goes rather than misleading. */
         setProposal(null);

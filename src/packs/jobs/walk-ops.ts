@@ -436,7 +436,7 @@ export async function moveToStep(
   ctx: JobsCtx,
   interviewId: string,
   stepId: string | null,
-  opts: { byPerson?: boolean } = {},
+  opts: { byPerson?: boolean; guardStepId?: string } = {},
 ): Promise<JobEstimateInterview> {
   requireWrite(ctx, "member");
   const walk = await getWalk(tx, ctx.tenantId, interviewId);
@@ -452,9 +452,20 @@ export async function moveToStep(
    * it, so the step stays open, the rail stays red and the reckoning still
    * refuses to call the bid ready.
    */
-  if (walk.step && !opts.byPerson) {
-    const left = mustAskOutstanding(walk.step, asWalkAnswers(walk.answers));
-    if (left.length > 0 && stepId !== walk.step.id) {
+  /**
+   * **THE GUARD IS ABOUT THE STEP BEING LEFT**, which is not always the one
+   * `currentStep` derives. Once a phase is covered the derived step is
+   * already the NEXT one, so checking that asked the wrong question
+   * entirely — and refused a move away from a phase that was finished
+   * because a later phase had a must-ask outstanding. `guardStepId` names
+   * the one being left; without it, the derived step is the best guess.
+   */
+  const guarded = opts.guardStepId
+    ? walk.steps.find((x) => x.id === opts.guardStepId)
+    : walk.step;
+  if (guarded && !opts.byPerson) {
+    const left = mustAskOutstanding(guarded, asWalkAnswers(walk.answers));
+    if (left.length > 0 && stepId !== guarded.id) {
       throw new JobsError("MUST_ASK", `"${left[0].prompt}" has to be asked first`);
     }
   }

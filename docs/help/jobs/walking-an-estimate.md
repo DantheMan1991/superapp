@@ -122,6 +122,38 @@ goes. That is what the tick on those questions is for.
 **It does not price anything.** It gathers; the numbers are a separate step.
 If you ask it what something costs it will say so and carry on.
 
+## What a phase costs
+
+**A phase ends in money.** When its questions are done the walk works out
+the lines — the material, the labour, the subcontract — and then **asks you
+for every price it cannot find**:
+
+> Roofing labor — what are you getting for that?
+>
+> Footing concrete, 240 lf — what are you getting per lf?
+
+Type a figure. It goes on that line with the basis reading *you said it*, and
+the walk asks for the next one. When they are all in, the item goes on the
+estimate and it tells you what the phase came to.
+
+Three things worth knowing:
+
+- **The question says which number it wants.** *Per lf* when there is a
+  quantity, the amount outright when the line is a lump. That is not fussiness:
+  `$3,400` read as a rate against 240 lf is **$816,000**.
+- **One figure at a time.** *"About twelve, maybe fourteen"* gets asked again
+  rather than averaged. Picking for you is how a wrong price reaches a client.
+- **{button:Skip this one|ghost} is a real answer.** The line stays unpriced
+  and shows red in *The whole bid* at the bottom, which is what that panel is
+  for. Nothing is lost and nothing is guessed.
+
+**It only asks about prices it has not got.** A price is found without asking
+when the work is a [saved assembly](#assemblies), when a subcontractor's bid
+has been awarded for that phase, or when **you priced the same thing on an
+earlier job**. That last one is the important one: every figure you give here
+is remembered, so the first bid you walk is where your price book comes from
+and the next one barely asks.
+
 ## Turning a phase into lines
 
 Once you have told it something about a phase, {button:What does this come to?|outline|receipt} appears under the conversation. It works out the lines that phase adds up to and shows them before anything is written.

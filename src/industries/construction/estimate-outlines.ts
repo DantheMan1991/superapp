@@ -96,7 +96,7 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
           kind: "choice",
           choices: ["Cleared", "Some clearing", "Heavy clearing"],
         },
-        { prompt: "Is rock expected?", kind: "yes_no" },
+        { prompt: "Is rock expected?", kind: "yes_no", alwaysAsk: true },
         {
           prompt: "Does the spoil stay on site or get hauled off?",
           kind: "choice",
@@ -134,6 +134,7 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
           prompt: "Basement, crawl or slab?",
           kind: "choice",
           choices: ["Full basement", "Walkout basement", "Crawl space", "Slab on grade"],
+          alwaysAsk: true,
         },
         {
           prompt: "Block or poured wall?",
@@ -161,6 +162,7 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
           prompt: "Damproofed or waterproofed?",
           kind: "choice",
           choices: ["Damproofing", "Waterproofing membrane", "Neither"],
+          alwaysAsk: true,
         },
         { prompt: "Is there drain tile, and does it go to daylight or a sump?", kind: "text" },
       ],
@@ -417,7 +419,7 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
       guidance:
         "Supervision, temporary utilities, the toilet, the trailer, the insurance. The costs that belong to the job rather than to any phase of it, and the ones most often left out of a fast bid.",
       questions: [
-        { prompt: "How many weeks from start to finish?", kind: "number", unit: "wk" },
+        { prompt: "How many weeks from start to finish?", kind: "number", unit: "wk", alwaysAsk: true },
         { prompt: "Who is supervising, and how much of their week does this job take?", kind: "text" },
         { prompt: "Temporary power, water and toilet — how long for each?", kind: "text" },
       ],
@@ -432,6 +434,7 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
           prompt: "How much contingency does this job need?",
           kind: "text",
           notes: "A percentage of cost or a figure — both end up as a line.",
+          alwaysAsk: true,
         },
         {
           prompt: "Is the contingency shown to the client or carried inside an item?",
@@ -459,8 +462,9 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
           prompt: "Is the building occupied while the work goes on?",
           kind: "choice",
           choices: ["Occupied throughout", "Vacated for part of it", "Empty"],
+          alwaysAsk: true,
         },
-        { prompt: "Roughly what year was it built?", kind: "text", notes: "Drives the lead, asbestos and knob-and-tube questions later." },
+        { prompt: "Roughly what year was it built?", kind: "text", alwaysAsk: true, notes: "Drives the lead, asbestos and knob-and-tube questions later." },
         { prompt: "How is access — stairs, lift, parking, hours?", kind: "text" },
       ],
     },
@@ -489,8 +493,9 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
           prompt: "Is there any asbestos, lead paint or mould known or suspected?",
           kind: "choice",
           choices: ["None suspected", "Suspected", "Tested and confirmed", "Not tested yet"],
+          alwaysAsk: true,
         },
-        { prompt: "Is testing or abatement in this contract, or the client's?", kind: "text" },
+        { prompt: "Is testing or abatement in this contract, or the client's?", kind: "text", alwaysAsk: true },
       ],
     },
     {
@@ -520,7 +525,7 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
       guidance: "Anything moving that holds the building up.",
       questions: [
         ...WHO,
-        { prompt: "Are any walls coming out?", kind: "yes_no" },
+        { prompt: "Are any walls coming out?", kind: "yes_no", alwaysAsk: true },
         { prompt: "Is any of it bearing, and has an engineer looked?", kind: "text" },
         { prompt: "Is there temporary shoring in this?", kind: "yes_no" },
       ],
@@ -532,11 +537,12 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
         "What is likely behind the wall, and what the contract does about it. A remodel priced as though nothing will be found is a remodel that loses money — the allowance here is the honest version of that.",
       questions: [
         { prompt: "What do you expect to find?", kind: "text" },
-        { prompt: "How much is carried for what nobody can see yet?", kind: "money" },
+        { prompt: "How much is carried for what nobody can see yet?", kind: "money", alwaysAsk: true },
         {
           prompt: "How are surprises handled — allowance, change order, or time and materials?",
           kind: "choice",
           choices: ["Allowance in the price", "Change order as found", "Time and materials"],
+          alwaysAsk: true,
         },
       ],
     },

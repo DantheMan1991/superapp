@@ -120,6 +120,73 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-19 — Two things the founder pushed back on: a question the walk may never skip, and a cost code the editor checks (`claude/outline-always-ask`)
+
+Both came straight out of reading X1 back to him, and both are worth the
+entry for the reasoning as much as the code.
+
+**"THERE IS NO WAY I AM EVER GOING TO HAVE ALL OF THE QUESTIONS 100% PERFECT."**
+He was right, and the X1 write-up was misleading: *nothing branches* is a
+statement about the SCHEMA — no condition column, no rule language a builder
+has to maintain — and it was written as though it forbade the interview from
+asking anything the outline does not contain. It does not, and it never did.
+Three separate things had been flattened into one sentence:
+
+| | Who decides | Allowed |
+| --- | --- | --- |
+| **Skip** an outline question the answers made moot | the model | yes, with the reason recorded |
+| **Add** a question the outline never had | the model | **yes — this is the point of a model being there** |
+| Encode if/then rules **in the outline data** | the builder, forever | no |
+
+**The outline is a FLOOR, not a ceiling.** It guarantees coverage; the walk
+goes past it whenever an answer opens a door.
+
+**WHAT HIS QUESTION ACTUALLY EARNED: `always_ask`.** If the model may skip,
+some questions must survive its judgement — *"is there any asbestos?"* on a
+pre-war remodel must not be quietly judged moot. One boolean on a question, not
+a rule language, and it is the counterweight that makes free skipping safe. It
+means always ASKED, never always ANSWERED: a hard block would trap somebody who
+does not know yet, so an unanswered one is named before the bid goes out
+instead, which is where it is useful. Off by default, because most questions
+SHOULD be skippable — a walk that asks about rebar after you said block is one
+people learn to click through. The starters mark twelve of about 150, and
+`tests/jobs-outline.test.ts` fails if that ratio ever passes a quarter, because
+a mark on everything is a mark on nothing.
+
+**"I'M NOT SURE I 100% UNDERSTAND COST CODES BEING TEXT."** The answer is that
+the real code IS used — the estimate line gets a real `cost_code_id` on a real
+row — and text is what makes that possible: a code's id belongs to ONE list, a
+job picks which list it is on, so an outline storing ids would be welded to one
+list and come out uncoded on every job using the other.
+
+**The gap his question exposed** is that the editor took a code into a free-text
+box and said nothing back. Now it checks against every list the business keeps,
+as you type: the code's name when all of them have it, `not in CSI divisions`
+when only some do (the useful sentence — that job would come out uncoded and
+nothing else would say so), and a warning plus a count at the top of the outline
+when no list has it. A typo used to be invisible until a bid came out with a
+hole in its budget.
+
+**IT HAD TO AGREE WITH THE WALK.** `codeStanding` imports `normalizedCode` from
+`assembly-math` rather than writing a second normalizer, and a test drives both
+through the same spellings — two normalizers would mean a code the editor calls
+good and the interview cannot find, which is the exact failure the check exists
+to prevent.
+
+**One trap re-trodden, and it is documented in `globals.css` as having been
+trodden before.** The warning text was written `text-warning`, which is the
+FILL token: at oklch(0.75) it measures **2.18:1** on the page and fails even
+the 3:1 bar for an icon. `text-warning-foreground` is the readable one, and the
+comment beside the token says several icons were "modernised" onto the fill and
+got worse before anybody measured. Both new strings are on the foreground.
+
+Migration `0391_even_vargas.sql`, one column with a default, so every question
+that exists keeps the behaviour it has. No new ADR: neither change reverses
+[ADR 0098](../decisions/0098-an-estimate-outline-is-the-tenants-and-a-question-is-a-row-so-an-answer-can-point-at-one.md)
+— `always_ask` is the opposite of a condition, it removes the model's
+discretion rather than encoding an if/then, and the cost-code check is that
+ADR's own rule made visible.
+
 ### 2026-09-19 — The estimate interview, X1: the outline is the tenant's, and a question is a row (`claude/estimate-outlines`, ADR 0098)
 
 **What the founder asked for**, in his words: a layer over estimating where
@@ -4757,7 +4824,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement. |
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
-| `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. |
+| `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. Since 2026-09-19 also `always_ask`: a question the walk may never decide is irrelevant, the counterweight to letting it skip. Always ASKED, not always answered. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |

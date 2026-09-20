@@ -111,6 +111,15 @@ Spacing does not matter. Leave it blank if this step's money does not belong to
 one code. A code the job's list does not have simply means no code on those
 lines, never a guess at a near one.
 
+**Beside the box, the screen tells you where that code lives.** If every one of
+your cost code lists has it, you just see what it is called — `Foundation`. If
+only some do, it says which do not: `Foundation · not in CSI divisions`, which
+matters because a job running on that list would come out uncoded at this step
+and nothing else would ever tell you. If no list has it at all you get
+`not in any of your cost code lists`, and a line at the top of the outline
+counts how many steps are in that state. That line is how you catch a typo
+before a bid goes out with a hole in its budget.
+
 **The guidance box** underneath — what has to be established at this step, in
 your own words. This is where you write the thing that is true of *your* work:
 that you never sub framing, that a walkout needs the engineer's number before
@@ -136,9 +145,21 @@ Each has:
 - `An amount` — money: a quote, a price, an allowance.
 - `Anything` — typed or said.
 
-**The notes line** at the bottom — when to ask it, what to watch for. *"Only
-when they are pouring."* *"A no here is worth going back to the foundation step
-for."* The walk reads this; the client never does.
+**The notes line** — when to ask it, what to watch for. *"Only when they are
+pouring."* *"A no here is worth going back to the foundation step for."* The
+walk reads this; the client never does.
+
+**`Always ask`** — the tick at the bottom. Normally the walk uses its judgement
+and skips a question your earlier answers made pointless: it will not ask about
+rebar after you said block, and it tells you it did not. Tick this and it may
+never make that call. Keep it for the handful where **being asked is the whole
+point** — asbestos on an old house, whether a permit is needed, who carries the
+risk on what is behind the wall. It means always *asked*, not always
+*answered*: you can say you do not know yet, and it comes back at you before
+the bid goes out.
+
+Tick everything and the mark stops meaning anything, so the starters mark about
+one question in ten.
 
 {icon:chevron-up} and {icon:chevron-down} move a question within its step, and
 {button:|ghost|trash} removes it.
@@ -152,7 +173,12 @@ it tells you it skipped it. Writing branching rules yourself would mean
 maintaining a second, invisible thing that goes wrong quietly.
 
 So write every question you would ever want asked for that phase, and put the
-"when" in its notes.
+"when" in its notes. The walk also asks things your outline never contained,
+when an answer opens a door — say walkout basement and it will want to know
+about the retaining wall and the egress windows whether you wrote them down or
+not. The outline is the floor, not the ceiling.
+
+Tick `Always ask` on the few that must survive its judgement.
 
 ## Turning it off
 

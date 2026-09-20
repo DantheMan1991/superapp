@@ -4,13 +4,17 @@ import { describe, expect, it } from "vitest";
 import { OUTLINE_QUESTION_KINDS } from "../src/db/schema";
 import {
   WHO_DOES_IT,
+  codeStanding,
   normalizeChoices,
   outlineFromCostCodes,
   outlineIssue,
   sortOrderAt,
+  stepsWithUnknownCode,
   summarizeOutline,
+  type CostCodeBook,
   type OutlineStepShape,
 } from "../src/packs/jobs/outline-math";
+import { resolveCostCode } from "../src/packs/jobs/assembly-math";
 import {
   SEED_QUESTION_KINDS,
   estimateOutlinesFrom,
@@ -369,5 +373,150 @@ describe("the construction profile's starter outlines", () => {
     expect(/\d+\s*(inch|inches|"|foot|feet|'|sq ?ft|psi|o\.c\.)/i.test(text)).toBe(false);
     /** And no bare number in a prompt, which is where an answer would hide. */
     expect(/\d/.test(text)).toBe(false);
+  });
+});
+
+/**
+ * A step's cost code is TEXT so an outline can be walked on a job using any
+ * of the tenant's lists (ADR 0098). The price of that is a typo nobody
+ * notices, so the editor checks as somebody types — and it has to agree with
+ * `resolveCostCode`, which is what the interview will actually use.
+ */
+describe("codeStanding: is this a code the business has?", () => {
+  const books: CostCodeBook[] = [
+    {
+      id: "a",
+      name: "Residential phases",
+      isDefault: true,
+      codes: [
+        { code: "2000", name: "Foundation" },
+        { code: "3000", name: "Framing labor" },
+      ],
+    },
+    {
+      id: "b",
+      name: "CSI divisions",
+      isDefault: false,
+      codes: [
+        { code: "03 00 00", name: "Concrete" },
+        { code: "2000", name: "Foundation" },
+      ],
+    },
+  ];
+
+  it("says nothing about a blank code", () => {
+    expect(codeStanding("", books)).toEqual({ state: "none", name: "", missingFrom: [] });
+    expect(codeStanding("   ", books).state).toBe("none");
+  });
+
+  it("is quiet when every list has it, and names it", () => {
+    expect(codeStanding("2000", books)).toEqual({
+      state: "everywhere",
+      name: "Foundation",
+      missingFrom: [],
+    });
+  });
+
+  /**
+   * The sentence worth having. A code in one list and not another comes out
+   * uncoded on a job using the other one, and nothing else would tell you.
+   */
+  it("names the lists that do NOT have it", () => {
+    expect(codeStanding("3000", books)).toEqual({
+      state: "partial",
+      name: "Framing labor",
+      missingFrom: ["CSI divisions"],
+    });
+  });
+
+  it("warns when no list has it", () => {
+    const out = codeStanding("2O00", books);
+    expect(out.state).toBe("missing");
+    expect(out.name).toBe("");
+  });
+
+  it("is missing rather than fine when the business keeps no lists at all", () => {
+    expect(codeStanding("2000", []).state).toBe("missing");
+  });
+
+  /**
+   * THE TWO MUST AGREE. A second normalizer would mean a code the editor
+   * calls good and the walk cannot find, which is the failure this whole
+   * check exists to prevent.
+   */
+  it("matches exactly what resolveCostCode matches", () => {
+    const codes = [{ id: "c1", code: "03 00 00" }];
+    for (const written of ["03 00 00", "030000", " 03  00  00 ", "03 00 00 "]) {
+      expect(resolveCostCode(written, codes), written).toBe("c1");
+      expect(codeStanding(written, [books[1]]).state, written).toBe("everywhere");
+    }
+    expect(resolveCostCode("03 00 01", codes)).toBeNull();
+    expect(codeStanding("03 00 01", [books[1]]).state).toBe("missing");
+  });
+
+  it("counts the steps whose code nothing has, and leaves a blank alone", () => {
+    const steps: OutlineStepShape[] = [
+      { title: "Fine", costCode: "2000" },
+      { title: "Typo", costCode: "2O00" },
+      { title: "Also a typo", costCode: "9999" },
+      { title: "Deliberately blank", costCode: "" },
+      { title: "No code field at all" },
+    ];
+    expect(stepsWithUnknownCode(steps, books)).toBe(2);
+    expect(summarizeOutline(steps).uncodedSteps).toBe(2);
+  });
+});
+
+/**
+ * ALWAYS ASK (ADR 0098): the counterweight to letting the walk skip. Off by
+ * default, because most questions should be skippable — a walk that asks
+ * about rebar after you said block is one people learn to click through.
+ */
+describe("the starters mark the questions a walk may never skip", () => {
+  const always = CONSTRUCTION_ESTIMATE_OUTLINES.flatMap((o) =>
+    o.steps.flatMap((s) => (s.questions ?? []).filter((q) => q.alwaysAsk)),
+  );
+
+  it("marks a few, not most — or the mark means nothing", () => {
+    const all = CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
+      (n, o) => n + o.steps.reduce((m, s) => m + (s.questions?.length ?? 0), 0),
+      0,
+    );
+    expect(always.length).toBeGreaterThan(0);
+    expect(always.length).toBeLessThan(all / 4);
+  });
+
+  it("includes the ones where being asked is the whole point", () => {
+    const prompts = always.map((q) => q.prompt);
+    expect(prompts).toContain(
+      "Is there any asbestos, lead paint or mould known or suspected?",
+    );
+    expect(prompts).toContain("How much is carried for what nobody can see yet?");
+    expect(prompts).toContain("Are any walls coming out?");
+  });
+
+  it("leaves everything else skippable", () => {
+    const skippable = CONSTRUCTION_ESTIMATE_OUTLINES.flatMap((o) =>
+      o.steps.flatMap((s) => (s.questions ?? []).filter((q) => !q.alwaysAsk)),
+    );
+    expect(skippable.length).toBeGreaterThan(always.length);
+    expect(skippable.some((q) => q.prompt === WHO_DOES_IT.prompt)).toBe(true);
+  });
+
+  it("carries the mark through the seed parser", () => {
+    const parsed = estimateOutlinesFrom({
+      estimateOutlines: CONSTRUCTION_ESTIMATE_OUTLINES,
+    });
+    const marked = parsed.flatMap((o) =>
+      o.steps.flatMap((s) => (s.questions ?? []).filter((q) => q.alwaysAsk)),
+    );
+    expect(marked).toHaveLength(always.length);
+  });
+
+  it("defaults to false when a seed does not say", () => {
+    const parsed = estimateOutlinesFrom({
+      estimateOutlines: [{ name: "x", steps: [{ title: "s", questions: [{ prompt: "p" }] }] }],
+    });
+    expect(parsed[0].steps[0].questions?.[0].alwaysAsk).toBe(false);
   });
 });

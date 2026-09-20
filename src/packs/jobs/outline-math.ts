@@ -1,4 +1,5 @@
 import { OUTLINE_QUESTION_KINDS, type OutlineQuestionKind } from "@/db/schema";
+import { normalizedCode } from "./assembly-math";
 
 /**
  * ESTIMATE OUTLINES, the pure half (X1, ADR 0098).
@@ -21,6 +22,8 @@ export interface OutlineQuestionShape {
   choices?: string[];
   unit?: string;
   notes?: string;
+  /** The interview may never decide this one is irrelevant (ADR 0098). */
+  alwaysAsk?: boolean;
 }
 
 export interface OutlineStepShape {
@@ -184,4 +187,83 @@ export function outlineFromCostCodes(
       guidance: "",
       questions: [{ ...WHO_DOES_IT }],
     }));
+}
+
+/* ------------------------------------------------------------------------
+ * WHETHER A STEP'S COST CODE IS A CODE THIS BUSINESS HAS.
+ *
+ * An outline carries a code as TEXT so it can be walked on a job using any
+ * of the tenant's cost code lists (ADR 0098). The price of that is a typo
+ * nobody notices: a step written `2O00` resolves to nothing when the
+ * interview reaches a job, the lines come out uncoded, and the first sign of
+ * it is a budget with a hole in it. So the editor checks as somebody types.
+ *
+ * **IT MUST AGREE WITH `resolveCostCode`** — the function the interview will
+ * actually use — which is why the normalizer is imported rather than written
+ * again here. A second one would mean a code the editor calls good and the
+ * walk cannot find.
+ * ---------------------------------------------------------------------- */
+
+/** One of the tenant's cost code lists, as the editor needs to see it. */
+export interface CostCodeBook {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  codes: { code: string; name: string }[];
+}
+
+export interface CodeStanding {
+  /**
+   * `none` — nothing typed. `everywhere` — every list has it. `partial` —
+   * some do, and `missingFrom` names the rest. `missing` — no list has it,
+   * which is the one worth a warning.
+   */
+  state: "none" | "everywhere" | "partial" | "missing";
+  /** What the code is called, from the first list that has it. */
+  name: string;
+  /** The lists that do NOT carry it, by name. */
+  missingFrom: string[];
+}
+
+export function codeStanding(
+  written: string,
+  books: readonly CostCodeBook[],
+): CodeStanding {
+  const want = normalizedCode(written ?? "");
+  if (want === "") return { state: "none", name: "", missingFrom: [] };
+  if (books.length === 0) return { state: "missing", name: "", missingFrom: [] };
+
+  let name = "";
+  const missingFrom: string[] = [];
+  for (const book of books) {
+    const hit = book.codes.find((c) => normalizedCode(c.code) === want);
+    if (hit) {
+      if (name === "") name = hit.name;
+    } else {
+      missingFrom.push(book.name);
+    }
+  }
+  if (name === "") return { state: "missing", name: "", missingFrom };
+  return {
+    state: missingFrom.length === 0 ? "everywhere" : "partial",
+    name,
+    missingFrom,
+  };
+}
+
+/**
+ * The one number worth putting at the top of the editor: how many steps carry
+ * a code that NO list of this business has. Steps with no code at all are
+ * already counted by `summarizeOutline`, and are a different thing — a
+ * deliberate blank rather than a mistake.
+ */
+export function stepsWithUnknownCode(
+  steps: readonly OutlineStepShape[],
+  books: readonly CostCodeBook[],
+): number {
+  let n = 0;
+  for (const step of steps) {
+    if (codeStanding(step.costCode ?? "", books).state === "missing") n += 1;
+  }
+  return n;
 }

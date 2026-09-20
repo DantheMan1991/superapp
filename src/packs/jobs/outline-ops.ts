@@ -440,6 +440,7 @@ async function writeSteps(
         choices: normalizeChoices(kind, question.choices),
         unit: (question.unit ?? "").trim(),
         notes: (question.notes ?? "").trim(),
+        alwaysAsk: question.alwaysAsk === true,
         sortOrder: sortOrderAt(qIndex),
       };
       if (question.id) {
@@ -456,6 +457,7 @@ async function writeSteps(
           row.kind !== values.kind ||
           row.unit !== values.unit ||
           row.notes !== values.notes ||
+          row.alwaysAsk !== values.alwaysAsk ||
           row.sortOrder !== values.sortOrder ||
           !sameChoices
         ) {
@@ -584,6 +586,7 @@ export async function duplicateOutline(
         choices: choicesOf(q),
         unit: q.unit,
         notes: q.notes,
+        alwaysAsk: q.alwaysAsk,
       })),
     })),
   });

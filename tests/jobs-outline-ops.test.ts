@@ -183,6 +183,52 @@ d("estimate outline ops", () => {
     expect(after!.steps[0].questions).toEqual([]);
   });
 
+  /**
+   * ALWAYS ASK survives a save, and defaults to off. The interview will read
+   * it to decide what it may skip, so a flag that quietly reset on an edit
+   * would turn an unskippable question into a skippable one with nothing
+   * failing.
+   */
+  it("keeps a question marked always-ask, and defaults the rest to off", async () => {
+    const loaded = await as(async (tx) => {
+      const rows = await listOutlines(tx, tenantId);
+      const id = rows.find((r) => r.outline.name === "New build")!.outline.id;
+      return (await loadOutline(tx, tenantId, id))!;
+    });
+    const foundation = loaded.steps.find((s) => s.title === "Foundation")!;
+    expect(foundation.questions.every((q) => q.alwaysAsk === false)).toBe(true);
+
+    await as((tx) =>
+      updateOutline(tx, ctx, loaded.outline.id, {
+        version: loaded.outline.version,
+        steps: loaded.steps.map((step) => ({
+          id: step.id,
+          title: step.title,
+          costCode: step.costCode,
+          guidance: step.guidance,
+          questions: step.questions.map((q) => ({
+            id: q.id,
+            prompt: q.prompt,
+            kind: q.kind as "choice" | "yes_no" | "number" | "money" | "text",
+            choices: (q.choices as string[]) ?? [],
+            unit: q.unit,
+            notes: q.notes,
+            alwaysAsk: q.prompt === "Poured or block?",
+          })),
+        })),
+      }),
+    );
+
+    const after = await as((tx) => loadOutline(tx, tenantId, loaded.outline.id));
+    const asked = after!.steps.find((s) => s.title === "Foundation")!.questions;
+    expect(asked.find((q) => q.prompt === "Poured or block?")!.alwaysAsk).toBe(true);
+    expect(asked.filter((q) => q.alwaysAsk)).toHaveLength(1);
+    // And the ids did not move because a boolean changed.
+    expect(asked.map((q) => q.id).sort()).toEqual(
+      foundation.questions.map((q) => q.id).sort(),
+    );
+  });
+
   it("refuses a save against a version somebody else has already moved", async () => {
     const loaded = await as(async (tx) => {
       const rows = await listOutlines(tx, tenantId);

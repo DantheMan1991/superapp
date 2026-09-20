@@ -120,6 +120,41 @@ there. The same as moving a row on an estimate.
 **The name** — what the walk says out loud. `Foundation`, `Demolition`,
 `Rough framing`.
 
+## Bringing questions in from another outline
+
+An outline read off your chart has the right steps and one question on each.
+If you have already written good questions into an older outline,
+{button:Bring questions in|outline} at the top of the page copies them across
+instead of you typing them again.
+
+Pick the outline to take them from and you get **one row per step that has
+questions**, with the step it matched to already chosen and the reason it
+matched. Then:
+
+- **Check every row.** It matches on the names, which is guesswork. On a real
+  pair of outlines it placed about three quarters of them, and a few of those
+  were nearly right rather than right — the sort of thing only you can see.
+- **Point a row somewhere else** with its dropdown, which lists every step in
+  this outline under its section.
+- **Leave a row alone** if nothing here should take it. Anything it could not
+  place is already set that way.
+
+{button:Copy onto N steps|primary} writes them. Nothing happens until you
+press it.
+
+Three things worth knowing:
+
+- **Questions are added, never replace.** They go after whatever the step
+  already asks, so the `Who is doing this one?` a generated outline carries
+  stays where it is.
+- **A question the step already asks is skipped**, so doing this twice changes
+  nothing the second time. The message afterwards says how many were already
+  there.
+- **The outline you took them from is not altered.** This is a copy.
+
+Everything about a question comes across — its buttons, its unit, its notes,
+and whether it is always asked.
+
 **The section** — the part of the bid this step belongs to.
 `Infrastructure`, `Structural`, `Mechanical`, `Finishes`, `Labour`, whatever
 you head your own price sheet with. It arrives filled in when the outline was

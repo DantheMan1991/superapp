@@ -8,10 +8,13 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { listCostCodes, JobsError, type JobsCtx } from "./ops";
 import { outlineFromCostCodes } from "./outline-math";
+import { proposeMerges } from "./outline-merge";
 import {
+  copyQuestionsBetweenOutlines,
   createOutline,
   deleteOutline,
   duplicateOutline,
+  loadOutline,
   setDefaultOutline,
   updateOutline,
 } from "./outline-ops";
@@ -273,6 +276,95 @@ export async function deleteOutlineAction(input: unknown) {
     );
     revalidatePath(OUTLINES);
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+
+/* ------------------------------------------------------------------------
+ * BRINGING ONE OUTLINE'S QUESTIONS ONTO ANOTHER'S STEPS.
+ * ---------------------------------------------------------------------- */
+
+const proposeSchema = z.object({
+  fromOutlineId: z.string().uuid(),
+  intoOutlineId: z.string().uuid(),
+});
+
+/**
+ * What the review screen shows: one row per source step that has questions,
+ * with the target this matched to and the reason. **Read only — nothing is
+ * written until somebody has looked at every row.**
+ */
+export async function proposeQuestionMergeAction(input: unknown) {
+  const parsed = proposeSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const out = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const from = await loadOutline(tx, ctx.tenantId, parsed.data.fromOutlineId);
+        const into = await loadOutline(tx, ctx.tenantId, parsed.data.intoOutlineId);
+        if (!from || !into) throw new JobsError("NOT_FOUND", "that outline is no longer here");
+        const shape = (o: NonNullable<typeof from>) =>
+          o.steps.map((x) => ({ id: x.id, title: x.title, questions: x.questions.length }));
+        return {
+          proposals: proposeMerges(shape(from), shape(into)),
+          /** Every step of the target, so a row can be pointed anywhere. */
+          targets: into.steps.map((x) => ({
+            id: x.id,
+            title: x.title,
+            section: x.section,
+            questions: x.questions.length,
+          })),
+          fromName: from.outline.name,
+          intoName: into.outline.name,
+        };
+      },
+      { role: ctx.role },
+    );
+    return { ok: true as const, ...out };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const copySchema = z.object({
+  fromOutlineId: z.string().uuid(),
+  intoOutlineId: z.string().uuid(),
+  pairs: z
+    .array(z.object({ fromStepId: z.string().uuid(), intoStepId: z.string().uuid() }))
+    .max(500),
+});
+
+export async function copyQuestionsAction(input: unknown) {
+  const parsed = copySchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  if (parsed.data.pairs.length === 0) {
+    return { error: "Nothing was ticked, so nothing was copied." };
+  }
+  try {
+    const ctx = await gate();
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const out = await copyQuestionsBetweenOutlines(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "jobs.estimate_outline.questions_copied",
+          targetType: "job_estimate_outline",
+          targetId: parsed.data.intoOutlineId,
+          meta: { from: parsed.data.fromOutlineId, copied: out.copied, steps: out.steps },
+        });
+        return out;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(OUTLINES);
+    revalidatePath(`${OUTLINES}/${parsed.data.intoOutlineId}`);
+    return { ok: true as const, ...result };
   } catch (err) {
     return toResult(err);
   }

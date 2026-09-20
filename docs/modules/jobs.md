@@ -120,6 +120,56 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — Bringing one outline's questions onto another's steps (`claude/bring-questions-across`)
+
+Reading an outline off a chart gives the right steps, codes and sections and
+**one question on each**. The questions are the whole value of a walk, and the
+pilot now has both halves in different places: 33 hand-edited steps carrying
+111 questions, and a 73-step outline carrying 73. He picked copying them
+across over re-coding by hand.
+
+**THE MATCHER WAS TUNED AGAINST HIS OWN PAIR, NOT INVENTED.** First cut scored
+any shared word and produced confident nonsense — *Utilities and septic* →
+*Windows and Doors (Including Hardware)*, because `and` is three letters and a
+long title shares a word with everything. Three fixes, each measured:
+
+- **stop words dropped**, so a long title stops being a magnet;
+- **a shared-word match must cover most of the shorter title**;
+- **among containments, the closest in length wins** — the difference between
+  `Electrical` → `Electric` and `Electrical` → `Electrical Fixtures Material`,
+  which is a phase versus a line item inside one.
+
+Plus crude stemming, which is what reaches `Landscaping` → `Landscape` and
+`Gutters` → `Downspout/Footer/Gutter`. **25 of his 33 matched** and the
+remaining 8 propose nothing rather than something wrong (`Heating and cooling`
+and `HVAC` share nothing a computer can see).
+
+**IT PROPOSES; A PERSON DECIDES.** Several of the 25 were NEARLY right —
+`Decks and porches` landed on `Porch` when `Deck` was also there — so the
+screen is one row per step with the match pre-chosen, a dropdown of every
+target step under its section, and a leave-alone. Nothing copies itself.
+
+**NOTHING IS REPLACED, AND THE SOURCE IS NOT TOUCHED.** Questions are appended
+after what a step already asks; a prompt it already carries is skipped, so a
+second run is a no-op. Everything comes across — kind, choices, unit, notes,
+`always_ask`.
+
+### The bug the database test caught, which the comment denied
+
+`copyQuestionsBetweenOutlines` rebuilt its list of already-asked prompts
+**inside** the pair loop, so two source steps pointing at one destination —
+his `Framing labour` and `Framing materials` both land on `Framing` — each
+imported what the other had just added. The comment above it claimed the
+opposite in as many words. Held across the whole run now, and there is a test
+named for the case. Nothing in `tsc`, lint or the pure suite could have seen
+it: it needed two pairs and one destination against a real database.
+
+No migration. Driven on dev end to end: the review screen with its reasons,
+a run that copied nothing because every prompt was already there (`3 already
+there`), then a real one — `2 questions onto 1 step, 3 already there`, with
+`Is rock expected?` arriving on `Excavation` with its always-ask intact,
+after the step's own question, and the source outline unchanged.
+
 ### 2026-09-20 — An outline is read off the chart as WORK, not as codes (`claude/outline-from-chart`)
 
 Loading the pilot's real chart made its default list 291 codes, and that

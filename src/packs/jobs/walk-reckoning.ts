@@ -77,13 +77,19 @@ export interface StepFacts {
   appliedLines: number;
   appliedCents: number;
   /**
-   * **HOW MANY OF THEM CARRY NO MONEY.** X2b writes a line with a basis of
-   * `none` when it worked out WHAT to price and could not work out what it
-   * costs, and that line lands on the estimate at zero. Counting a phase of
-   * those as priced is the exact failure this file exists to prevent: green
-   * on the rail, nothing in the total, and a bid short by whatever the
-   * concrete was going to cost. Found on the dev tenant's own first walk,
-   * where all three lines of `Cast-in-place concrete` were zeroes.
+   * **HOW MANY OF THEM THE WALK COULD NOT PRICE.** X2b writes a line with a
+   * basis of `none` when it worked out WHAT to price and could not work out
+   * what it costs, and that line lands on the estimate at zero. Counting a
+   * phase of those as priced is the exact failure this file exists to
+   * prevent: green on the rail, nothing in the total, and a bid short by
+   * whatever the concrete was going to cost. Found on the dev tenant's own
+   * first walk, where all three lines of `Cast-in-place concrete` were zeroes.
+   *
+   * **NOT EVERY ZERO, THOUGH.** The founder's own price sheet carries about
+   * sixty deliberate `$0.00` rows — *"Supplied by Turkel"*, *"By Owner"*,
+   * *"(N/A)"* — which are its exclusions, stated in place. Only a line the
+   * WALK could not price counts here; `walk-reckoning-ops.ts` holds that
+   * distinction and the reason for it.
    */
   zeroLines: number;
   bid: StepBidFacts | null;

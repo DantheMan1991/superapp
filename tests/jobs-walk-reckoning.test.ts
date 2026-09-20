@@ -118,6 +118,25 @@ describe("one phase", () => {
     expect(out.blocking).toBe(true);
   });
 
+  /**
+   * **A ZERO SOMEBODY MEANT IS NOT A HOLE.** The founder's price sheet is full
+   * of them and they are the exclusions. `zeroLines` counts only what the WALK
+   * could not price, so a phase deliberately carried at nothing is priced and
+   * blocks nothing — see `walk-reckoning-ops.ts` for where that is decided.
+   */
+  it("is priced when a phase was deliberately carried at nothing", () => {
+    const meant: StepFacts = {
+      appliedLines: 2,
+      appliedCents: 0,
+      zeroLines: 0,
+      bid: null,
+    };
+    const out = reckonStep(step({ id: "a" }), [said("a", "a-who", "By others")], meant);
+    expect(out.standing).toBe("priced");
+    expect(out.blocking).toBe(false);
+    expect(out.amountCents).toBe(0);
+  });
+
   it("flags the one line in a phase that never got a number", () => {
     const s = step({ id: "a" });
     const partly: StepFacts = {

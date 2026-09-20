@@ -160,6 +160,7 @@ The reasons you will see:
 | answered, nothing priced | You went through the phase and no lines ever reached the estimate. |
 | bidding it out, nobody asked | You said you were subbing it and no bid request went out on that cost code. |
 | allowance never set | A money question was passed over, or answered without a figure. |
+| N lines on the estimate, no prices | The walk worked out what to price and could not work out what it costs, so the lines went on at nothing. |
 | a bid chosen, not on the estimate yet | You went with a subcontractor's price and it has not been put on. |
 | N still to ask | The phase has questions nobody has answered. |
 | N asked · N back | Subcontractors have it. Nobody has been chosen. |
@@ -169,6 +170,11 @@ Click any of them to open that phase.
 **What is out for bid is not in the figure.** A price nobody has chosen is not
 a number yet, so the total counts only what is actually on the estimate. The
 line under those rows says so.
+
+**A line you deliberately carry at nothing is not a hole.** *Supplied by the
+owner*, *by others*, *included in the plumbing quote* — price it at zero
+yourself and the phase stays priced. Only a line the walk could not put a
+number on counts against you.
 
 **A phase you priced and then deleted the lines for goes back to red.** The
 figure follows the estimate, not the walk, so if you typed over a generated

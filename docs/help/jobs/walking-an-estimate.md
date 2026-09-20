@@ -1,6 +1,6 @@
 # Walking an estimate
 
-> Price a job by going through it and answering questions, instead of typing the lines yourself. It asks one thing at a time, keeps track of what you have settled, and asks things your list does not have.
+> Price a job by going through it and answering questions, instead of typing the lines yourself. It asks one thing at a time, turns each phase into lines you check before they are written, and asks things your list does not have.
 > **Route:** /dashboard/m/jobs/*/estimates/*/walk
 > **Order:** 265
 
@@ -90,6 +90,25 @@ goes. That is what the tick on those questions is for.
 
 **It does not price anything.** It gathers; the numbers are a separate step.
 If you ask it what something costs it will say so and carry on.
+
+## Turning a phase into lines
+
+Once you have told it something about a phase, {button:What does this come to?|outline|receipt} appears under the conversation. It works out the lines that phase adds up to and shows them before anything is written.
+
+Each line carries a chip saying **where its number came from**:
+
+- `assembly` — built from one of your saved items, at the size you gave.
+- `your last price` — what you charged for that same line last time, with how long ago so you know how much to trust it.
+- `you said it` — a figure you gave in this conversation.
+- {badge:needs a price|warning} — it knows what the line IS and has nothing to price it with.
+
+**It will not make a price up.** If you have not priced that line before, have no assembly for it, and did not say a figure, you get the line at zero with `needs a price` on it. That is the tool working, not failing — a number that looks right and is not would go out in a proposal.
+
+Quantities work the same way. A figure you said is used as you said it. A figure it worked out shows its arithmetic beside the line — *"2 baths at 3 fixtures each"* — so you can check it at a glance. A figure it can neither quote nor explain becomes a quantity of one for you to fill in.
+
+{button:Put it on the estimate|primary} adds them as one item named after the phase, with the lines inside it — the same shape as anything you build by hand, so the proposal prints it normally. {button:Not yet|ghost} leaves it alone.
+
+**Nothing is written until you press the button**, and answering anything else clears the working-out, because it was about the answers as they stood.
 
 ## When it finishes
 

@@ -1,4 +1,4 @@
-import { recall, type PriceBook } from "./price-memory";
+import { howLongAgo, recall, type PriceBook } from "./price-memory";
 
 /**
  * ANSWERS BECOME LINES (X2b, ADR 0098) — the pure half, and the one rule the
@@ -190,7 +190,16 @@ export function priceProposed(
       unit: base.unit === "" ? remembered.unit : base.unit,
       unitCostCents: remembered.unitCostCents,
       basis: "memory",
-      basisDetail: `last charged on ${remembered.projectNumber}`,
+      /**
+       * HOW OLD the price is, not just where it came from. `howLongAgo` is
+       * deliberately vague past a month (E4a) because the point of the
+       * phrase is how much to trust the figure, and a date makes the reader
+       * do that arithmetic themselves.
+       */
+      basisDetail: `last charged on ${remembered.projectNumber}, ${howLongAgo(
+        remembered.pricedOn,
+        today,
+      )}`,
     };
   }
 

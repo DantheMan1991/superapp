@@ -122,11 +122,13 @@ describe("priceProposed: where the number came from, or no number", () => {
     expect(out.description).toBe("Tile, labour");
   });
 
-  it("falls back to what they charged last time", () => {
+  it("falls back to what they charged last time, and says how long ago", () => {
     const out = priceProposed(shape(), ["in-house"], book([{}]), TODAY);
     expect(out.unitCostCents).toBe(350);
     expect(out.basis).toBe("memory");
     expect(out.basisDetail).toContain("24-108");
+    /** How OLD the price is, because that is how much to trust it (E4a). */
+    expect(out.basisDetail).toMatch(/ago|last |yesterday/i);
   });
 
   /** What was SAID beats what was charged last time: it is this job. */

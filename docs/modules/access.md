@@ -19,6 +19,53 @@ becomes theatre.
 
 ## Build log
 
+### 2026-09-19 — A pill that filters itself cannot be a server component (`claude/filter-pills-client`)
+
+**`/dashboard/m/jobs` was 500ing on production, and so were eight other
+screens.** The founder reported the jobs one. What turned it from a pack bug
+into a platform one was the digest: `3424842900` on `/dashboard/m/jobs` and
+`3424842900` on accounting's Inbox, two screens with nothing in common but a
+row of pills.
+
+**THE CAUSE IS THE ENTRY ABOVE.** ADR 0097's *"`FilterPills` filters too"* was
+implemented as `const isDenied = useIsDenied()` inside
+`src/components/app/filter-pills.tsx` — a file with no `"use client"`, whose own
+doc comment read *"Links, not buttons, and therefore a server component.
+Nothing here needs JavaScript."* A hook imported from a `"use client"` module is
+a client reference on the server, and calling one throws *"Attempted to call
+`useIsDenied()` from the server"*. The feature was right; the file it went into
+was the wrong side of the boundary.
+
+**NINE SCREENS, AND THE FOUR THAT SURVIVED ARE WHY IT SHIPPED.** Broken:
+`JobsModule`, a job's Job cost tab, accounting's Inbox, Invoices, Bills and New
+deposit, Inventory's Entries and Value, and the superadmin feedback console.
+Untouched: `sales-nav.tsx`, `purchases-nav.tsx`, `item-filters.tsx` and
+`lot-filters.tsx`, which render the same component and are themselves
+`"use client"`. Accounting's Sales and Purchases sub-navigation — *the pills the
+change was driven on* — are two of those four. The driving was real and it
+proved the feature; it could not have caught this.
+
+**`tsc`, `eslint`, `npm run build` AND THE FULL SUITE WERE ALL GREEN**, on the
+PR and again on `main`. The types are right, and the error exists only at
+render, on dynamic routes nothing prerenders — the same combination that hid the
+`LandModule` function-prop bug on 2026-08-26, and the same blast pattern:
+invisible to every automated check, conditional on which caller you happen to
+open.
+
+**THE FIX IS THE DIRECTIVE**, not backing the feature out. Every prop is
+serialisable (`FilterPill` is `{key, label, href, count?}`, all primitives), so
+a server parent hands it plain data and the four client callers are unaffected.
+The doc comment that asserted the opposite is rewritten to say why the directive
+is load-bearing.
+
+**AND THE CLASS IS GUARDED NOW.** `tests/server-client-boundary.test.ts` gained
+a second scan: any non-`"use client"` module that CALLS a `use*` import
+resolving to a `"use client"` file is a violation, named with its fix. Checked
+against the whole of `src/` — `filter-pills.tsx` was the only one. Proved by
+removing the directive and watching it fail on that file alone.
+
+No migration and no seed: this is code only.
+
 ### 2026-09-19 — Accounting to the leaf, and somewhere to start (`claude/accounting-areas`, ADR 0097)
 
 Neither of the founder's examples fitted inside Accounting's twelve sections:

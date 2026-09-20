@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useIsDenied } from "@/components/app/access-provider";
@@ -29,9 +31,22 @@ interface FilterPillsProps {
 /**
  * Which subset of a list you are looking at.
  *
- * Links, not buttons, and therefore a server component: every filter in the
- * product is already a `?f=` search param, so each pill is a real navigable URL
- * that survives a refresh and can be shared. Nothing here needs JavaScript.
+ * Links, not buttons: every filter in the product is already a `?f=` search
+ * param, so each pill is a real navigable URL that survives a refresh and can
+ * be shared. Nothing here needs JavaScript to NAVIGATE.
+ *
+ * **IT IS A CLIENT COMPONENT ANYWAY, AND HAS BEEN SINCE #626 — WHICH IS WHAT
+ * TOOK PRODUCTION DOWN ON 2026-09-19.** This file said "and therefore a server
+ * component" for a day after `useIsDenied()` was added to it, and a hook cannot
+ * be called from a server module: every page that rendered pills WITHOUT being
+ * a client component itself threw *"Attempted to call useIsDenied() from the
+ * server"*. That was nine screens, `/dashboard/m/jobs` among them. The four
+ * callers that happened to be client components carried on working, which is
+ * why the accounting sub-navigation the change was driven on looked fine.
+ *
+ * So the directive above is load-bearing, and removing it does not make this a
+ * server component again — it makes nine screens 500. Drop the hook first if the
+ * cost of the boundary ever matters; the props are all serialisable either way.
  *
  * These replace a row of underlined tabs. The distinction is worth keeping
  * straight, because the two were doing the same job in different shapes on the

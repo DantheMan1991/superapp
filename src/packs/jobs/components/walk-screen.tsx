@@ -50,29 +50,69 @@ export function WalkScreen({
   const router = useRouter();
   const [view, setView] = useState<WalkView>(initial);
   const [said, setSaid] = useState("");
+  /** The last thing sent, so a failed turn can be retried without retyping. */
+  const [lastSaid, setLastSaid] = useState("");
+  const [failed, setFailed] = useState(false);
+  /** What was just said, shown at once while the turn runs. */
+  const [echoed, setEchoed] = useState<{ prompt: string; answer: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
+  /**
+   * **EVERY CALL IS WRAPPED, and one that was not is why the founder found a
+   * question with all of its buttons dead.** An action that REJECTS rather
+   * than returning `{ error }` — the model overloaded, the request dropped —
+   * left the transition unsettled, so `pending` stayed true and every
+   * control on the screen stayed disabled with no way back but a reload.
+   *
+   * `lastSaid` is kept so the retry below can send the same thing again
+   * without making somebody type it twice.
+   */
   function send(text: string) {
     if (pending) return;
     setSaid("");
+    setLastSaid(text);
+    /**
+     * **YOUR ANSWER LANDS BEFORE THE MODEL DOES.** A turn is a couple of
+     * seconds whatever else is trimmed, and the first version spent all of
+     * them with the panel greyed and nothing moving, which is what the
+     * founder was describing when he said it seemed slow. Showing the answer
+     * against the question it answered makes the wait the model's, not the
+     * screen's — and it is only ever replaced by the real view a moment
+     * later, so it cannot go stale.
+     */
+    if (text.trim() !== "") {
+      setEchoed({ prompt: view.say, answer: text.trim() });
+    }
     startTransition(async () => {
-      const result = await takeWalkTurnAction({
-        interviewId: view.interviewId,
-        said: text,
-        projectId,
-        estimateId,
-      });
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
+      try {
+        const result = await takeWalkTurnAction({
+          interviewId: view.interviewId,
+          said: text,
+          projectId,
+          estimateId,
+        });
+        if ("error" in result) {
+          toast.error(result.error);
+          setFailed(true);
+          return;
+        }
+        setFailed(false);
+        setEchoed(null);
+        if (result.view) setView(result.view);
+        if (result.finished) {
+          toast.success("That is the whole walk.");
+          router.push(estimateHref);
+          return;
+        }
+        /**
+         * NO `router.refresh()` HERE EITHER. The turn returns the whole
+         * view, so the refresh bought nothing and cost a server re-render of
+         * the estimate page behind this one on every single exchange.
+         */
+      } catch {
+        toast.error("That did not get through. Try again.");
+        setFailed(true);
       }
-      if (result.view) setView(result.view);
-      if (result.finished) {
-        toast.success("That is the whole walk.");
-        router.push(estimateHref);
-        return;
-      }
-      router.refresh();
     });
   }
 
@@ -131,15 +171,27 @@ export function WalkScreen({
           ) : (
             <>
               <p className="min-h-12 text-[15px] leading-relaxed">
-                {pending && view.say.trim() === ""
-                  ? "Reading the job…"
-                  : view.say ||
-                    "It has not asked anything yet."}
+                {pending ? (
+                  <span className="text-muted-foreground">Thinking…</span>
+                ) : (
+                  view.say || "It has not asked anything yet."
+                )}
               </p>
               {!pending && view.say.trim() === "" && (
                 <Button className="mt-3" size="sm" onClick={() => send("")}>
                   Ask it
                 </Button>
+              )}
+
+              {failed && !pending && (
+                <div className="mt-3 flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => send(lastSaid)}>
+                    Try that again
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Nothing you have said is lost.
+                  </span>
+                </div>
               )}
 
               {view.quickReplies.length > 0 && (
@@ -192,14 +244,18 @@ export function WalkScreen({
                     disabled={pending}
                     onClick={() =>
                       startTransition(async () => {
-                        const result = await skipQuestionAction({
-                          interviewId: view.interviewId,
-                          questionId: view.pendingQuestionId!,
-                          projectId,
-                          estimateId,
-                        });
-                        if ("error" in result) toast.error(result.error);
-                        else send("Skip that one.");
+                        try {
+                          const result = await skipQuestionAction({
+                            interviewId: view.interviewId,
+                            questionId: view.pendingQuestionId!,
+                            projectId,
+                            estimateId,
+                          });
+                          if ("error" in result) toast.error(result.error);
+                          else send("Skip that one.");
+                        } catch {
+                          toast.error("That did not get through. Try again.");
+                        }
                       })
                     }
                   >
@@ -212,14 +268,18 @@ export function WalkScreen({
                   disabled={pending}
                   onClick={() =>
                     startTransition(async () => {
-                      const result = await closeWalkAction({
-                        interviewId: view.interviewId,
-                        status: "abandoned",
-                        projectId,
-                        estimateId,
-                      });
-                      if ("error" in result) toast.error(result.error);
-                      else router.push(estimateHref);
+                      try {
+                        const result = await closeWalkAction({
+                          interviewId: view.interviewId,
+                          status: "abandoned",
+                          projectId,
+                          estimateId,
+                        });
+                        if ("error" in result) toast.error(result.error);
+                        else router.push(estimateHref);
+                      } catch {
+                        toast.error("That did not get through. Try again.");
+                      }
                     })
                   }
                 >
@@ -232,7 +292,7 @@ export function WalkScreen({
 
         <Panel className="p-5">
           <p className="text-sm font-medium">What you have said</p>
-          {view.settled.length === 0 ? (
+          {view.settled.length === 0 && !echoed ? (
             <p className="mt-2 text-sm text-muted-foreground">
               Nothing on this step yet.
             </p>
@@ -257,6 +317,12 @@ export function WalkScreen({
                   )}
                 </li>
               ))}
+              {echoed && (
+                <li className="border-t pt-3 opacity-70">
+                  <p className="text-xs text-muted-foreground">{echoed.prompt}</p>
+                  <p className="mt-0.5 text-sm">{echoed.answer}</p>
+                </li>
+              )}
             </ul>
           )}
 

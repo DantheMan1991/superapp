@@ -120,6 +120,67 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-19 — Four things the founder hit in the first hour of walking a real bid (`claude/walk-faster`)
+
+He used it, and every one of these came back within the hour. Three were
+defects and one was content.
+
+**1. "THERE KEEPS BEING AN ERROR IN LOADING."** The turn asked for ADAPTIVE
+thinking inside a 4,000-token budget, and `src/lib/claude.ts` warns in so many
+words what that does: **`max_tokens` caps thinking AND the response together,
+so a tight budget truncates mid-tool-call.** A truncated call carries no
+complete `tool_use` block, the turn comes back null, and the screen says *"It
+could not answer just then."* The warning was already in the file when this
+was written; the fix is thinking off and a budget sized for the tool.
+
+**2. "OVERALL IT SEEMS SLOW."** Measured at **6.8 seconds** a turn, and it was
+four things, not one:
+
+- Adaptive thinking on the considered model. `CLAUDE_FAST_MODEL` is new for
+  exactly this: what a conversational turn decides — what to ask, what an
+  answer settled, what it made moot — is shallow, and the deep reasoning in
+  this feature is the sweep over a finished bid, which nobody waits on.
+- `revalidatePath(..., "layout")` on every exchange, which re-rendered the
+  **estimate page** — the heaviest loader in the pack, the price book at up to
+  six hundred rows, the assembly library, the client links. X2a writes no
+  lines, so nothing there had changed.
+- `router.refresh()` alongside it, buying nothing, because the turn returns
+  the whole view.
+- Three full `getWalk` calls per turn — the outline, its questions and every
+  answer, five queries each — plus a whole extra transaction to re-read one
+  config flag the turn already fetches.
+
+Down to **about 2.5 seconds a model call**. The rest is the model, and the
+honest way past that is streaming the reply, which is its own slice.
+
+**AND THE ANSWER NOW LANDS BEFORE THE MODEL DOES.** A turn costs a couple of
+seconds whatever is trimmed, and the whole panel used to grey out with nothing
+moving. What you just said is echoed into *What you have said* at once, and
+only the next question waits.
+
+**3. "ONE QUESTION HAS ALL OF THE ANSWERS GREYED OUT THAT I CAN'T PUSH."** An
+action that REJECTS rather than returning `{ error }` left the transition
+unsettled, so `pending` stayed true and every control on the screen stayed
+disabled with no way out but a reload. Every call is wrapped now, and a failed
+turn draws **Try that again** rather than a toast somebody has to catch —
+`Nothing you have said is lost`, because it is not.
+
+While driving the fix, the same screenshot showed a second bug: it had asked
+*"Block or poured wall?"* — the outline's own words, verbatim — without
+tagging `askingQuestionId`. So the buttons were three inventions instead of
+the question's four options, `Come back to this` vanished, and the answer
+would have been filed as volunteered with the real question still outstanding
+for it to ask again. The words are now matched back to the question when the
+id is missing, on an exact normalised hit only: **a near miss is left alone,
+because mislabelling an answer is worse than a missing chip.**
+
+**4. "WE WOULD NEVER BID OUT PERMITS."** Content, not code — the starter
+opened every phase with *In-house / Bidding it out / By others*, including
+permits and drawings. A button that is never a real answer teaches somebody
+the buttons are decoration. Permits now asks who PULLS it and drawings who is
+PRODUCING them, and a test fails if either is ever offered *Bidding it out*
+again.
+
 ### 2026-09-19 — Granted, and nothing to walk (`claude/walk-no-outline`)
 
 **The founder turned the walk on for his own tenant on production, opened an

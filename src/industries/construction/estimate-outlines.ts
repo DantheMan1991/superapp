@@ -40,6 +40,15 @@ import type { EstimateOutlineSeed } from "@/packs/jobs/seed-shape";
  * needs no knowledge of the trade to ask.
  */
 
+/**
+ * **NOT EVERY PHASE IS ONE YOU COULD SUB OUT**, and the founder found that
+ * the first time he walked a real bid: *"we would never bid out permits."*
+ * A step that opens with In-house / Bidding it out when neither is a real
+ * answer teaches somebody the buttons are decoration.
+ *
+ * So this is on the phases a trade actually does, and permits, drawings,
+ * general conditions and contingency ask their own question instead.
+ */
 const WHO: EstimateOutlineSeed["steps"][number]["questions"] = [
   {
     prompt: "Who is doing this one?",
@@ -61,7 +70,11 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
       guidance:
         "Everything the job owes before a shovel moves. Jurisdictions differ enormously — some charge impact and tap fees that dwarf the permit itself.",
       questions: [
-        ...WHO,
+        {
+          prompt: "Who pulls the permit?",
+          kind: "choice",
+          choices: ["We do", "The client", "The architect or engineer", "No permit on this"],
+        },
         { prompt: "Which jurisdiction is this in?", kind: "text" },
         {
           prompt: "Are there impact, tap or connection fees on top of the permit?",
@@ -75,7 +88,11 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
       costCode: "1100",
       guidance: "What still has to be drawn or stamped before the job can be built.",
       questions: [
-        ...WHO,
+        {
+          prompt: "Who is producing the drawings?",
+          kind: "choice",
+          choices: ["We are", "The client's architect", "Already done", "Nothing more needed"],
+        },
         {
           prompt: "Are the drawings complete, or still in design?",
           kind: "choice",
@@ -550,8 +567,13 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
       title: "Permits",
       costCode: "1000",
       questions: [
-        ...WHO,
         { prompt: "Does this scope need a permit?", kind: "yes_no" },
+        {
+          prompt: "Who pulls it?",
+          kind: "choice",
+          choices: ["We do", "The client", "The architect or engineer"],
+          notes: "Skip when the answer above was no.",
+        },
         { prompt: "Is a historic or HOA review involved?", kind: "yes_no" },
       ],
     },

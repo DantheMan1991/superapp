@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "../src/db";
 import {
+  choicesOf,
+  copyQuestionsBetweenOutlines,
   createOutline,
   deleteOutline,
   duplicateOutline,
@@ -311,6 +313,159 @@ d("estimate outline ops", () => {
     // "Rough framing" lost its questions in the edit above.
     expect(newBuild.summary.silentSteps).toBe(1);
     expect(newBuild.summary.uncodedSteps).toBe(0);
+  });
+
+  /**
+   * BRINGING ONE OUTLINE'S QUESTIONS ONTO ANOTHER'S STEPS.
+   *
+   * The matcher that proposes the pairs is pure and tested elsewhere; what
+   * matters here is that the write **adds and never replaces**, that doing it
+   * twice is a no-op, and that the outline lent from is untouched.
+   */
+  it("copies questions onto another outline's steps, and never twice", async () => {
+    const from = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, {
+        name: `${STAMP} lender`,
+        steps: [
+          {
+            title: "Foundation",
+            questions: [
+              { prompt: "Block or poured?", kind: "choice", choices: ["Block", "Poured"] },
+              { prompt: "Any rebar?", alwaysAsk: true },
+            ],
+          },
+          { title: "Roofing", questions: [{ prompt: "How many squares?", unit: "sq" }] },
+          { title: "Asks nothing" },
+        ],
+      }),
+    );
+    const into = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, {
+        name: `${STAMP} borrower`,
+        steps: [
+          { title: "Foundation", questions: [{ prompt: "Who is doing this one?" }] },
+          { title: "Roofing", questions: [{ prompt: "Who is doing this one?" }] },
+        ],
+      }),
+    );
+
+    const lender = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, from.id));
+    const borrower = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, into.id));
+    const pairs = [
+      { fromStepId: lender!.steps[0].id, intoStepId: borrower!.steps[0].id },
+      { fromStepId: lender!.steps[1].id, intoStepId: borrower!.steps[1].id },
+    ];
+
+    const out = await withTenant(tenantId, (tx) =>
+      copyQuestionsBetweenOutlines(tx, ctx, {
+        fromOutlineId: from.id,
+        intoOutlineId: into.id,
+        pairs,
+      }),
+    );
+    expect(out).toEqual({ steps: 2, copied: 3, skipped: 0 });
+
+    /** **APPENDED, NOT REPLACED** — the step's own question stays first. */
+    const after = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, into.id));
+    expect(after!.steps[0].questions.map((q) => q.prompt)).toEqual([
+      "Who is doing this one?",
+      "Block or poured?",
+      "Any rebar?",
+    ]);
+    /** Everything about a question comes across, not just its words. */
+    const rebar = after!.steps[0].questions[2];
+    expect(rebar.alwaysAsk).toBe(true);
+    const blockOrPoured = after!.steps[0].questions[1];
+    expect(blockOrPoured.kind).toBe("choice");
+    expect(choicesOf(blockOrPoured)).toEqual(["Block", "Poured"]);
+    expect(after!.steps[1].questions[1].unit).toBe("sq");
+
+    /** **THE OUTLINE LENT FROM IS NOT TOUCHED.** This is a copy, not a move. */
+    const lenderAfter = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, from.id));
+    expect(lenderAfter!.steps[0].questions).toHaveLength(2);
+    expect(lenderAfter!.outline.version).toBe(lender!.outline.version);
+
+    /** Doing it again changes nothing: a prompt already asked is skipped. */
+    const again = await withTenant(tenantId, (tx) =>
+      copyQuestionsBetweenOutlines(tx, ctx, {
+        fromOutlineId: from.id,
+        intoOutlineId: into.id,
+        pairs,
+      }),
+    );
+    expect(again).toEqual({ steps: 0, copied: 0, skipped: 3 });
+    const twice = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, into.id));
+    expect(twice!.steps[0].questions).toHaveLength(3);
+
+    /**
+     * **TWO SOURCES ONTO ONE TARGET.** The pilot's `Framing labour` and
+     * `Framing materials` both land on `Framing`; both sets belong, and
+     * neither may re-import what the other just added.
+     */
+    const both = await withTenant(tenantId, (tx) =>
+      copyQuestionsBetweenOutlines(tx, ctx, {
+        fromOutlineId: from.id,
+        intoOutlineId: into.id,
+        pairs: [
+          { fromStepId: lender!.steps[1].id, intoStepId: borrower!.steps[0].id },
+          { fromStepId: lender!.steps[1].id, intoStepId: borrower!.steps[0].id },
+        ],
+      }),
+    );
+    expect(both).toEqual({ steps: 1, copied: 1, skipped: 1 });
+  });
+
+  it("refuses to copy an outline onto itself, and refuses one that is gone", async () => {
+    const one = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, { name: `${STAMP} self`, steps: [{ title: "A" }] }),
+    );
+    await expect(
+      withTenant(tenantId, (tx) =>
+        copyQuestionsBetweenOutlines(tx, ctx, {
+          fromOutlineId: one.id,
+          intoOutlineId: one.id,
+          pairs: [],
+        }),
+      ),
+    ).rejects.toThrow(JobsError);
+    await expect(
+      withTenant(tenantId, (tx) =>
+        copyQuestionsBetweenOutlines(tx, ctx, {
+          fromOutlineId: one.id,
+          intoOutlineId: "00000000-0000-4000-8000-000000000000",
+          pairs: [],
+        }),
+      ),
+    ).rejects.toThrow(JobsError);
+  });
+
+  /** A pair naming a step of some other outline is ignored, not obeyed. */
+  it("ignores a pair whose steps are not on the outlines named", async () => {
+    const a = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, {
+        name: `${STAMP} stray a`,
+        steps: [{ title: "A", questions: [{ prompt: "Ask A?" }] }],
+      }),
+    );
+    const b = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, { name: `${STAMP} stray b`, steps: [{ title: "B" }] }),
+    );
+    const other = await withTenant(tenantId, (tx) =>
+      createOutline(tx, ctx, { name: `${STAMP} stray c`, steps: [{ title: "C" }] }),
+    );
+    const loadedOther = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, other.id));
+    const loadedA = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, a.id));
+
+    const out = await withTenant(tenantId, (tx) =>
+      copyQuestionsBetweenOutlines(tx, ctx, {
+        fromOutlineId: a.id,
+        intoOutlineId: b.id,
+        pairs: [{ fromStepId: loadedA!.steps[0].id, intoStepId: loadedOther!.steps[0].id }],
+      }),
+    );
+    expect(out).toEqual({ steps: 0, copied: 0, skipped: 0 });
+    const untouched = await withTenant(tenantId, (tx) => loadOutline(tx, tenantId, other.id));
+    expect(untouched!.steps[0].questions).toEqual([]);
   });
 
   it("takes the whole tree with it when it goes", async () => {

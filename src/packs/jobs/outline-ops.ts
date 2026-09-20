@@ -17,6 +17,7 @@ import {
   type OutlineSummary,
 } from "./outline-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
+import { isAlreadyAsked } from "./outline-merge";
 
 /**
  * ESTIMATE OUTLINES (X1, ADR 0098) — reading and writing the walk.
@@ -535,6 +536,107 @@ async function writeSteps(
         ),
       );
   }
+}
+
+/**
+ * COPY QUESTIONS FROM ONE OUTLINE'S STEPS ONTO ANOTHER'S.
+ *
+ * The pairs come from a person who has looked at every one of them — the
+ * matcher only ever proposes (`outline-merge.ts` says why). This writes what
+ * they confirmed and nothing else.
+ *
+ * **NOTHING IS REPLACED AND NOTHING IS REMOVED.** Questions are APPENDED
+ * after whatever the target step already asks, so the `Who is doing this
+ * one?` that a generated outline carries stays where it is and the borrowed
+ * ones follow. A prompt the step already asks is skipped, so running this
+ * twice, or onto the outline it came from, changes nothing the second time.
+ *
+ * **THE SOURCE OUTLINE IS NOT TOUCHED AT ALL** — this is a copy, not a move,
+ * and the outline somebody spent a year writing has to still be there
+ * afterwards.
+ */
+export async function copyQuestionsBetweenOutlines(
+  tx: Tx,
+  ctx: JobsCtx,
+  input: {
+    fromOutlineId: string;
+    intoOutlineId: string;
+    pairs: readonly { fromStepId: string; intoStepId: string }[];
+  },
+): Promise<{ steps: number; copied: number; skipped: number }> {
+  requireWrite(ctx, "member");
+  if (input.fromOutlineId === input.intoOutlineId) {
+    throw new JobsError("INVALID_VALUE", "that is the same outline");
+  }
+  const from = await loadOutline(tx, ctx.tenantId, input.fromOutlineId);
+  const into = await loadOutline(tx, ctx.tenantId, input.intoOutlineId);
+  if (!from || !into) throw new JobsError("NOT_FOUND", "that outline is no longer here");
+
+  const fromSteps = new Map(from.steps.map((s) => [s.id, s]));
+  const intoSteps = new Map(into.steps.map((s) => [s.id, s]));
+
+  const inserts: (typeof schema.jobEstimateOutlineQuestions.$inferInsert)[] = [];
+  let skipped = 0;
+  const touched = new Set<string>();
+  /** Per destination step, the prompts it carries — including ones added here. */
+  const alreadyAsked = new Map<string, string[]>();
+
+  for (const pair of input.pairs) {
+    const source = fromSteps.get(pair.fromStepId);
+    const destination = intoSteps.get(pair.intoStepId);
+    /** A step that moved or vanished between the preview and the press. */
+    if (!source || !destination) continue;
+
+    /**
+     * **HELD ACROSS PAIRS, NOT PER PAIR.** Two source steps pointing at one
+     * destination — the pilot's `Framing labour` and `Framing materials`
+     * both land on `Framing` — must not each import what the other just
+     * added. The first draft rebuilt this list inside the loop and the
+     * database test caught it importing the same question twice.
+     */
+    let asked = alreadyAsked.get(destination.id);
+    if (!asked) {
+      asked = destination.questions.map((q) => q.prompt);
+      alreadyAsked.set(destination.id, asked);
+    }
+    let at = destination.questions.length + inserts.filter((i) => i.stepId === destination.id).length;
+
+    for (const q of source.questions) {
+      if (isAlreadyAsked(q.prompt, asked)) {
+        skipped += 1;
+        continue;
+      }
+      asked.push(q.prompt);
+      at += 1;
+      inserts.push({
+        tenantId: ctx.tenantId,
+        stepId: destination.id,
+        prompt: q.prompt,
+        kind: q.kind,
+        choices: choicesOf(q),
+        unit: q.unit,
+        notes: q.notes,
+        alwaysAsk: q.alwaysAsk,
+        sortOrder: sortOrderAt(at),
+      });
+      touched.add(destination.id);
+    }
+  }
+
+  if (inserts.length > 0) {
+    await tx.insert(schema.jobEstimateOutlineQuestions).values(inserts);
+    await tx
+      .update(schema.jobEstimateOutlines)
+      .set({ version: into.outline.version + 1, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.jobEstimateOutlines.tenantId, ctx.tenantId),
+          eq(schema.jobEstimateOutlines.id, input.intoOutlineId),
+        ),
+      );
+  }
+
+  return { steps: touched.size, copied: inserts.length, skipped };
 }
 
 export async function setDefaultOutline(

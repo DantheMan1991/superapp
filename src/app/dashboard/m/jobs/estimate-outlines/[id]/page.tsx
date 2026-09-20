@@ -8,7 +8,8 @@ import { allowsWrite } from "@/lib/packs/authorize";
 import { packContext } from "@/lib/packs/tenant-context";
 import { PageHeader } from "@/components/app/page-header";
 import { listCostCodes, listCostCodeSets } from "@/packs/jobs/ops";
-import { choicesOf, loadOutline } from "@/packs/jobs/outline-ops";
+import { choicesOf, listOutlines, loadOutline } from "@/packs/jobs/outline-ops";
+import { BringQuestionsButton } from "@/packs/jobs/components/bring-questions-dialog";
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import { PACK } from "@/packs/jobs/vocabulary";
 import { OutlineEditor } from "@/packs/jobs/components/outline-editor";
@@ -37,7 +38,7 @@ export default async function EstimateOutlinePage({
     async (tx) => {
       const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
       const gate = interviewGateFrom(pack.config);
-      if (!gate.available) return { gate, loaded: null, books: [] };
+      if (!gate.available) return { gate, loaded: null, books: [], others: [] };
       /**
        * EVERY LIST, NOT JUST THE DEFAULT. A step's code is checked against all
        * of them, because "2000 is in Residential phases but not in CSI
@@ -56,7 +57,16 @@ export default async function EstimateOutlinePage({
           })),
         })),
       );
-      return { gate, loaded: await loadOutline(tx, ctx.tenant.id, id), books };
+      /** The tenant's OTHER outlines, to borrow questions from. */
+      const others = (await listOutlines(tx, ctx.tenant.id))
+        .filter((o) => o.outline.id !== id && o.summary.questions > 0)
+        .map((o) => ({
+          id: o.outline.id,
+          name: o.outline.name,
+          steps: o.summary.steps,
+          questions: o.summary.questions,
+        }));
+      return { gate, loaded: await loadOutline(tx, ctx.tenant.id, id), books, others };
     },
     { role: ctx.role },
   );
@@ -76,6 +86,11 @@ export default async function EstimateOutlinePage({
       <PageHeader
         title={outline.name}
         description="Steps in the order you price them, and the questions each one asks. Type over a step's number to move it."
+        actions={
+          canWrite ? (
+            <BringQuestionsButton outlineId={outline.id} others={data.others} />
+          ) : null
+        }
       />
 
       <OutlineEditor

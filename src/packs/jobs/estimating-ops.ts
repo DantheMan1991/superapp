@@ -71,6 +71,18 @@ export interface EstimateLineInput {
   markupPpm?: number | null;
   unitPriceCents?: number | null;
   notes?: string;
+  /**
+   * WHERE THIS LINE'S NUMBER CAME FROM (X2b, ADR 0098). A walk sets it; the
+   * editor never does, and every line somebody typed carries a blank.
+   *
+   * **OMITTING IT LEAVES WHAT IS THERE**, rather than clearing it, which is
+   * the whole reason it is optional in two senses: the editor's autosave
+   * posts every line on every keystroke and does not know about a basis, so
+   * a save that blanked an absent field would wipe the provenance off a
+   * walked estimate the first time somebody fixed a typo.
+   */
+  basis?: string;
+  basisDetail?: string;
 }
 
 /** A client-facing item on the estimate (ADR 0079). */
@@ -367,6 +379,12 @@ async function saveLines(
       unitPriceCents: l.unitPriceCents ?? null,
       notes: l.notes?.trim() ?? "",
       sortOrder: (i + 1) * 10,
+      /**
+       * Only when the caller SAID so. The editor posts no basis, and an
+       * absent one must leave the row's alone — see `EstimateLineInput`.
+       */
+      ...(l.basis !== undefined ? { basis: l.basis } : {}),
+      ...(l.basisDetail !== undefined ? { basisDetail: l.basisDetail.trim() } : {}),
     };
     if (l.id) {
       // A row that already holds all of this is left alone — autosave on a

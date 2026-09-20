@@ -3,17 +3,36 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, CornerDownLeft, SkipForward } from "lucide-react";
+import { Check, CornerDownLeft, Receipt, SkipForward } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/app/panel";
 import type { WalkView } from "../walk-ops";
+import { formatMoney } from "@/lib/money";
+import { formatQuantity } from "../billing-math";
+import { basisLabel, type LineBasis } from "../walk-lines-math";
 import {
+  applyStepAction,
   closeWalkAction,
+  proposeStepAction,
   skipQuestionAction,
   takeWalkTurnAction,
 } from "../walk-actions";
+
+/** A line the walk has worked out but nobody has accepted yet. */
+interface ProposedRow {
+  id: string;
+  description: string;
+  unit: string;
+  quantityThousandths: number;
+  unitCostCents: number;
+  costCode: string;
+  basis: string;
+  basisDetail: string;
+  quantityBasis: string;
+  quantityNote: string;
+}
 
 /**
  * WALKING AN ESTIMATE (X2a, ADR 0098): the conversation on the left, what it
@@ -41,11 +60,13 @@ export function WalkScreen({
   projectId,
   estimateId,
   estimateHref,
+  symbol,
 }: {
   initial: WalkView;
   projectId: string;
   estimateId: string;
   estimateHref: string;
+  symbol: string | null;
 }) {
   const router = useRouter();
   const [view, setView] = useState<WalkView>(initial);
@@ -55,6 +76,11 @@ export function WalkScreen({
   const [failed, setFailed] = useState(false);
   /** What was just said, shown at once while the turn runs. */
   const [echoed, setEchoed] = useState<{ prompt: string; answer: string } | null>(null);
+  /** What this phase comes to, before anybody accepts it. */
+  const [proposal, setProposal] = useState<{ lines: ProposedRow[]; excluded: string } | null>(
+    null,
+  );
+  const [working, setWorking] = useState(false);
   const [pending, startTransition] = useTransition();
 
   /**
@@ -98,6 +124,9 @@ export function WalkScreen({
         }
         setFailed(false);
         setEchoed(null);
+        /** A proposal is about the answers as they were; another answer
+         *  makes it out of date, so it goes rather than misleading. */
+        setProposal(null);
         if (result.view) setView(result.view);
         if (result.finished) {
           toast.success("That is the whole walk.");
@@ -236,6 +265,37 @@ export function WalkScreen({
                 </Button>
               </form>
 
+              {view.settled.length > 0 && !proposal && (
+                <div className="mt-4 border-t pt-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={working || pending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        setWorking(true);
+                        try {
+                          const result = await proposeStepAction({
+                            interviewId: view.interviewId,
+                            projectId,
+                            estimateId,
+                          });
+                          if ("error" in result) toast.error(result.error);
+                          else setProposal({ lines: result.lines, excluded: result.excluded });
+                        } catch {
+                          toast.error("That did not get through. Try again.");
+                        } finally {
+                          setWorking(false);
+                        }
+                      })
+                    }
+                  >
+                    <Receipt className="mr-1.5 size-4" />
+                    {working ? "Working it out…" : "What does this come to?"}
+                  </Button>
+                </div>
+              )}
+
               <div className="mt-4 flex flex-wrap items-center gap-3 border-t pt-3 text-xs">
                 {view.pendingQuestionId && (
                   <button
@@ -348,6 +408,111 @@ export function WalkScreen({
           )}
         </Panel>
       </div>
+
+      {proposal && (
+        <Panel className="p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">
+              What {view.stepTitle || "this"} comes to
+            </p>
+            <p className="text-sm font-medium">
+              {formatMoney(
+                proposal.lines.reduce(
+                  (n, l) => n + Math.round((l.quantityThousandths * l.unitCostCents) / 1000),
+                  0,
+                ),
+                symbol,
+              )}
+            </p>
+          </div>
+
+          {proposal.lines.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Nothing to price on this one.
+            </p>
+          ) : (
+            <ul className="mt-3">
+              {proposal.lines.map((l) => (
+                <li
+                  key={l.id}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm">{l.description}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className={
+                          l.basis === "none"
+                            ? "rounded-full bg-warning/15 px-2 py-0.5 text-warning-foreground"
+                            : "rounded-full bg-muted px-2 py-0.5"
+                        }
+                      >
+                        {basisLabel(l.basis as LineBasis)}
+                      </span>
+                      {/* The chip already says it when there is nothing to add. */}
+                      {l.basisDetail && l.basisDetail !== basisLabel(l.basis as LineBasis) && (
+                        <span>{l.basisDetail}</span>
+                      )}
+                      {l.quantityBasis === "derived" && l.quantityNote && (
+                        <span className="italic">{l.quantityNote}</span>
+                      )}
+                    </p>
+                  </div>
+                  <p className="whitespace-nowrap text-xs text-muted-foreground">
+                    {formatQuantity(l.quantityThousandths)}
+                    {l.unit ? ` ${l.unit}` : ""} × {formatMoney(l.unitCostCents, symbol)}
+                  </p>
+                  <p className="w-24 whitespace-nowrap text-right text-sm">
+                    {formatMoney(
+                      Math.round((l.quantityThousandths * l.unitCostCents) / 1000),
+                      symbol,
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {proposal.excluded && (
+            <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+              For the exclusions: {proposal.excluded}
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t pt-3">
+            <Button
+              disabled={pending || proposal.lines.length === 0}
+              onClick={() =>
+                startTransition(async () => {
+                  try {
+                    const result = await applyStepAction({
+                      interviewId: view.interviewId,
+                      projectId,
+                      estimateId,
+                    });
+                    if ("error" in result) {
+                      toast.error(result.error);
+                      return;
+                    }
+                    toast.success(`${result.groupName} is on the estimate.`);
+                    setProposal(null);
+                  } catch {
+                    toast.error("That did not get through. Try again.");
+                  }
+                })
+              }
+            >
+              Put it on the estimate
+            </Button>
+            <Button variant="ghost" disabled={pending} onClick={() => setProposal(null)}>
+              Not yet
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Nothing is written until you press it.
+            </p>
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }

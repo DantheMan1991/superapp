@@ -120,6 +120,73 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — X2b: answers become lines, and every one says where its number came from (`claude/walk-lines`, ADR 0098)
+
+The half that touches money. A step's answers become an ITEM on the estimate
+with its lines inside (ADR 0079), and the whole slice is built around one
+sentence the pack already had, in its assembly tests: **a plausible wrong
+number in an estimate is worse than a refusal, because it goes out in a
+proposal.**
+
+**THE MODEL NEVER EMITS MONEY, AND THE TOOL CANNOT SAY IT.** Look at
+`PROPOSE_TOOL`: there is no field for a price. Not `unitCost`, not `total`.
+The nearest thing is `saidUnitCostCents`, which means *"they told me this
+figure"* — and is checked against the transcript before it is believed. The
+safety argument is a schema rather than a paragraph in a prompt, because a
+prompt is a request and a schema is not.
+
+The money goes on afterwards, in `walk-lines-ops.ts` and nowhere else, from
+one of four places a builder can point at:
+
+| Basis | Where the number came from |
+| --- | --- |
+| `assembly` | one of their saved items, exploded at the size asked for |
+| `memory` | what they charged for that line last time, with how long ago (E4a) |
+| `said` | a figure the estimator gave, found in the transcript |
+| `none` | nothing yet, and the line says so on its face |
+
+**A QUANTITY IS QUOTED OR EXPLAINED**, and that is the founder's call. The
+first version refused any figure that was not verbatim in what somebody
+said, which also refused arithmetic anybody would want: *"two baths, three
+fixtures each"* would not put 6 on a line. His instruction was *"let it
+derive quantities and show the arithmetic"*, and he is right about why —
+**what makes a derived number safe is not that a model did not do the sum,
+it is that the sum is on the screen.** So a derived figure carries its
+working, the working is shown on the line, and the table refuses a row that
+claims `derived` with nothing to show. A figure with neither a quotation nor
+working still falls back to a lump of one.
+
+**APPLYING GOES THROUGH `updateEstimate`**, the same whole-form save the
+editor posts (ADR 0082) — not a private insert. So a walk cannot produce an
+estimate the editor cannot show or the proposal cannot print, and turning the
+layer off leaves ordinary rows behind. Each proposal remembers the line it
+became, the shape a takeoff already uses for a measurement it pushed
+(ADR 0074).
+
+`basis` on `job_estimate_lines` defaults to BLANK, which is not `none`.
+Blank means nobody recorded where a number came from and is what every line
+ever typed carries; `none` means a walk produced the line and could not price
+it, which is worth seeing. `EstimateLineInput.basis` is optional in two
+senses — **omitting it leaves what is there** — because the editor's autosave
+posts every line on every keystroke and knows nothing about a basis, and a
+save that blanked an absent field would strip the provenance off a walked
+estimate the first time somebody fixed a typo.
+
+### What it actually did, driven
+
+On a barn conversion whose tenant has no assemblies and no price history for
+concrete, and where the estimator gave no figures, it proposed *Footing
+concrete*, *Slab on grade* and *Concrete labor, place & finish* — three lines
+an estimator would recognise — each marked **needs a price** at zero, and put
+them on the estimate as one item. That is the feature working, not failing:
+it knew the shape of the phase and refused to invent the money. The same walk
+against a business with a filled-in assembly library and a year of priced
+lines is where the numbers come from.
+
+One trap re-trodden on the way: a backtick inside a template literal, in the
+proposal prompt this time, which ends the literal mid-file exactly as it did
+in `proposal-html.ts`'s stylesheet.
+
 ### 2026-09-19 — Four things the founder hit in the first hour of walking a real bid (`claude/walk-faster`)
 
 He used it, and every one of these came back within the hour. Three were
@@ -4988,12 +5055,13 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_selection_choices` | What is on offer for a selection, one row each: description, supplier, reference, a price by the unit (both or neither, ADR 0064's thousandths) or as a sum, `price_cents` the extended figure, and `is_selected` for the client's pick. | Cascade from the selection; no action to the party. **One chosen per selection**: a partial unique index on `(tenant, selection) where is_selected`. Price, quantity and unit price ≥ 0; the unit pair both or neither. Nothing points at a choice, so an edit replaces by id. |
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` — CHECK lines / codes / **groups** (E1, ADR 0079) / sum, the live definition being in `0373`, which drops and re-adds it — and the proposal's `scope`, `exclusions` and `terms`: the words fixed with the money, the presentation free. An accepted estimate's ITEMS are fixed with its lines and its rates. Since E2 also `show_code_numbers` (ADR 0080), off by default and free on an accepted estimate, being a printing choice. |
 | `job_estimate_groups` | **The item the client buys** (E1, ADR 0079): a name in the client's words, an optional `client_note` paragraph, `price_mode` — `rollup` (its lines sum) or `fixed` (the price is typed, and sits OUTSIDE the overhead-and-profit spread) — `fixed_price_cents`, sort order. One level deep, by the shape rather than by a rule. | Cascade from the estimate. CHECK: name present and ≤ 200, note ≤ 4,000, mode on the list, price ≥ 0, and **`(price_mode = 'fixed') = (fixed_price_cents is not null)`** so the mode and the number cannot disagree. Nothing stores a total; the item's cost, price and margin come from `estimate-math.ts`. |
-| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement. |
+| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement.  Since X2b also `basis` / `basis_detail` (ADR 0098): where the number came from, BLANK on every line anybody typed — blank is not `none`, which means a walk produced it and could not price it. The input treats an absent basis as *leave what is there*, so the editor's autosave cannot strip it. |
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
 | `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. Since 2026-09-19 also `always_ask`: a question the walk may never decide is irrelevant, the counterweight to letting it skip. Always ASKED, not always answered. |
 | `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
+| `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |

@@ -68,6 +68,7 @@ export default async function WalkPage({
         projectId={id}
         estimateId={estimateId}
         estimateHref={estimateHref}
+        symbol={ctx.tenant.currencySymbol}
       />
     </div>
   );

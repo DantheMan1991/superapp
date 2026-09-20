@@ -257,6 +257,22 @@ export const jobEstimateLines = pgTable(
     /** An explicit price per unit, which overrides the markup: how a unit-price bid is written. */
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }),
     notes: text("notes").notNull().default(""),
+    /**
+     * WHERE THIS LINE'S NUMBER CAME FROM (X2b, ADR 0098), and blank on every
+     * line anybody typed — which is every line written before this existed.
+     *
+     * A walk produces lines from a saved assembly, from what this business
+     * charged last time, or from a figure the estimator gave; the chip on the
+     * line says which, and `basis_detail` says the rest — *"your last price
+     * on 24-108"*, *"6 from 2 baths at 3 fixtures each"*. The takeoff will
+     * want the same column when a measurement pushes a quantity.
+     *
+     * **BLANK IS NOT A BASIS OF `none`.** Blank means nobody recorded one;
+     * `none` means a walk produced the line and could not price it, which is
+     * a thing worth seeing.
+     */
+    basis: text("basis").notNull().default(""),
+    basisDetail: text("basis_detail").notNull().default(""),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -291,6 +307,10 @@ export const jobEstimateLines = pgTable(
       foreignColumns: [jobCostCodes.tenantId, jobCostCodes.id],
     }),
     check("job_estimate_lines_description_present", sql`length(btrim(${t.description})) > 0`),
+    check(
+      "job_estimate_lines_basis_valid",
+      sql`${t.basis} in ('', 'assembly', 'memory', 'said', 'none')`,
+    ),
     check(
       "job_estimate_lines_client_description_bounded",
       sql`char_length(${t.clientDescription}) <= 300`,

@@ -2550,6 +2550,168 @@ d("jobs tables (RLS)", () => {
     );
   });
 
+  it("cannot read or change another tenant's PROPOSED LINES; a derived quantity shows its working; applied is whole or absent; and they go with the walk", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const e = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantA, projectId: projectA, number: "EST-PROP-1" })
+        .returning();
+      const o = await tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantA, name: "Proposed outline" })
+        .returning();
+      const w = await tx
+        .insert(schema.jobEstimateInterviews)
+        .values({ tenantId: tenantA, estimateId: e[0].id, outlineId: o[0].id })
+        .returning();
+      const l = await tx
+        .insert(schema.jobEstimateProposedLines)
+        .values({
+          tenantId: tenantA,
+          interviewId: w[0].id,
+          stepTitle: "Foundation",
+          description: "Footing concrete",
+          unit: "lf",
+          quantityThousandths: 176_000,
+          unitCostCents: 2_375,
+          basis: "memory",
+          basisDetail: "last charged on 24-108",
+          quantityBasis: "said",
+        })
+        .returning();
+      return { estimateId: e[0].id, outlineId: o[0].id, walkId: w[0].id, lineId: l[0].id };
+    });
+
+    // Tenant B sees none of it and changes none of it.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx
+        .select()
+        .from(schema.jobEstimateProposedLines)
+        .where(eq(schema.jobEstimateProposedLines.id, seeded.lineId)),
+      changed: await tx
+        .update(schema.jobEstimateProposedLines)
+        .set({ unitCostCents: 1 })
+        .where(eq(schema.jobEstimateProposedLines.id, seeded.lineId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+
+    // Member work, like the walk that made it.
+    const mine = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.jobEstimateProposedLines)
+        .where(eq(schema.jobEstimateProposedLines.id, seeded.lineId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].basis).toBe("memory");
+
+    /**
+     * **A DERIVED QUANTITY SHOWS ITS WORKING, OR IT IS NOT DERIVED.** The
+     * founder asked for arithmetic on the condition it is visible; a row
+     * claiming `derived` with nothing to show would be the unexplained
+     * number this whole slice refuses.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateProposedLines).values({
+          tenantId: tenantA,
+          interviewId: seeded.walkId,
+          description: "Fixtures",
+          quantityBasis: "derived",
+          quantityNote: "",
+        }),
+      ),
+    ).rejects.toThrow();
+    // And working with no derivation is equally half a fact.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateProposedLines).values({
+          tenantId: tenantA,
+          interviewId: seeded.walkId,
+          description: "Fixtures",
+          quantityBasis: "said",
+          quantityNote: "2 baths at 3 each",
+        }),
+      ),
+    ).rejects.toThrow();
+    const derived = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateProposedLines)
+        .values({
+          tenantId: tenantA,
+          interviewId: seeded.walkId,
+          description: "Fixtures",
+          quantityThousandths: 6_000,
+          quantityBasis: "derived",
+          quantityNote: "2 baths at 3 fixtures each",
+        })
+        .returning(),
+    );
+    expect(derived[0].quantityNote).toBe("2 baths at 3 fixtures each");
+
+    // A basis nothing understands, and money that is less than nothing.
+    for (const bad of [
+      { basis: "vibes" },
+      { quantityBasis: "guessed" },
+      { unitCostCents: -1 },
+      { quantityThousandths: -1 },
+      { description: "  " },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.jobEstimateProposedLines).values({
+            tenantId: tenantA,
+            interviewId: seeded.walkId,
+            description: "x",
+            ...bad,
+          } as typeof schema.jobEstimateProposedLines.$inferInsert),
+        ),
+        JSON.stringify(bad),
+      ).rejects.toThrow();
+    }
+
+    /** Applied is both halves or neither: half a record is not one. */
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateProposedLines)
+          .set({ appliedAt: new Date() })
+          .where(eq(schema.jobEstimateProposedLines.id, seeded.lineId)),
+      ),
+    ).rejects.toThrow();
+
+    // A proposal on another tenant's walk is unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateProposedLines).values({
+          tenantId: tenantB,
+          interviewId: seeded.walkId,
+          description: "theirs",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // They go with the walk, which goes with the estimate.
+    await withSystem((tx) =>
+      tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, seeded.estimateId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobEstimateProposedLines)
+          .where(eq(schema.jobEstimateProposedLines.id, seeded.lineId)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) =>
+      tx
+        .delete(schema.jobEstimateOutlines)
+        .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId)),
+    );
+  });
+
   it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
     const seeded = await withSystem(async (tx) => {
       const e = await tx

@@ -9,6 +9,10 @@ import { logAuditInTx } from "@/lib/audit";
 import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { takeWalkTurn, walkSystemPrompt } from "./ai/walk";
+import { proposeSystemPrompt, takeProposal } from "./ai/propose";
+import { listAssemblies } from "./assembly-ops";
+import { listCostCodes } from "./ops";
+import { applyProposal, proposeLines } from "./walk-lines-ops";
 import { JobsError, type JobsCtx } from "./ops";
 import { interviewGateFrom } from "./interview-gate";
 import {
@@ -516,6 +520,162 @@ export async function closeWalkAction(input: unknown) {
     );
     revalidatePath(`${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`, "layout");
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/* ------------------------------------------------------------------------
+ * WHAT A STEP COMES TO (X2b, ADR 0098).
+ *
+ * The same three acts as a turn — gather and claim, call the model with no
+ * transaction open, persist — because it is the same hazard.
+ * ---------------------------------------------------------------------- */
+
+const proposeSchema = z.object({
+  interviewId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+export async function proposeStepAction(input: unknown) {
+  const parsed = proposeSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+
+    const gathered = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+        requireGrantedFrom(pack.config);
+        await claimTurn(tx, ctx, parsed.data.interviewId, { ignoreCooldown: true });
+        const walk = await getWalk(tx, ctx.tenantId, parsed.data.interviewId);
+        if (!walk?.step) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+        const estimate = await tx.query.jobEstimates.findFirst({
+          where: (e, { and: a, eq: q }) =>
+            a(q(e.tenantId, ctx.tenantId), q(e.id, walk.interview.estimateId)),
+          columns: { projectId: true },
+        });
+        const project = estimate
+          ? await tx.query.jobProjects.findFirst({
+              where: (p, { and: a, eq: q }) =>
+                a(q(p.tenantId, ctx.tenantId), q(p.id, estimate.projectId)),
+              columns: { name: true, number: true, costCodeSetId: true },
+            })
+          : null;
+        const assemblies = await listAssemblies(tx, ctx.tenantId);
+        const codes = project?.costCodeSetId
+          ? await listCostCodes(tx, ctx.tenantId, project.costCodeSetId)
+          : [];
+        return {
+          walk,
+          step: walk.step,
+          labels: pack.labels,
+          jobName: project ? `${project.number} ${project.name}` : "",
+          assemblies: assemblies.map((a) => ({
+            name: a.assembly.name,
+            per:
+              a.assembly.drivingQuantityThousandths === 1000 && a.assembly.drivingUnit === ""
+                ? "each"
+                : `per ${a.assembly.drivingQuantityThousandths / 1000} ${a.assembly.drivingUnit}`.trim(),
+          })),
+          costCodes: codes
+            .filter((c) => c.isActive)
+            .map((c) => ({ code: c.code, name: c.name })),
+        };
+      },
+      { role: ctx.role },
+    );
+
+    const here = gathered.walk.answers.filter((a) => a.stepId === gathered.step.id);
+    const system = proposeSystemPrompt({
+      projectWord: labelFor(gathered.labels, "project", "Project"),
+      jobName: gathered.jobName,
+      step: gathered.step,
+      answers: here.map((a) => ({
+        questionId: a.questionId,
+        stepId: a.stepId,
+        prompt: a.prompt,
+        answer: a.answer,
+        skipped: a.skipped,
+        skipReason: a.skipReason,
+      })),
+      assemblies: gathered.assemblies,
+      costCodes: gathered.costCodes,
+    });
+
+    const proposal = await takeProposal({ system });
+    if (!proposal) return { error: "It could not work that out just then. Try again." };
+
+    const rows = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        proposeLines(tx, ctx, {
+          interviewId: parsed.data.interviewId,
+          step: gathered.step,
+          shapes: proposal.lines,
+          /** Only what was actually SAID counts as having been said. */
+          answers: here.filter((a) => !a.skipped).map((a) => a.answer),
+          today: new Date().toISOString().slice(0, 10),
+        }),
+      { role: ctx.role },
+    );
+
+    return {
+      ok: true as const,
+      excluded: proposal.excluded,
+      lines: rows.map((r) => ({
+        id: r.id,
+        description: r.description,
+        unit: r.unit,
+        quantityThousandths: r.quantityThousandths,
+        unitCostCents: r.unitCostCents,
+        costCode: r.costCode,
+        basis: r.basis,
+        basisDetail: r.basisDetail,
+        quantityBasis: r.quantityBasis,
+        quantityNote: r.quantityNote,
+      })),
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function applyStepAction(input: unknown) {
+  const parsed = proposeSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const applied = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const walk = await getWalk(tx, ctx.tenantId, parsed.data.interviewId);
+        if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+        const out = await applyProposal(tx, ctx, {
+          interviewId: parsed.data.interviewId,
+          estimateId: walk.interview.estimateId,
+          stepId: walk.step?.id ?? null,
+        });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "jobs.estimate_walk.applied",
+          targetType: "job_estimate",
+          targetId: walk.interview.estimateId,
+          meta: { item: out.groupName, lines: out.lines },
+        });
+        return out;
+      },
+      { role: ctx.role },
+    );
+    /** This one DOES change the estimate, so the page behind is stale. */
+    revalidatePath(
+      `${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`,
+      "layout",
+    );
+    return { ok: true as const, ...applied };
   } catch (err) {
     return toResult(err);
   }

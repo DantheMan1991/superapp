@@ -561,7 +561,7 @@ export async function proposeStepAction(input: unknown) {
           ? await tx.query.jobProjects.findFirst({
               where: (p, { and: a, eq: q }) =>
                 a(q(p.tenantId, ctx.tenantId), q(p.id, estimate.projectId)),
-              columns: { name: true, number: true, costCodeSetId: true },
+              columns: { id: true, name: true, number: true, costCodeSetId: true },
             })
           : null;
         const assemblies = await listAssemblies(tx, ctx.tenantId);
@@ -573,6 +573,7 @@ export async function proposeStepAction(input: unknown) {
           step: walk.step,
           labels: pack.labels,
           jobName: project ? `${project.number} ${project.name}` : "",
+          projectId: project?.id,
           assemblies: assemblies.map((a) => ({
             name: a.assembly.name,
             per:
@@ -618,6 +619,7 @@ export async function proposeStepAction(input: unknown) {
           /** Only what was actually SAID counts as having been said. */
           answers: here.filter((a) => !a.skipped).map((a) => a.answer),
           today: new Date().toISOString().slice(0, 10),
+          projectId: gathered.projectId,
         }),
       { role: ctx.role },
     );

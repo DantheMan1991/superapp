@@ -16,6 +16,7 @@ import { howLongAgo, recall, type PriceBook } from "./price-memory";
  * of four places the business can point at:
  *
  *   `assembly`  a saved item of theirs, exploded at the size asked for
+ *   `sub`       a subcontractor's own number, on a bid they awarded (X3)
  *   `memory`    what they charged for this line last time (E4a)
  *   `said`      a figure the estimator gave in the conversation
  *   `none`      nothing yet, and the line says so
@@ -32,7 +33,7 @@ import { howLongAgo, recall, type PriceBook } from "./price-memory";
 /** Quantities are thousandths (ADR 0064); money is cents. */
 const ONE = 1_000;
 
-export const LINE_BASES = ["assembly", "memory", "said", "none"] as const;
+export const LINE_BASES = ["assembly", "memory", "said", "sub", "none"] as const;
 export type LineBasis = (typeof LINE_BASES)[number];
 
 /** What a walk may propose. Note what is absent: any free-form price. */
@@ -261,6 +262,8 @@ export function basisLabel(basis: LineBasis): string {
   switch (basis) {
     case "assembly":
       return "assembly";
+    case "sub":
+      return "their bid";
     case "memory":
       return "your last price";
     case "said":

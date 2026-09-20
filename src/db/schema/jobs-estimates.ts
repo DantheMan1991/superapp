@@ -309,7 +309,7 @@ export const jobEstimateLines = pgTable(
     check("job_estimate_lines_description_present", sql`length(btrim(${t.description})) > 0`),
     check(
       "job_estimate_lines_basis_valid",
-      sql`${t.basis} in ('', 'assembly', 'memory', 'said', 'none')`,
+      sql`${t.basis} in ('', 'assembly', 'memory', 'said', 'sub', 'none')`,
     ),
     check(
       "job_estimate_lines_client_description_bounded",

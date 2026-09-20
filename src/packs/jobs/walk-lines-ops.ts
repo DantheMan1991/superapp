@@ -11,6 +11,7 @@ import {
   type ProposedShape,
 } from "./walk-lines-math";
 import { getEstimate, priceBookRows, updateEstimate } from "./estimating-ops";
+import { awardedForCode } from "./bids-ops";
 import { listCostCodes } from "./ops";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import type { WalkStep } from "./walk-math";
@@ -103,6 +104,8 @@ export async function proposeLines(
     /** Every answer on this step, for checking a figure it says was said. */
     answers: readonly string[];
     today: string;
+    /** The job, so an awarded bid on this phase can supply the number (X3). */
+    projectId?: string;
   },
 ): Promise<JobEstimateProposedLine[]> {
   requireWrite(ctx, "member");
@@ -112,7 +115,45 @@ export async function proposeLines(
   const book = priceBookFrom(await priceBookRows(tx, ctx.tenantId));
   const library = await listAssemblies(tx, ctx.tenantId);
 
+  /**
+   * **A BID THEY AWARDED BEATS EVERYTHING** (X3). It is this job, this scope
+   * and a number a subcontractor put their name to — better than what the
+   * business charged last time and better than anything the conversation
+   * implied. Matched on the phase's cost code; no award means no number,
+   * never the lowest bid, because which one they are going with is their
+   * decision and not an arithmetic.
+   */
+  const awarded =
+    input.projectId && input.step.costCode
+      ? await awardedForCode(tx, ctx.tenantId, input.projectId, input.step.costCode)
+      : null;
+
   const priced: PricedLine[] = [];
+  /**
+   * ONE LINE FOR AN AWARDED SUBCONTRACT, and the shapes are set aside.
+   * A phase somebody else is doing for a fixed number is one lump — a
+   * breakdown of their work would be this business guessing at it.
+   */
+  if (awarded) {
+    await tx.insert(schema.jobEstimateProposedLines).values({
+      tenantId: ctx.tenantId,
+      interviewId: input.interviewId,
+      stepId: input.step.id,
+      stepTitle: input.step.title,
+      description: `${input.step.title} — ${awarded.partyName}`,
+      unit: "ls",
+      quantityThousandths: 1_000,
+      unitCostCents: awarded.amountCents,
+      costCode: input.step.costCode,
+      basis: "sub",
+      basisDetail: `${awarded.partyName}, on your bid request`,
+      quantityBasis: "none",
+      quantityNote: "",
+      sortOrder: 10,
+    });
+    return listProposal(tx, ctx.tenantId, input.interviewId, input.step.id);
+  }
+
   for (const shape of input.shapes) {
     const named = shape.assembly
       ? library.find(

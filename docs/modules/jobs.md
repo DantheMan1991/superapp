@@ -120,6 +120,88 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — X3: asking subcontractors for a number (`claude/bid-requests`, ADR 0098)
+
+The thing the walk kept pointing at. Answer *"bidding it out"* on a phase and
+something has to actually go out, and **nothing in the pack did** — a
+`job_commitment` is the subcontract AFTER you have bought the work, and there
+was no row for the asking.
+
+**IT IS A LINK, NOT AN EMAIL, AND THAT IS A DECISION ABOUT HONESTY.** The
+obvious build emails a bid request, and this platform cannot do that yet: SES
+production access is still denied, so outbound reaches only verified
+addresses. A send button would have looked like it worked and reached nobody.
+So an invitation is a **tokenised link** — the shape the proposal's client
+link already proved (E5c, ADR 0085) — and the builder sends it however they
+already talk to that sub. Email becomes one more way to hand over the same
+link whenever the relay is free, and nothing has to be rebuilt for it.
+
+**A TOKEN EACH, NOT ONE PER PACKAGE.** One shared link would make *"who has
+looked at this"* unanswerable and *"stop that one"* impossible, and a
+forwarded link would be indistinguishable from the sub you sent it to.
+
+**A REPLY OUTLIVES THE DOOR.** `bidStanding` puts what somebody SAID ahead of
+what happened to their link: a number given and then a link revoked is still
+a number they gave, and a page reading "revoked" over a real bid would lose
+the only fact that matters. Revoking takes back access, not testimony. The
+door also stays open after a reply so a sub can check what they sent —
+`invitationAcceptsReply` is the separate question of whether they may send
+another, and they may not.
+
+**THE SPREAD IS THE POINT, NOT THE AVERAGE.** Three prices within a few per
+cent means the scope is understood and any of them is safe; one at half the
+others means somebody has read it differently, and that is worth knowing
+before it is the cheapest bid on an estimate. `summarizePackage` gives both
+ends and never a mean.
+
+**AND AN AWARDED BID BEATS EVERY OTHER BASIS** in a walk (X2b). It is this
+job, this scope, and a number a subcontractor put their name to. Matched on
+the phase's cost code; **no award means no number, never the lowest bid**,
+because which one a business is going with is their decision and not an
+arithmetic. A phase with an award proposes ONE lump line for the
+subcontract — a breakdown of somebody else's work would be this business
+guessing at it.
+
+### Two things the database refuses
+
+**You cannot award a number nobody gave.** `job_bid_invitations_award_has_a_number`
+— awarding a silence or a no-bid would put a price on an estimate with
+nothing behind it, which is the one thing this whole program exists to
+refuse. **And a reply is a whole fact or none of one**: a number with no date
+cannot be placed, and a date with neither a number nor a decline says only
+that something happened.
+
+`recordBidReply` writes only where nothing has been said yet, so a double
+submit, a back button or a change of mind cannot quietly replace a number the
+builder may already have awarded. They ring up instead, which is what they
+would do anyway.
+
+### The second-most-dangerous function in the pack
+
+`bid-share.ts`, in its own file so it can be read in one sitting, and a
+deliberate copy of `proposal-share.ts`: **`withSystem` does the token → tenant
+hop and nothing else**, every read after it runs `withTenant` at role staff,
+and every failure — unknown, revoked, expired, closed, pack off, tenant gone
+— answers identically. A subcontractor sees the scope, the due date and where
+the job is. **Never the estimate, never the other bidders, never what anybody
+else said**: a bid request that leaked the competition would be worse than no
+bid request.
+
+Behind the interview's gate for now. Bid requests are independently useful
+and will probably be un-gated once the pilot has earned it, but shipping them
+open would put a new public surface in front of every tenant on the strength
+of one business's feedback.
+
+### Driven end to end
+
+A package for *Electrical* with a real scope, one subcontractor invited, the
+link opened as a stranger with no session, `$18,400.00` typed in and sent,
+the page then refusing a second and showing what was sent, and the builder's
+screen going from `1 asked · 0 priced · 1 silent` to `1 priced` and then
+`Going with this`. **Not driven: a walk picking the award up** — it needs a
+step whose cost code matches, and the dev tenant's outline has different
+codes.
+
 ### 2026-09-20 — X2b: answers become lines, and every one says where its number came from (`claude/walk-lines`, ADR 0098)
 
 The half that touches money. A step's answers become an ITEM on the estimate
@@ -5062,6 +5144,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
 | `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
+| `job_bid_packages` | **One scope being priced** (X3, ADR 0098): what it is, the cost code by its DIGITS, the scope a subcontractor reads, when numbers are wanted by, open or closed. | Cascade from the project. Hung on the JOB, not an estimate, because a business asks for a number once and may price two revisions with it. CHECK: title present, status on the list. Behind the interview's grant in application code, not in a policy. |
+| `job_bid_invitations` | **One subcontractor asked, and what they said**: their own token, its expiry, views, and the reply — a number or a decline, with the name they typed and an IP hash. `is_awarded` for the one the business is going with. | Cascade from the package; **RESTRICT to the party** — a sub who has been asked for a number is kept. `token_hash` GLOBALLY unique with no tenant prefix (the public lookup has no tenant to scope by), token under AES-GCM so the link can be copied again. Unique per `(package, party)`: asking twice is one ask. **At most one award**, by a partial index. CHECK: **a reply is whole or absent** (ADR 0085's shape), and **`not is_awarded or amount_cents is not null`** — you cannot award a number nobody gave. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |

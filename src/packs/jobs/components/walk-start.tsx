@@ -65,7 +65,37 @@ export function WalkStart({
     );
   }
 
-  if (outlines.length === 0) return null;
+  /**
+   * **GRANTED, AND NOTHING TO WALK.** This returned null, which is how the
+   * founder came to be looking at an estimate on production with the feature
+   * switched on and no sign of it anywhere — a screen that said nothing when
+   * the only thing missing was one list. A business gets the grant before it
+   * ever writes an outline, so this is the FIRST state it sees, not an edge.
+   */
+  if (outlines.length === 0) {
+    return (
+      <Panel className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <MessagesSquare className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">Walk it instead of typing it</p>
+            <p className="text-xs text-muted-foreground">
+              You have this turned on, but there is no outline to walk yet —
+              the steps and questions a walk goes through. Start one from a
+              cost code list and it writes most of itself.
+            </p>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => router.push("/dashboard/m/jobs/estimate-outlines")}
+        >
+          Set one up
+        </Button>
+      </Panel>
+    );
+  }
 
   return (
     <Panel className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4">

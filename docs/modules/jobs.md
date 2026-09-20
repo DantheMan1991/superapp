@@ -120,6 +120,24 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-19 — Granted, and nothing to walk (`claude/walk-no-outline`)
+
+**The founder turned the walk on for his own tenant on production, opened an
+estimate, and saw nothing at all.** Everything was working: the grant was set,
+the code was deployed, the outlines screen was there. He had no OUTLINE, and
+`WalkStart` returned `null` when the list was empty.
+
+That is not an edge case, it is the FIRST state every business is in — a
+tenant gets the grant before it has ever written an outline, and a profile's
+starters only land on an install or when the module is switched on, so a
+tenant that had `jobs` already has none. The panel now says so and links to
+the screen that fixes it.
+
+Worth writing down because the bug was a *decision to be silent*: the
+component had all three facts it needed (granted, no outlines, here is where
+they live) and chose to render nothing. Every `return null` in a gated feature
+is a place somebody can be left looking at a blank space with no idea why.
+
 ### 2026-09-19 — The walk, X2a: an estimate priced by answering questions (`claude/estimate-walk`, ADR 0098)
 
 The founder's ask, in his words: instead of typing the lines you walk the

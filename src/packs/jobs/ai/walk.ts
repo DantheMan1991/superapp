@@ -338,6 +338,39 @@ export async function takeWalkTurn(input: {
   history: { role: "user" | "assistant"; content: string }[];
   step: WalkStep;
 }): Promise<WalkTurn | null> {
+  /**
+   * **THIS FUNCTION NEVER THROWS, AND THAT IS THE WHOLE POINT.** It used to,
+   * on any transient failure — an overloaded model, a dropped socket — and
+   * the throw escaped `runTurn` AFTER the first turn had already committed.
+   * The screen kept the old question, the walk had moved on, and the next
+   * answer landed on a question nobody had seen. The founder found it:
+   * *"when you answer it, it actually answers the next question that you
+   * don't see yet."*
+   *
+   * One retry, because most of these are a blip, and then null — which the
+   * caller turns into a turn read off the outline rather than an error.
+   */
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    try {
+      const turn = await askOnce(input);
+      if (turn) return turn;
+    } catch {
+      /** Deliberately blind: a failure here is a failure, whatever its shape. */
+    }
+    if (attempt + 1 < ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_PAUSE_MS));
+  }
+  return null;
+}
+
+/** How many times a turn is asked for before the outline carries it. */
+const ATTEMPTS = 2;
+const RETRY_PAUSE_MS = 400;
+
+async function askOnce(input: {
+  system: string;
+  history: { role: "user" | "assistant"; content: string }[];
+  step: WalkStep;
+}): Promise<WalkTurn | null> {
   const response = await getClaude().messages.create({
     /**
      * FAST, AND NOT THINKING. Both were wrong the first time round and the

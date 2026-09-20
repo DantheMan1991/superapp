@@ -28,8 +28,11 @@ import {
   recordAnswers,
   savePendingTurn,
   startWalk,
+  walkView,
   walkViewFrom,
+  type WalkView,
 } from "./walk-ops";
+import { outlineCanCarry, outlineTurn } from "./walk-fallback";
 import { reckoningFor } from "./walk-reckoning-ops";
 import { currentStep, live, nextStep, type WalkAnswer } from "./walk-math";
 import { PACK } from "./vocabulary";
@@ -188,9 +191,23 @@ const turnSchema = z.object({
   interviewId: z.string().uuid(),
   /** Blank on the first turn of a step: the walk opens the conversation. */
   said: z.string().trim().max(2000).optional(),
+  /**
+   * **THE QUESTION THE PERSON BELIEVED THEY WERE ANSWERING**, in the words
+   * they read. The server holds the pending question too, and when the two
+   * disagree the screen is stale — which is how an answer came to land on a
+   * question nobody had seen. Absent on the opening turn of a walk, which
+   * answers nothing.
+   */
+  answering: z.string().trim().max(2000).optional(),
   projectId: z.string().uuid(),
   estimateId: z.string().uuid(),
 });
+
+/** Two prompts are the same question when they read the same. */
+function sameQuestion(a: string, b: string): boolean {
+  const flat = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+  return flat(a) === flat(b);
+}
 
 /** How much of the earlier steps goes into the prompt as context. */
 const EARLIER_CONTEXT = 30;
@@ -209,7 +226,7 @@ async function oneTurn(
   ctx: WalkCtx,
   interviewId: string,
   said: string | undefined,
-  opts: { ignoreCooldown?: boolean } = {},
+  opts: { ignoreCooldown?: boolean; answering?: string } = {},
 ) {
   {
 
@@ -258,6 +275,33 @@ async function oneTurn(
      * stays on the last step so it can keep going past the list. An outline
      * with no steps at all is the only thing that ends here.
      */
+    /**
+     * **THE SCREEN AND THE SERVER MUST AGREE ON WHAT IS BEING ANSWERED.**
+     *
+     * They came apart, and the founder found exactly how it felt: *"when it
+     * errors, it stays on the question so you can answer it again, but when
+     * you answer it, it actually answers the next question that you don't
+     * see yet."* A turn that committed and then threw on the way back left
+     * the old question on screen with the walk already past it.
+     *
+     * So the screen says which question it is answering, and a disagreement
+     * is answered with the truth rather than a write: nothing is recorded,
+     * and the current view goes back so the person sees the real question.
+     * **Refusing costs one re-read; guessing costs a wrong answer in a bid.**
+     */
+    if (
+      opts.answering !== undefined &&
+      gathered.pendingSay.trim() !== "" &&
+      !sameQuestion(opts.answering, gathered.pendingSay)
+    ) {
+      return {
+        ok: true as const,
+        view: walkView(gathered.walk),
+        finished: false as const,
+        resynced: true as const,
+      };
+    }
+
     /** `loadWalk` already rides out the last step while the walk is running,
      *  so a null here means an outline with nothing in it. */
     const step = gathered.walk.step;
@@ -292,7 +336,28 @@ async function oneTurn(
     }
     if (said && said.trim() !== "") history.push({ role: "user", content: said.trim() });
 
-    const turn = await takeWalkTurn({ system, history, step });
+    /**
+     * **THE OUTLINE CARRIES THE WALK WHEN THE MODEL CANNOT.** `takeWalkTurn`
+     * no longer throws and has already retried; null here means it is not
+     * available. The outline is the floor — it always was — so the walk banks
+     * what was just said and asks the next question on the list in the
+     * business's own words, and nobody sees an error.
+     *
+     * The one case with nothing honest to say is a step whose questions are
+     * all settled and no model to judge whether the walk should go further.
+     * That reports the failure rather than inventing a question.
+     */
+    const turn =
+      (await takeWalkTurn({ system, history, step })) ??
+      (outlineCanCarry(step, asWalk) || (said ?? "").trim() !== ""
+        ? outlineTurn({
+            step,
+            answers: asWalk,
+            pendingQuestionId: gathered.walk.interview.pendingQuestionId,
+            pendingSay: gathered.pendingSay,
+            said,
+          })
+        : null);
     if (!turn) return { error: "It could not answer just then. Try sending that again." };
 
     /* ── Act three: persist ──────────────────────────────────────────────── */
@@ -386,36 +451,58 @@ async function oneTurn(
  * One logical turn, two calls; the cooldown is waived for the second because
  * nobody is hammering anything.
  */
-async function runTurn(ctx: WalkCtx, interviewId: string, said: string | undefined) {
-  const first = await oneTurn(ctx, interviewId, said);
-  if (!first.ok || first.finished || !first.view) return first;
+/**
+ * **NOTHING AFTER THE FIRST TURN MAY UNDO IT.** The first turn commits; the
+ * continuation is a convenience. A throw in either of the two calls below
+ * used to escape to the action's catch, which answered `{ error }` with no
+ * view while the walk had already moved — the exact fault the founder hit.
+ * Both are wrapped, and a failure returns the first turn's view.
+ */
+async function runTurn(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+  answering?: string,
+) {
+  const first = await oneTurn(ctx, interviewId, said, { answering });
+  if (!first.ok || first.finished || !first.view || first.resynced) return first;
   const movedOn = first.view.stepTitle !== "" && first.ranOn !== undefined;
   if (!movedOn) return first;
 
-  /** Did the step actually change? Compare what it ran on with where it is. */
-  const stillHere = await withTenant(
-    ctx.tenantId,
-    async (tx) => {
-      const walk = await getWalk(tx, ctx.tenantId, interviewId);
-      return walk?.step?.id ?? null;
-    },
-    { role: ctx.role },
-  );
-  /** `null` means coverage is complete and the walk is riding out the last
-   *  step; that is not a transition and needs no second turn. */
-  if (stillHere === first.ranOn || stillHere === null) return first;
+  try {
+    /** Did the step actually change? Compare what it ran on with where it is. */
+    const stillHere = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        return walk?.step?.id ?? null;
+      },
+      { role: ctx.role },
+    );
+    /** `null` means coverage is complete and the walk is riding out the last
+     *  step; that is not a transition and needs no second turn. */
+    if (stillHere === first.ranOn || stillHere === null) return first;
 
-  const second = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
-  return second.ok ? second : first;
+    const second = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    return second.ok ? second : first;
+  } catch {
+    return first;
+  }
 }
 
 export async function takeWalkTurnAction(input: unknown) {
   const parsed = turnSchema.safeParse(input);
-  if (!parsed.success) return { error: "Check the form and try again." };
+  /** Every failure of this action carries a view, even the ones with none. */
+  if (!parsed.success) return { error: "Check the form and try again.", view: null };
   try {
     const ctx = await gate();
     /** The grant is checked inside the turn, off a read it makes anyway. */
-    const out = await runTurn(ctx, parsed.data.interviewId, parsed.data.said);
+    const out = await runTurn(
+      ctx,
+      parsed.data.interviewId,
+      parsed.data.said,
+      parsed.data.answering,
+    );
     /**
      * **NO `revalidatePath` ON A TURN.** It was here out of habit and it was
      * expensive: `"layout"` invalidates the whole estimate subtree, and the
@@ -427,7 +514,29 @@ export async function takeWalkTurnAction(input: unknown) {
      */
     return out;
   } catch (err) {
-    return toResult(err);
+    /**
+     * **AN ERROR NEVER GOES BACK WITHOUT THE TRUTH WITH IT.** A bare
+     * `{ error }` left the screen holding whatever it had, and if the turn
+     * had committed before failing, that was a question the walk was already
+     * past — so the next answer landed on one nobody had seen. Whatever went
+     * wrong, the current view goes back so the screen shows what the walk
+     * actually has. Failing to read it is not worth a second failure.
+     */
+    let view: WalkView | null = null;
+    try {
+      const ctx = await gate();
+      view = await withTenant(
+        ctx.tenantId,
+        async (tx) => {
+          const walk = await getWalk(tx, ctx.tenantId, parsed.data.interviewId);
+          return walk ? walkView(walk) : null;
+        },
+        { role: ctx.role },
+      );
+    } catch {
+      /* The message below is still worth sending. */
+    }
+    return { ...toResult(err), view };
   }
 }
 

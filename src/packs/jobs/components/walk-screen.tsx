@@ -189,16 +189,36 @@ export function WalkScreen({
         const result = await takeWalkTurnAction({
           interviewId: view.interviewId,
           said: text,
+          /**
+           * **WHAT WAS ON THE SCREEN WHEN THEY ANSWERED.** The server holds
+           * the pending question too, and if the two disagree this screen is
+           * stale — so nothing is recorded and the real question comes back.
+           * Without this an answer could land on a question nobody saw.
+           */
+          answering: view.say,
           projectId,
           estimateId,
         });
         if ("error" in result) {
           toast.error(result.error);
           setFailed(true);
+          /**
+           * **AND THE SCREEN RESYNCS EVEN ON A FAILURE.** A turn can commit
+           * and then fail on the way back; keeping the old question on screen
+           * is what sent the next answer to the wrong place.
+           */
+          if (result.view) {
+            setView(result.view);
+            setEchoed(null);
+          }
           return;
         }
         setFailed(false);
         setEchoed(null);
+        /** The screen was behind; it is not any more, and nothing was lost. */
+        if ("resynced" in result && result.resynced) {
+          toast.message("That had already moved on — here is where it is.");
+        }
         /** A proposal is about the answers as they were; another answer
          *  makes it out of date, so it goes rather than misleading. */
         setProposal(null);

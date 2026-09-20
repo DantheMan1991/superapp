@@ -120,6 +120,74 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — A turn cannot fail into a wrong answer (`claude/a-turn-cannot-fail-wrong`)
+
+The founder, with a screenshot: *"I keep having issues with it showing an
+error. When it errors, it stays on the questions so you can answer it again,
+but when you answer it, it actually answers the next question that you don't
+see yet. There should be no errors period. If errors start happening people
+get frustrated and stop using the tool."*
+
+**Two faults, and the second is the dangerous one.**
+
+### The error: the model was a single point of failure
+
+`takeWalkTurn` called the API with no try/catch and no retry. Any transient
+failure — overloaded, a dropped socket, a tool call that would not validate —
+propagated. It now **never throws**: two attempts, then null.
+
+And null is not an error either. **The outline carries the walk.** That was
+always the design — *the outline is a floor, not a ceiling* (ADR 0098) — and
+a walk that stopped dead because a model call timed out had quietly made the
+model the floor instead. `outlineTurn` banks what was just said against the
+question that was asked and asks the next one on the list, in the business's
+own words. Deterministic, instant, no error.
+
+What it loses, written down rather than glossed: the model's judgement. One
+question, one answer, no gap-spotting, no reading three answers out of one
+sentence. **A worse walk and a working one.**
+
+### The wrong answer: a committed turn that then threw
+
+`runTurn` takes a second turn when a step ends. Both that call and the
+`getWalk` before it could throw — and a throw there escaped to the action's
+catch, which answered `{ error }` with no view **after the first turn had
+already committed**. The screen kept the old question; the walk was past it;
+the next answer was attributed to a question nobody had seen.
+
+Three changes, each of which alone would have prevented it:
+
+- **The screen says what it is answering.** `answering` carries the question
+  as the person read it. If it does not match the pending one, **nothing is
+  recorded** and the current view goes back. Refusing costs one re-read;
+  guessing costs a wrong answer in a bid.
+- **An error never goes back without the current view**, so a stale screen
+  cannot survive a failure.
+- **Nothing after the first turn may undo it** — the continuation is wrapped,
+  and a failure there returns the first turn's view.
+
+### The bug the tests caught on the way
+
+`outlineTurn` marked the pending question settled because it was PENDING, so
+an empty answer would have **skipped a question out of the bid entirely** —
+the same class of fault the whole slice exists to remove. Only what was
+actually recorded counts now.
+
+### Driven
+
+An invalid API key: `takeWalkTurn` returns null in 847ms across two attempts
+without throwing, and the outline banks `Who is producing the drawings? → We
+are` and asks the next question.
+
+Then the founder's own bug, reproduced: with `Who's handling the plumbing?`
+on screen, the server's pending question was moved behind its back and the
+button pressed. **Four answers on record before, four after** — nothing
+written — the screen resynced to the real question, and the toast read *"That
+had already moved on — here is where it is."* Before this, that click became
+the answer to a question nobody had read.
+
+No migration.
+
 ### 2026-09-20 — The price sheet (`claude/the-price-sheet`)
 
 The document the founder actually hands clients, which he sent as a 195-row

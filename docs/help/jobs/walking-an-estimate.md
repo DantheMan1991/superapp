@@ -194,8 +194,21 @@ above the lines reads *The last walk left N phases unfinished*, with
 
 ## If it will not answer
 
-The message *It could not answer just then* means the model did not come back.
-Send the same thing again. *Give it a moment* means two goes arrived at once.
+**The walk carries on without it.** If the part that reads your sentences is
+slow or unavailable, it tries again and then simply asks the next question on
+your outline, in the words you wrote. You will not see an error, and what you
+just said is banked against the question you were asked.
+
+What you lose while that is happening is its judgement: it asks one question
+at a time, takes one answer at a time, and will not notice a gap your list
+does not cover. The walk still works, and everything is still recorded.
+
+*Give it a moment* means two goes arrived at once. Send it again.
+
+**If the screen and the walk ever disagree** — you answer and it says *That
+had already moved on* — then the question you were looking at had already
+been dealt with, and the walk has put the real one up. **Nothing is recorded
+against a question you could not see.** Answer the one now on screen.
 
 ## See also
 

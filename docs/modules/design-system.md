@@ -668,7 +668,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `EmptyState` | no | ~49 bare `<p>No X yet</p>` |
 | `DataTable` + `RowActions` | no | `<Card><CardContent className="p-0">` around a table |
 | `StatCard` | no | Eight hand-built cards in `AccountingModule.tsx` |
-| `FilterPills` | no | Underlined filter tab rows |
+| `FilterPills` | **yes** | Underlined filter tab rows |
 | `CategoryStrip` | **yes** | Wrapping module tab rows (`AccountingNav`, `DocumentsNav`) |
 | `Panel` | no | `<Card><CardContent className="p-0">` around a list |
 | `SectionRow` | no | — (new: titled band on a hub page) |
@@ -727,6 +727,20 @@ sub-nav and a filter row stacked above the first invoice.
   that build `navGroups`
 
 ## Decisions & gotchas
+
+- **`FilterPills` IS A CLIENT COMPONENT, AND THE TABLE ABOVE SAID "no" FOR A
+  DAY.** ADR 0095's rule that a pill onto a denied page is not drawn was
+  implemented with `useIsDenied()` — a hook — inside a file that had no
+  `"use client"` and a doc comment reading *"Links, not buttons, and therefore a
+  server component."* A hook imported from a `"use client"` module is a client
+  reference on the server, so every one of the **nine** screens that rendered
+  pills without itself being a client component threw *"Attempted to call
+  useIsDenied() from the server"*. `/dashboard/m/jobs` and accounting's Inbox
+  among them; production, for most of 2026-09-19. The four callers that were
+  already client components — `sales-nav.tsx`, `purchases-nav.tsx`,
+  `item-filters.tsx`, `lot-filters.tsx` — kept working, which is why the
+  accounting sub-navigation the change was driven on looked fine.
+  `tests/server-client-boundary.test.ts` now scans for it.
 
 - **An icon cannot cross a server/client boundary as a component.** The rail's
   nav is built on the server from the `modules` table, so it names icons as

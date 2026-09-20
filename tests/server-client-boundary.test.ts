@@ -40,6 +40,17 @@ async function walk(dir: string): Promise<string[]> {
 const isClientSource = (source: string) =>
   /^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use client["']/.test(source);
 
+/** File contents do not change during a run, so one cache serves both tests. */
+const clientCache = new Map<string, boolean>();
+
+async function isClientFile(file: string): Promise<boolean> {
+  const hit = clientCache.get(file);
+  if (hit !== undefined) return hit;
+  const client = isClientSource(await fs.readFile(file, "utf8"));
+  clientCache.set(file, client);
+  return client;
+}
+
 /** `@/x` → `src/x`, `./x` → sibling. Returns the file that actually exists. */
 async function resolveImport(
   specifier: string,
@@ -89,6 +100,31 @@ function importedNames(source: string): Map<string, string> {
 }
 
 /**
+ * Hook-shaped named imports — `useIsDenied` → `@/components/app/access-provider`.
+ *
+ * Separate from `importedNames` rather than a flag on it, because that one
+ * deliberately keeps only capitalised names: it is looking for JSX elements,
+ * and a hook is never one.
+ */
+function importedHooks(source: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const re = /import\s+(type\s+)?([\s\S]*?)\s+from\s+["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) {
+    if (m[1]) continue; // `import type` never reaches runtime
+    const braced = m[2].match(/\{([\s\S]*?)\}/);
+    if (!braced) continue;
+    for (const part of braced[1].split(",")) {
+      const clause = part.trim();
+      if (clause.startsWith("type ")) continue; // inline `{ type Foo }`
+      const name = clause.split(/\s+as\s+/).pop()?.trim();
+      if (name && /^use[A-Z]/.test(name)) map.set(name, m[3]);
+    }
+  }
+  return map;
+}
+
+/**
  * Every `<Component ... prop={(a) => …}>` in the source, as
  * `{ element, prop }`. Deliberately only INLINE functions: a bare identifier
  * is usually a server action, which is legal and is the documented way to pass
@@ -130,17 +166,6 @@ function inlineFunctionProps(source: string): { element: string; prop: string }[
 describe("server/client boundary", () => {
   it("no server component hands an inline function to a client component", async () => {
     const files = (await walk(SRC)).filter((f) => f.endsWith(".tsx"));
-    const clientCache = new Map<string, boolean>();
-
-    async function isClientFile(file: string): Promise<boolean> {
-      const hit = clientCache.get(file);
-      if (hit !== undefined) return hit;
-      const source = await fs.readFile(file, "utf8");
-      const client = isClientSource(source);
-      clientCache.set(file, client);
-      return client;
-    }
-
     const violations: string[] = [];
 
     for (const file of files) {
@@ -163,6 +188,55 @@ describe("server/client boundary", () => {
                 .relative(SRC, target)
                 .replace(/\\/g, "/")} is a client component, so this ` +
               `function cannot be serialised. Pass data, or a server action.`,
+          );
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * **THE SECOND WAY ACROSS THE SAME BOUNDARY, AND IT TOOK PRODUCTION DOWN.**
+   *
+   * On 2026-09-19 `#626` added `const isDenied = useIsDenied()` to
+   * `FilterPills` so a pill onto a denied page would not be drawn — a correct
+   * feature, in a file with no `"use client"` whose own doc comment said "and
+   * therefore a server component". A hook imported from a `"use client"` module
+   * is a client reference on the server, and calling one throws *"Attempted to
+   * call useIsDenied() from the server"*.
+   *
+   * Nine screens 500ed, `/dashboard/m/jobs` among them. The four callers that
+   * were themselves client components kept working, which is exactly why it
+   * shipped: accounting's Sales and Purchases sub-navigation — the pills the
+   * change was driven on — are `sales-nav.tsx` and `purchases-nav.tsx`, both
+   * `"use client"`.
+   *
+   * **`tsc`, `eslint`, `npm run build` AND THE WHOLE SUITE WERE GREEN**, for
+   * the same reason the inline-function bug above was: the types are right, and
+   * the error exists only at render, on dynamic routes nothing prerenders.
+   */
+  it("no server module calls a hook imported from a client module", async () => {
+    const files = (await walk(SRC)).filter(
+      (f) => f.endsWith(".tsx") || f.endsWith(".ts"),
+    );
+    const violations: string[] = [];
+
+    for (const file of files) {
+      const source = await fs.readFile(file, "utf8");
+      if (isClientSource(source)) continue;
+
+      for (const [hook, specifier] of importedHooks(source)) {
+        // Imported but never called is harmless — re-exporting is legal.
+        if (!new RegExp(`\\b${hook}\\s*\\(`).test(source)) continue;
+        const target = await resolveImport(specifier, file);
+        if (!target) continue; // node_modules — not ours to police
+        if (await isClientFile(target)) {
+          violations.push(
+            `${path.relative(SRC, file).replace(/\\/g, "/")}: calls ${hook}() ` +
+              `from ${path.relative(SRC, target).replace(/\\/g, "/")}, which is ` +
+              `"use client". A hook cannot be called from a server module — add ` +
+              `"use client" to this file, or lift the hook to a caller that has it.`,
           );
         }
       }

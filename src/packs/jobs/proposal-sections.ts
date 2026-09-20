@@ -1,6 +1,7 @@
 import { formatQuantity } from "./billing-math";
 import { formatCents } from "@/lib/money";
 import { buildProposalModel, paragraphs, type ProposalInput, type ProposalModel } from "./proposal-model";
+import { PROPOSAL_FORMATS, type ProposalFormat } from "./vocabulary";
 
 /**
  * A PROPOSAL AS AN ORDERED LIST OF SECTIONS — pure, no database, no React
@@ -55,7 +56,29 @@ export type ProposalSection =
   | { kind: "price"; price: ProposalModel["price"] }
   | { kind: "allowances"; title: string; intro: string; rows: ProposalAllowance[] }
   | { kind: "milestones"; title: string; intro: string; rows: ProposalMilestone[] }
-  | { kind: "acceptance"; words: string; validity: string | null; signatures: ProposalModel["signatures"] };
+  | { kind: "acceptance"; words: string; validity: string | null; signatures: ProposalModel["signatures"] }
+  /**
+   * THE PRICE SHEET: one running list, numbered straight through, with the
+   * parts of the bid as rows of their own. The founder's own document, which
+   * he described as *"infrastructure, structural etc"* over the client items.
+   */
+  | { kind: "worksheet"; heading: string; rows: WorksheetRow[]; total: ProposalModel["price"]["total"] };
+
+/**
+ * A row of the price sheet. **The number runs through everything including
+ * the headings**, because that is how somebody says *"look at 102"* on the
+ * phone — which is the whole reason the numbers are there.
+ */
+export interface WorksheetRow {
+  number: number;
+  /** A part of the bid rather than a thing in it. No amount of its own. */
+  isSection: boolean;
+  description: string;
+  /** The qualifier beside the name: "As per plans", "Supplied by others". */
+  note: string;
+  /** Formatted, and blank on a section row. `$0.00` is a real answer. */
+  amount: string;
+}
 
 /** What the sections need beyond the money: the facts the rest of the pack holds. */
 export interface ProposalExtras {
@@ -66,7 +89,7 @@ export interface ProposalExtras {
 }
 
 export interface ProposalDocument {
-  format: "letter" | "brochure";
+  format: ProposalFormat;
   /** For the tab, the file name and the running footer. */
   title: string;
   model: ProposalModel;
@@ -81,9 +104,94 @@ function withoutRowNotes(price: ProposalModel["price"]): ProposalModel["price"] 
   };
 }
 
-/** The two formats, and the only place the page order lives. */
-export function isProposalFormat(v: string): v is "letter" | "brochure" {
-  return v === "letter" || v === "brochure";
+/** The formats, and the only place the page order lives. */
+export function isProposalFormat(v: string): v is ProposalFormat {
+  return (PROPOSAL_FORMATS as readonly string[]).includes(v);
+}
+
+/**
+ * THE PRICE SHEET — the shape the pilot's company has handed clients for
+ * years, and the reason the section and the one-price switch exist.
+ *
+ * **EVERY FIGURE COMES FROM `price.rows`, WHICH IS THE MODEL'S.** This file
+ * arranges; it never computes. Rows are taken in the order the model
+ * produced them, grouped under the section each item carries, and numbered
+ * straight through. An item's own note rides beside its name, which is where
+ * *"Supplied by Turkel"* and *"As per plans"* go.
+ *
+ * **A ROW AT `$0.00` IS PRINTED, NOT DROPPED.** Roughly sixty of the pilot's
+ * 195 rows are zero on purpose — *"By Owner"*, *"(N/A)"*, *"Included in
+ * Plumbing Quote"* — and they are the document's exclusions, stated where
+ * the client reads them. Dropping an item because it costs nothing would
+ * throw away the most careful part of the sheet.
+ *
+ * **AN ITEM WITH NO SECTION GETS ONE WHEN ANYTHING ELSE HAS ONE.** With no
+ * sections anywhere the sheet is a plain numbered list, which is every
+ * estimate written before they existed and is what it always was. But mixed,
+ * an unsectioned item printed under the heading above it READS as part of
+ * that section — driving this found `Loft framing` sitting under `FINISHES`
+ * having never been put there. So it gets `Other`, the same word the `codes`
+ * presentation already uses for money with no code.
+ */
+export const UNSECTIONED = "Other";
+
+function priceSheetSections(model: ProposalModel, sectionOf: ReadonlyMap<string, string>): ProposalSection[] {
+  const rows: WorksheetRow[] = [];
+  let n = 0;
+  let current: string | null = null;
+
+  const named = (row: ProposalModel["price"]["rows"][number]) =>
+    (row.groupId ? sectionOf.get(row.groupId) : "") ?? "";
+  /** Only worth heading anything when the sheet actually uses sections. */
+  const sectioned = model.price.rows.some((r) => named(r) !== "");
+
+  for (const row of model.price.rows) {
+    /** A heading row from the takeoff shape is an ITEM, not a part of the bid. */
+    const raw = named(row);
+    const section = sectioned && raw === "" ? UNSECTIONED : raw;
+    if (section !== (current ?? "")) {
+      current = section;
+      if (section !== "") {
+        n += 1;
+        rows.push({ number: n, isSection: true, description: section, note: "", amount: "" });
+      }
+    }
+    n += 1;
+    rows.push({
+      number: n,
+      isSection: false,
+      description: row.description,
+      note: row.note ?? "",
+      amount: row.heading ? "" : row.amount,
+    });
+  }
+
+  if (model.price.rounding) {
+    n += 1;
+    rows.push({
+      number: n,
+      isSection: false,
+      description: model.price.rounding.description,
+      note: "",
+      amount: model.price.rounding.amount,
+    });
+  }
+
+  return [
+    { kind: "parties", toLines: model.toLines, fromLines: model.fromLines },
+    { kind: "facts", rows: model.facts },
+    { kind: "worksheet", heading: model.price.heading, rows, total: model.price.total },
+    ...(model.acceptance
+      ? [
+          {
+            kind: "acceptance" as const,
+            words: model.acceptance,
+            validity: model.validity,
+            signatures: model.signatures,
+          },
+        ]
+      : []),
+  ];
 }
 
 /**
@@ -181,12 +289,20 @@ export function buildProposalDocument(
   format = "letter",
 ): ProposalDocument {
   const model = buildProposalModel(input);
-  const chosen: "letter" | "brochure" = isProposalFormat(format) ? format : "letter";
+  const chosen: ProposalFormat = isProposalFormat(format) ? format : "letter";
+  const sectionOf = new Map(
+    (input.groups ?? []).map((g) => [g.id, (g.section ?? "").trim()]),
+  );
   return {
     format: chosen,
     title: model.subtitle,
     model,
-    sections: chosen === "brochure" ? brochureSections(input, model, extras) : letterSections(model),
+    sections:
+      chosen === "brochure"
+        ? brochureSections(input, model, extras)
+        : chosen === "price_sheet"
+          ? priceSheetSections(model, sectionOf)
+          : letterSections(model),
   };
 }
 

@@ -136,7 +136,10 @@ export const jobEstimates = pgTable(
       foreignColumns: [jobContracts.tenantId, jobContracts.id],
     }),
     check("job_estimates_number_present", sql`length(btrim(${t.number})) > 0`),
-    check("job_estimates_format_valid", sql`${t.format} in ('letter', 'brochure')`),
+    check(
+      "job_estimates_format_valid",
+      sql`${t.format} in ('letter', 'brochure', 'price_sheet')`,
+    ),
     check(
       "job_estimates_status_valid",
       sql`${t.status} in ('draft', 'sent', 'accepted', 'declined', 'superseded')`,

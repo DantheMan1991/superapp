@@ -149,6 +149,12 @@ th.n, td.n { text-align: right; }
 tr, td, th { break-inside: avoid; }
 .row-note { color: var(--muted); font-size: 8.5pt; margin: 2px 0 0; max-width: 40em; }
 .heading-row td { font-weight: 600; border-bottom: none; padding-top: 14px; padding-bottom: 2px; }
+/* The price sheet: a running number, the item, its qualifier, its amount.
+   Tight rows because a real one runs to two hundred of them. */
+table.worksheet td { padding: 3px 6px; font-size: 9.5pt; }
+table.worksheet td.num { width: 2.6em; color: var(--muted); text-align: right; padding-right: 10px; }
+table.worksheet tr.sheet-section td { font-weight: 600; padding-top: 13px; border-bottom: none; text-transform: uppercase; letter-spacing: 0.04em; font-size: 9pt; }
+.qualifier { color: var(--muted); font-weight: 400; margin-left: 10px; }
 .total td { border-top: 2px solid var(--ink); border-bottom: none; font-weight: 700; font-size: ${brochure ? "13pt" : "11.5pt"}; padding-top: 9px; }
 .sum { display: flex; justify-content: space-between; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
        padding: 12px 0; font-weight: 700; font-size: 13pt; }
@@ -361,6 +367,33 @@ function sectionHtml(section: ProposalSection, brand: ProposalHtmlBrand, logo: s
           `<tr><td>${esc(r.name)}</td><td>${esc(r.when)}</td><td class="muted">${esc(r.who)}</td></tr>`,
       )
       .join("")}</tbody>
+  </table></section>`;
+    /**
+      * THE PRICE SHEET. One table, numbered straight through, with the parts
+      * of the bid as rows of their own — the shape the pilot's company has
+      * handed clients for years.
+      *
+      * **A ROW AT `$0.00` PRINTS.** Those rows are the document's exclusions
+      * — *"By Owner"*, *"(N/A)"*, *"Included in the plumbing quote"* — said
+      * where the client reads them, and about a third of a real sheet.
+      */
+    case "worksheet":
+      return `<section class="section"><h2>${esc(section.heading)}</h2>
+  <table class="worksheet">
+    <tbody>
+      ${section.rows
+        .map((r) =>
+          r.isSection
+            ? `<tr class="sheet-section"><td class="num">${r.number}</td><td colspan="2">${esc(r.description)}</td></tr>`
+            : `<tr>
+  <td class="num">${r.number}</td>
+  <td>${esc(r.description)}${r.note ? `<span class="qualifier">${esc(r.note)}</span>` : ""}</td>
+  <td class="n">${esc(r.amount)}</td>
+</tr>`,
+        )
+        .join("")}
+      <tr class="total"><td></td><td>${esc(section.total.label)}</td><td class="n">${esc(section.total.amount)}</td></tr>
+    </tbody>
   </table></section>`;
     case "acceptance":
       return `<section class="section">

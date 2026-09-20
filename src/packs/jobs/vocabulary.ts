@@ -464,11 +464,12 @@ export const PROPOSAL_PRESENTATION_LABELS: Record<ProposalPresentation, string> 
  * What the paper IS, as against how the money is grouped (E5a, ADR 0083):
  * the business document ADR 0070 built, or the custom-home brochure.
  */
-export const PROPOSAL_FORMATS = ["letter", "brochure"] as const;
+export const PROPOSAL_FORMATS = ["letter", "brochure", "price_sheet"] as const;
 export type ProposalFormat = (typeof PROPOSAL_FORMATS)[number];
 export const PROPOSAL_FORMAT_LABELS: Record<ProposalFormat, string> = {
   letter: "A letter",
   brochure: "A brochure",
+  price_sheet: "A price sheet",
 };
 
 export function isProposalPresentation(v: string): v is ProposalPresentation {

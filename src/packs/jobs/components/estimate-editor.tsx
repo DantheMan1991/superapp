@@ -3758,7 +3758,12 @@ function ClientLinks({
       <div className="flex flex-wrap gap-2 pt-1">
         <Button variant="outline" size="sm" className="h-9" asChild>
           <a href={`/api/jobs/estimates/${estimateId}/document`} target="_blank" rel="noopener noreferrer">
-            <BookOpen className="mr-1.5 size-4" /> Open {format === "brochure" ? "brochure" : "document"}
+            <BookOpen className="mr-1.5 size-4" /> Open{" "}
+            {format === "brochure"
+              ? "brochure"
+              : format === "price_sheet"
+                ? "price sheet"
+                : "document"}
           </a>
         </Button>
         <Button variant="outline" size="sm" className="h-9" asChild>

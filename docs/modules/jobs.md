@@ -120,6 +120,94 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-19 — The walk, X2a: an estimate priced by answering questions (`claude/estimate-walk`, ADR 0098)
+
+The founder's ask, in his words: instead of typing the lines you walk the
+house with the software and answer questions, and the estimate fills in behind
+the conversation. **This slice is the conversation.** No lines come out of it
+yet — X2b turns answers into groups and lines — and doing it in that order was
+deliberate: the conversation is where the design can be wrong, and this way it
+was wrong before anything touched money.
+
+**Two tables.** `job_estimate_interviews` (one running per estimate, by a
+partial unique index) and `job_estimate_interview_answers` (one row per thing
+asked, with what came back). The walk hangs off an ESTIMATE, not a job: you
+make one the way you always did and then walk it, so the estimate is ordinary
+before, during and after, and a walk abandoned halfway leaves a perfectly good
+draft behind.
+
+**THE OUTLINE IS READ LIVE, and this reverses what the X1 write-up promised.**
+That said the walk would snapshot the outline so editing a template could not
+change a bid in flight. The founder's own case is why it is wrong: realise
+mid-bid that the outline never asked about the sump, and you want the question
+in the walk you are in. So it reads the outline as it stands, and the
+truthfulness a snapshot would have bought is bought better — **an answer stores
+the words it was asked in**, so rewording or deleting a question later cannot
+rewrite the transcript.
+
+`step_id` and `question_id` carry no foreign key, which is a deliberate
+exception to this pack's habit. A transcript is a RECORD — the shape of a lien
+waiver, a back-charge and an acceptance — and an answer that vanished because
+somebody tidied the outline would be a record that lies.
+
+**THE HOUSE PATTERN, in three acts.** Gather and claim the cooldown in one
+transaction, call the model with NO transaction open, persist in another. A
+walk is forty-five minutes of model calls and holding a transaction across one
+is how a pool dies.
+
+**MUST-ASK IS GUARDED TWICE**, and neither guard is the prompt. `validateWalkTurn`
+drops a skip of a question marked always-ask, and `recordAnswers` refuses to
+write one. A rule that lives only in a prompt is a rule a model can be talked
+out of. A PERSON may still skip one: the mark guards against judgement, not
+against a decision made with eyes open.
+
+### Three things found by driving it, all the same mistake
+
+The outline is a FLOOR. Three separate places treated it as a ceiling, and
+every one of them was only visible by walking a real estimate.
+
+**1. It marked a step done and asked about the step it had just left.** Told to
+move on, the model set `stepDone` AND asked a follow-up in the same breath;
+both were honoured, so the screen read *"Cast-in-place concrete, step 2 of 2"*
+over a question about the framing. **A step you are still asking about is not
+done** — resolved in favour of the QUESTION, because on a barn conversion
+*"how much of the existing frame are you keeping?"* was the best thing it did
+and no outline could have held it. A question mark is the tell, and
+`askingQuestionId` is the other.
+
+**2. Coverage closed the walk mid-sentence.** `currentStep` goes null the
+moment every outline question is settled, and the first draft closed the walk
+right there — header reading `Finished` with *"what's the cast-in-place work
+on this one, slab, footings, piers or all of it?"* still on the screen. A walk
+now ends when it says it is done and is not asking, not when the checklist
+runs out; while running it rides out its last step.
+
+**3. The fallback lived in two places and they disagreed.** The turn used the
+last step and `walkView` did not, so the header said `Finished` over a live
+question. One fallback, in `loadWalk`, so the screen, the turn and the
+progress cannot drift.
+
+Also corrected while driving: the screen fired its opening turn from an effect,
+which is both an eslint error here (cascading renders) and a blank panel for as
+long as the model takes. **The server takes the opening turn** when the walk
+starts, so it arrives already asking.
+
+### What it does that the outline could not
+
+Driven on a barn conversion whose outline had ONE question per step, it asked
+*"how much of the existing frame are you keeping — posts and beams staying, or
+is this new framing throughout?"* and then *"are the footings new perimeter
+footings, or pads under posts inside the barn?"* Neither is in any outline and
+both are the right question. The screen counts them separately — `it thought
+of` — because that count is what will tell a builder which questions to add.
+
+### What is NOT built
+
+The lines. X2b takes these answers and proposes groups and lines, each with a
+basis you can see, applied per phase through the same `updateEstimate` the
+editor uses. Then bid requests, quantities from a Revit schedule, and a takeoff
+opened inline from a question.
+
 ### 2026-09-19 — Two things the founder pushed back on: a question the walk may never skip, and a cost code the editor checks (`claude/outline-always-ask`)
 
 Both came straight out of reading X1 back to him, and both are worth the
@@ -4825,6 +4913,8 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
 | `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. Since 2026-09-19 also `always_ask`: a question the walk may never decide is irrelevant, the counterweight to letting it skip. Always ASKED, not always answered. |
+| `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
+| `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |

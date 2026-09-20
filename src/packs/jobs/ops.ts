@@ -159,7 +159,18 @@ export class JobsError extends Error {
       | "SCHEDULE_NOT_MADE"
       /** A client link that is revoked, expired or already accepted (ADR 0085). */
       | "SHARE_CLOSED"
-      | "SHEET_TAKEN",
+      | "SHEET_TAKEN"
+      /* ---- the walk (X2a, ADR 0098) ---- */
+      /** This estimate is already being walked; one at a time. */
+      | "WALK_RUNNING"
+      /** The walk has finished or been abandoned; nothing more goes into it. */
+      | "WALK_CLOSED"
+      /** Two turns in the same instant; the second waits. */
+      | "WALK_COOLDOWN"
+      /** The walk has gone on long enough — the backstop on a runaway. */
+      | "WALK_CAPPED"
+      /** A question marked always-ask cannot be skipped by the walk. */
+      | "MUST_ASK",
     message: string,
   ) {
     super(message);

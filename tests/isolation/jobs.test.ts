@@ -2325,6 +2325,231 @@ d("jobs tables (RLS)", () => {
     );
   });
 
+  it("cannot read or change another tenant's ESTIMATE WALKS; one runs per estimate; a finish carries its date; a skip is whole or absent; an outline in use cannot be deleted; and the answers go with the estimate", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const e = await tx
+        .insert(schema.jobEstimates)
+        .values({ tenantId: tenantA, projectId: projectA, number: "EST-WALK-1" })
+        .returning();
+      const o = await tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantA, name: "Walked outline" })
+        .returning();
+      const w = await tx
+        .insert(schema.jobEstimateInterviews)
+        .values({ tenantId: tenantA, estimateId: e[0].id, outlineId: o[0].id })
+        .returning();
+      const a = await tx
+        .insert(schema.jobEstimateInterviewAnswers)
+        .values({
+          tenantId: tenantA,
+          interviewId: w[0].id,
+          stepTitle: "Foundation",
+          prompt: "Block or poured?",
+          answer: "Poured",
+        })
+        .returning();
+      return { estimateId: e[0].id, outlineId: o[0].id, walkId: w[0].id, answerId: a[0].id };
+    });
+
+    // Tenant B sees neither and changes neither.
+    const seen = await asOtherTenant(async (tx) => ({
+      walks: await tx
+        .select()
+        .from(schema.jobEstimateInterviews)
+        .where(eq(schema.jobEstimateInterviews.id, seeded.walkId)),
+      changed: await tx
+        .update(schema.jobEstimateInterviews)
+        .set({ status: "abandoned" })
+        .where(eq(schema.jobEstimateInterviews.id, seeded.walkId))
+        .returning(),
+      answers: await tx
+        .select()
+        .from(schema.jobEstimateInterviewAnswers)
+        .where(eq(schema.jobEstimateInterviewAnswers.id, seeded.answerId)),
+    }));
+    expect(seen.walks).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(seen.answers).toEqual([]);
+
+    /**
+     * **MEMBER WORK, not owner work.** Walking an estimate IS the estimating,
+     * the same as typing the lines. The OUTLINE is owner-only to write; using
+     * one is a chore.
+     */
+    const mine = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.jobEstimateInterviewAnswers)
+        .where(eq(schema.jobEstimateInterviewAnswers.id, seeded.answerId)),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].answer).toBe("Poured");
+
+    /**
+     * **ONE RUNNING WALK PER ESTIMATE**, by a partial unique index. Two people
+     * walking one estimate would each be banking answers the other cannot see.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateInterviews).values({
+          tenantId: tenantA,
+          estimateId: seeded.estimateId,
+          outlineId: seeded.outlineId,
+        }),
+      ),
+    ).rejects.toThrow();
+    // Closed, and a second may start -- which is what re-walking an estimate is.
+    await withSystem((tx) =>
+      tx
+        .update(schema.jobEstimateInterviews)
+        .set({ status: "abandoned", finishedAt: new Date() })
+        .where(eq(schema.jobEstimateInterviews.id, seeded.walkId)),
+    );
+    const second = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateInterviews)
+        .values({
+          tenantId: tenantA,
+          estimateId: seeded.estimateId,
+          outlineId: seeded.outlineId,
+        })
+        .returning(),
+    );
+    expect(second).toHaveLength(1);
+
+    // A finish carries its date, and a running one carries none -- both ways.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateInterviews)
+          .set({ status: "finished", finishedAt: null })
+          .where(eq(schema.jobEstimateInterviews.id, second[0].id)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateInterviews)
+          .set({ status: "running", finishedAt: new Date() })
+          .where(eq(schema.jobEstimateInterviews.id, second[0].id)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateInterviews)
+          .set({ status: "paused" })
+          .where(eq(schema.jobEstimateInterviews.id, second[0].id)),
+      ),
+    ).rejects.toThrow();
+    // And the buttons are a list or nothing.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateInterviews)
+          .set({ pendingQuickReplies: { a: 1 } })
+          .where(eq(schema.jobEstimateInterviews.id, second[0].id)),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **A SKIP IS A WHOLE FACT OR NONE OF ONE.** Half a skip -- a reason with
+     * no skip, a skip with no reason, a skip that also carries an answer -- is
+     * a record of nothing, and the finish gate reads these to tell a passed
+     * question from one nobody got to.
+     */
+    const halfSkips: Record<string, unknown>[] = [
+      { prompt: "p", skipped: true, skipReason: "" },
+      { prompt: "p", skipped: true, skipReason: "moot", answer: "but also this" },
+      { prompt: "p", skipped: false, skipReason: "a reason with no skip" },
+    ];
+    for (const bad of halfSkips) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.jobEstimateInterviewAnswers).values({
+            tenantId: tenantA,
+            interviewId: second[0].id,
+            ...bad,
+          } as typeof schema.jobEstimateInterviewAnswers.$inferInsert),
+        ),
+        JSON.stringify(bad),
+      ).rejects.toThrow();
+    }
+    // A whole skip is fine.
+    const skip = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateInterviewAnswers)
+        .values({
+          tenantId: tenantA,
+          interviewId: second[0].id,
+          prompt: "Any rebar?",
+          skipped: true,
+          skipReason: "the wall is block",
+        })
+        .returning(),
+    );
+    expect(skip[0].answer).toBe("");
+    // And a blank prompt is not a question.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.jobEstimateInterviewAnswers)
+          .values({ tenantId: tenantA, interviewId: second[0].id, prompt: "  " }),
+      ),
+    ).rejects.toThrow();
+
+    // A walk on another tenant's estimate is unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateInterviews).values({
+          tenantId: tenantB,
+          estimateId: seeded.estimateId,
+          outlineId: seeded.outlineId,
+        }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **AN OUTLINE SOMEBODY HAS WALKED CANNOT BE DELETED** -- NO ACTION, not
+     * cascade. A walk keeps pointing at the outline it ran from, and losing
+     * that would leave a transcript nobody could place.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx
+          .delete(schema.jobEstimateOutlines)
+          .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId)),
+      ),
+    ).rejects.toThrow();
+
+    // The answers go with the walk, and the walk goes with the estimate.
+    await withSystem((tx) =>
+      tx.delete(schema.jobEstimates).where(eq(schema.jobEstimates.id, seeded.estimateId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobEstimateInterviews)
+          .where(eq(schema.jobEstimateInterviews.estimateId, seeded.estimateId)),
+      ),
+    ).toEqual([]);
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.jobEstimateInterviewAnswers)
+          .where(eq(schema.jobEstimateInterviewAnswers.id, skip[0].id)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) =>
+      tx
+        .delete(schema.jobEstimateOutlines)
+        .where(eq(schema.jobEstimateOutlines.id, seeded.outlineId)),
+    );
+  });
+
   it("cannot read or change another tenant's CLIENT LINKS; a link hangs off this tenant's estimate; a token_hash is globally unique; a signature is whole or absent; and the link goes with the estimate", async () => {
     const seeded = await withSystem(async (tx) => {
       const e = await tx

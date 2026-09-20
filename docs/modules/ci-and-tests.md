@@ -51,6 +51,51 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-09-20 — The ADR index is checked against the ADRs (branch `claude/competent-chebyshev-c7907d`)
+
+`docs/decisions/README.md` had been stale since 2026-09-14: 99 ADRs in the
+folder, 58 rows in its index table. PR #636 backfilled the missing forty-one by
+hand and left the hole open, because nothing in the repo could have noticed —
+`tests/build-docs.test.ts` asserts the viewer renders a `decisions` section, and
+a section renders identically whether the index inside it lists 58 decisions or
+99.
+
+**`tests/adr-index.test.ts`** recomputes the table from the files. Six checks:
+every ADR has a `# NNNN` heading plus the `- **Date:**` / `- **Status:**` lines
+the table is built from; every ADR has exactly one row; no row names a number
+with no ADR behind it and no number has two rows (`README.md` is `merge=union`,
+so two sessions adding the same row both get theirs); every row's link goes to
+the file it numbers, with a non-empty Decision cell; every row's date and
+standing match the ADR's own header; and the rows stay in ascending order.
+
+Three things it deliberately does not do. **It never asserts a decision's
+wording** — the same rule `guides.test.ts` and `build-docs.test.ts` already
+keep, because a test that fails when prose is improved teaches people not to
+improve prose. **It does not care how a heading is punctuated**: 42 ADRs write
+`# 0042. Title` and 57 write `# 0042 — Title`, so only the number is read and
+neither convention has to be swept. And it **normalises both columns rather
+than demanding the strings be equal** — the date is the first ISO date on the
+line, because 0013 carries `2026-08-21, **revised 2026-08-22**`, and the status
+is its first word, because 22 ADRs qualify theirs (`Accepted (built 2026-09-05,
+Marketing slice 10)`, `Accepted, amended by [0050](…)`) where the column holds
+the bare standing.
+
+**It found a drift on its first run.** `0010` had said `Accepted (slice 1 built
+2026-08-16)` in the file and `Proposed` in the index since the slice shipped.
+The index row is corrected here; the ADR is the record and the table is a
+listing of it.
+
+The rule it enforces was nowhere written down — `docs/conventions.md` §11 told
+you how to pick the number and why the file is `merge=union`, and stopped. It
+now says the index row goes in the same commit as the ADR, as do
+`docs/decisions/README.md`'s own Format section and the `docs/decisions/` row of
+`AGENTS.md`'s doc table.
+
+Filesystem only, so it lands in the `pure` project with no change to
+`tests/db-backed-files.ts` — and it stays there, because it neither reads the
+database URL nor imports a `_shared` gate, which is what
+`tests/db-backed-files.test.ts` recomputes that list from.
+
 ### 2026-09-17 — The scan says "superseded", because that is what it found (branch `claude/youthful-mestorf-bbe0aa`)
 
 The entry below replaced the file scan with a `pg_constraint` guard and wrote

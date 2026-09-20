@@ -54,6 +54,7 @@ function answer(over: Partial<WalkAnswer> = {}): WalkAnswer {
     prompt: "Block or poured?",
     answer: "Poured",
     skipped: false,
+    superseded: false,
     skipReason: "",
     ...over,
   };

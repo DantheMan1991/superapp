@@ -194,6 +194,24 @@ export const jobEstimateInterviewAnswers = pgTable(
     skipReason: text("skip_reason").notNull().default(""),
     /** The order they were asked in, which is the order they read back. */
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * WHEN SOMEBODY ASKED THIS ONE AGAIN (X4, ADR 0098).
+     *
+     * A walk is forty-five minutes long and a person changes their mind in
+     * it: the masonry step reminds you the foundation needed a brick ledge,
+     * and the starter outline's own note says to go back for it. Going back
+     * had to mean something, and **the something is not a delete** — a
+     * transcript is a record of what happened (the file comment above), and
+     * an answer that vanished because somebody revisited a step would be a
+     * record that lies about what was said at the time.
+     *
+     * So the old answer stays and stops counting. Every derived thing —
+     * coverage, what is outstanding, where the walk is, what the phase is
+     * worth — reads only the live rows, so `currentStep` takes somebody back
+     * to a step the moment one of its questions is re-opened, with no
+     * special case anywhere for "a person is revisiting".
+     */
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

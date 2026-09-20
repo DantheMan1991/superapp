@@ -38,10 +38,41 @@ down to the question you were on — nothing is lost by closing the laptop.
 ## The screen
 
 Across the top: the phase you are on, what number it is out of how many, and
-what your business wrote as guidance for that phase. The bar underneath fills
-as phases are covered, and the line beside it counts what you have answered,
-what got passed over, and how many questions **it thought of** — ones your
-outline did not contain.
+what your business wrote as guidance for that phase. The line beside it counts
+what you have answered, what got passed over, and how many questions **it
+thought of** — ones your outline did not contain.
+
+### The rail
+
+Under that is a row of small squares, one for every phase in your outline, in
+the order they are walked. Hover over one to see which phase it is and where
+it stands. The colours are the same everywhere in this screen:
+
+- **Green** — priced. Lines from this phase are on the estimate.
+- **Amber** — out for bid. Subcontractors have the scope and nobody has been
+  chosen yet.
+- **Red** — answered, and nothing came of it. This is the one to look at.
+- **Grey** — not walked yet.
+- **Outline only** — by others, so it belongs in your exclusions.
+
+The phase you are standing on has a ring around it. **Click any square** to
+open that phase, which you can do at any time without losing your place.
+
+### Opening a phase
+
+The card that opens shows the phase, its cost code, where it stands and what
+it comes to. Under that is every question asked on it and what you said.
+
+- {button:Work on this|secondary} takes the walk to that phase and asks its
+  next question. It only appears on a phase you are not already on.
+- {button:Ask again|ghost}, beside any answer, asks you that one question
+  again. The walk goes there and puts the question back on the screen.
+- {button:Close|ghost} shuts the card. Clicking the same square again does
+  the same thing.
+
+**Asking again does not erase what you said.** The old answer stops counting
+and stays in the record, so the transcript still shows what you said at the
+time and what you changed it to.
 
 ### Answering
 
@@ -110,10 +141,50 @@ Quantities work the same way. A figure you said is used as you said it. A figure
 
 **Nothing is written until you press the button**, and answering anything else clears the working-out, because it was about the answers as they stood.
 
+## The whole bid
+
+At the bottom of the screen, always, is what the whole bid stands at. It has
+one job: **tell you whether this bid is finished.**
+
+The line at the top counts the phases that are priced and what they come to in
+cost. Under it, either:
+
+- **Every phase is priced, excluded or asks nothing** — there is nothing
+  outstanding, and the bid is ready as far as this tool can tell.
+- **N phases are not finished** — followed by each one and why.
+
+The reasons you will see:
+
+| What it says | What happened |
+| --- | --- |
+| answered, nothing priced | You went through the phase and no lines ever reached the estimate. |
+| bidding it out, nobody asked | You said you were subbing it and no bid request went out on that cost code. |
+| allowance never set | A money question was passed over, or answered without a figure. |
+| a bid chosen, not on the estimate yet | You went with a subcontractor's price and it has not been put on. |
+| N still to ask | The phase has questions nobody has answered. |
+| N asked · N back | Subcontractors have it. Nobody has been chosen. |
+
+Click any of them to open that phase.
+
+**What is out for bid is not in the figure.** A price nobody has chosen is not
+a number yet, so the total counts only what is actually on the estimate. The
+line under those rows says so.
+
+**A phase you priced and then deleted the lines for goes back to red.** The
+figure follows the estimate, not the walk, so if you typed over a generated
+price it is your number that counts.
+
 ## When it finishes
 
-When there is nothing left and it has nothing more to ask, the walk closes and
-you land back on the estimate. Everything you said is kept against it.
+When it has asked everything in the outline, the walk closes and says so — and
+**the screen stays where it is** so you can read what is left. Running out of
+questions is not the same as having a finished bid.
+
+{button:Back to the estimate|primary} takes you back whenever you are ready.
+
+If you leave and come back later, the estimate itself will tell you: the panel
+above the lines reads *The last walk left N phases unfinished*, with
+{button:See what is left|outline} to come back to this screen.
 
 ## If it will not answer
 

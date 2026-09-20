@@ -7,7 +7,8 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { packContext } from "@/lib/packs/tenant-context";
 import { PageHeader } from "@/components/app/page-header";
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
-import { loadWalk, walkView } from "@/packs/jobs/walk-ops";
+import { asWalkAnswers, loadWalk, walkView } from "@/packs/jobs/walk-ops";
+import { reckoningFor } from "@/packs/jobs/walk-reckoning-ops";
 import { PACK } from "@/packs/jobs/vocabulary";
 import { WalkScreen } from "@/packs/jobs/components/walk-screen";
 
@@ -39,13 +40,32 @@ export default async function WalkPage({
     async (tx) => {
       const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
       const gate = interviewGateFrom(pack.config);
-      if (!gate.available) return { gate, walk: null };
-      return { gate, walk: await loadWalk(tx, ctx.tenant.id, estimateId) };
+      if (!gate.available) return { gate, walk: null, reckoning: null };
+      const walk = await loadWalk(tx, ctx.tenant.id, estimateId);
+      if (!walk) return { gate, walk: null, reckoning: null };
+      return {
+        gate,
+        walk,
+        /** The whole bid, so the panel is right on the first paint. */
+        reckoning: await reckoningFor(tx, ctx.tenant.id, {
+          interviewId: walk.interview.id,
+          projectId: id,
+          steps: walk.steps,
+          answers: asWalkAnswers(walk.answers),
+        }),
+      };
     },
     { role: ctx.role },
   );
   if (!data.gate.available) notFound();
-  if (!data.walk || data.walk.interview.status !== "running") redirect(estimateHref);
+  /**
+   * **A FINISHED WALK STILL RENDERS**, and that is the point of X4. This
+   * redirected the moment the questions ran out, so the one screen that says
+   * what the bid is still missing was the one screen nobody could reach. An
+   * abandoned walk has nothing to show and still goes back.
+   */
+  if (!data.walk || !data.reckoning) redirect(estimateHref);
+  if (data.walk.interview.status === "abandoned") redirect(estimateHref);
 
   const view = walkView(data.walk);
 
@@ -65,6 +85,7 @@ export default async function WalkPage({
 
       <WalkScreen
         initial={view}
+        initialReckoning={data.reckoning}
         projectId={id}
         estimateId={estimateId}
         estimateHref={estimateHref}

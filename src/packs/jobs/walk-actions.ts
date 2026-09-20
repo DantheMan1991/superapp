@@ -16,7 +16,10 @@ import { applyProposal, proposeLines } from "./walk-lines-ops";
 import { JobsError, type JobsCtx } from "./ops";
 import { interviewGateFrom } from "./interview-gate";
 import {
+  asWalkAnswers,
   claimTurn,
+  goToStep,
+  reopenQuestion,
   closeWalk,
   getWalk,
   moveToStep,
@@ -27,7 +30,8 @@ import {
   startWalk,
   walkViewFrom,
 } from "./walk-ops";
-import { currentStep, nextStep, type WalkAnswer } from "./walk-math";
+import { reckoningFor } from "./walk-reckoning-ops";
+import { currentStep, live, nextStep, type WalkAnswer } from "./walk-math";
 import { PACK } from "./vocabulary";
 
 /**
@@ -264,14 +268,7 @@ async function oneTurn(
       return { ok: true as const, view: null, finished: true as const };
     }
 
-    const asWalk: WalkAnswer[] = gathered.walk.answers.map((a) => ({
-      questionId: a.questionId,
-      stepId: a.stepId,
-      prompt: a.prompt,
-      answer: a.answer,
-      skipped: a.skipped,
-      skipReason: a.skipReason,
-    }));
+    const asWalk: WalkAnswer[] = live(asWalkAnswers(gathered.walk.answers));
     const settledHere = asWalk.filter((a) => a.stepId === step.id);
     const earlier = asWalk.filter((a) => a.stepId !== step.id).slice(-EARLIER_CONTEXT);
     const stepNumber = gathered.walk.steps.findIndex((s) => s.id === step.id) + 1;
@@ -349,14 +346,7 @@ async function oneTurn(
          * talk its way past one by claiming it is done.
          */
         if (turn.stepDone) {
-          const answers = answerRows.map((a) => ({
-            questionId: a.questionId,
-            stepId: a.stepId,
-            prompt: a.prompt,
-            answer: a.answer,
-            skipped: a.skipped,
-            skipReason: a.skipReason,
-          }));
+          const answers = asWalkAnswers(answerRows);
           const onward = nextStep(steps, answers, step.id);
           const here = currentStep(steps, answers, step.id);
           if (!here || here.id !== step.id) {
@@ -594,14 +584,7 @@ export async function proposeStepAction(input: unknown) {
       projectWord: labelFor(gathered.labels, "project", "Project"),
       jobName: gathered.jobName,
       step: gathered.step,
-      answers: here.map((a) => ({
-        questionId: a.questionId,
-        stepId: a.stepId,
-        prompt: a.prompt,
-        answer: a.answer,
-        skipped: a.skipped,
-        skipReason: a.skipReason,
-      })),
+      answers: live(asWalkAnswers(here)),
       assemblies: gathered.assemblies,
       costCodes: gathered.costCodes,
     });
@@ -678,6 +661,130 @@ export async function applyStepAction(input: unknown) {
       "layout",
     );
     return { ok: true as const, ...applied };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+
+/* ------------------------------------------------------------------------
+ * THE WHOLE BID, AND THE WAY BACK INTO IT (X4, ADR 0098).
+ * ---------------------------------------------------------------------- */
+
+const reckonSchema = z.object({
+  interviewId: z.string().uuid(),
+  projectId: z.string().uuid(),
+});
+
+/**
+ * **A DOOR OF ITS OWN, AND DELIBERATELY NOT PART OF A TURN.** The founder's
+ * word on the first version of this walk was that it felt slow, and the fix
+ * was to stop doing anything on a turn that the turn did not need. A
+ * reckoning is five indexed reads; folding them into every exchange would
+ * put them on the critical path of a conversation forty-five minutes long.
+ *
+ * The screen calls this AFTER a turn has already landed, without waiting, so
+ * the panel catches up a beat later and nothing on screen is ever blocked on
+ * it.
+ */
+export async function reckonWalkAction(input: unknown) {
+  const parsed = reckonSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const reckoning = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+        requireGrantedFrom(pack.config);
+        const walk = await getWalk(tx, ctx.tenantId, parsed.data.interviewId);
+        if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+        return reckoningFor(tx, ctx.tenantId, {
+          interviewId: parsed.data.interviewId,
+          projectId: parsed.data.projectId,
+          steps: walk.steps,
+          answers: asWalkAnswers(walk.answers),
+        });
+      },
+      { role: ctx.role },
+    );
+    return { ok: true as const, reckoning };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const goToStepSchema = z.object({
+  interviewId: z.string().uuid(),
+  stepId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+/** Put the walk on a step and ask that step's question. */
+export async function goToStepAction(input: unknown) {
+  const parsed = goToStepSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    await withTenant(
+      ctx.tenantId,
+      (tx) => goToStep(tx, ctx, parsed.data.interviewId, parsed.data.stepId),
+      { role: ctx.role },
+    );
+    /** Nobody is hammering anything: this is one click, not a conversation. */
+    const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
+      ignoreCooldown: true,
+    });
+    return { ok: true as const, view: out.view };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const askAgainSchema = z.object({
+  interviewId: z.string().uuid(),
+  questionId: z.string().uuid(),
+  projectId: z.string().uuid(),
+  estimateId: z.string().uuid(),
+});
+
+/**
+ * ASK ME THAT ONE AGAIN. Supersedes the answer, which re-opens its step, and
+ * takes a turn there so the question is on the screen when the click lands.
+ */
+export async function askAgainAction(input: unknown) {
+  const parsed = askAgainSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const where = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const out = await reopenQuestion(
+          tx,
+          ctx,
+          parsed.data.interviewId,
+          parsed.data.questionId,
+        );
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "jobs.estimate_walk.reopened",
+          targetType: "job_estimate_interview",
+          targetId: parsed.data.interviewId,
+          meta: { questionId: parsed.data.questionId },
+        });
+        return out;
+      },
+      { role: ctx.role },
+    );
+    const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
+      ignoreCooldown: true,
+    });
+    return { ok: true as const, view: out.view, prompt: where.prompt };
   } catch (err) {
     return toResult(err);
   }

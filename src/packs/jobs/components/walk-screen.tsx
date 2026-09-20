@@ -14,11 +14,16 @@ import { formatQuantity } from "../billing-math";
 import { basisLabel, type LineBasis } from "../walk-lines-math";
 import {
   applyStepAction,
+  askAgainAction,
   closeWalkAction,
+  goToStepAction,
   proposeStepAction,
+  reckonWalkAction,
   skipQuestionAction,
   takeWalkTurnAction,
 } from "../walk-actions";
+import type { Reckoning } from "../walk-reckoning";
+import { StepCard, WalkRail, WalkReckoning } from "./walk-reckoning-panel";
 
 /** A line the walk has worked out but nobody has accepted yet. */
 interface ProposedRow {
@@ -57,12 +62,14 @@ interface ProposedRow {
 
 export function WalkScreen({
   initial,
+  initialReckoning,
   projectId,
   estimateId,
   estimateHref,
   symbol,
 }: {
   initial: WalkView;
+  initialReckoning: Reckoning;
   projectId: string;
   estimateId: string;
   estimateHref: string;
@@ -70,6 +77,10 @@ export function WalkScreen({
 }) {
   const router = useRouter();
   const [view, setView] = useState<WalkView>(initial);
+  /** The whole bid, refreshed beside a turn rather than inside one. */
+  const [reck, setReck] = useState<Reckoning>(initialReckoning);
+  /** The step opened from the rail, which is not where the walk is standing. */
+  const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [said, setSaid] = useState("");
   /** The last thing sent, so a failed turn can be retried without retyping. */
   const [lastSaid, setLastSaid] = useState("");
@@ -93,6 +104,70 @@ export function WalkScreen({
    * `lastSaid` is kept so the retry below can send the same thing again
    * without making somebody type it twice.
    */
+  /**
+   * **NOTHING WAITS FOR THIS.** A reckoning is five indexed reads and a turn
+   * is already two and a half seconds of model; putting them in series would
+   * undo the speed work the founder asked for. It is fired after the view has
+   * landed and the panel catches up a beat later.
+   */
+  function refreshReckoning() {
+    void reckonWalkAction({ interviewId: view.interviewId, projectId })
+      .then((r) => {
+        if ("reckoning" in r && r.reckoning) setReck(r.reckoning);
+      })
+      .catch(() => {
+        /* The panel keeps the last good reckoning rather than emptying. */
+      });
+  }
+
+  const openedIndex = openStepId
+    ? reck.steps.findIndex((x) => x.stepId === openStepId)
+    : -1;
+  const opened =
+    openedIndex >= 0 ? { step: reck.steps[openedIndex], index: openedIndex } : null;
+
+  /** Shared by the two rail actions: both end with a fresh view and a turn. */
+  function moved(
+    run: () => Promise<{ error: string } | { ok: true; view?: WalkView | null }>,
+    said: string,
+  ) {
+    if (pending) return;
+    setOpenStepId(null);
+    setEchoed(null);
+    startTransition(async () => {
+      try {
+        const result = await run();
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+        setFailed(false);
+        /** A proposal was about the answers as they were; these change them. */
+        setProposal(null);
+        if (result.view) setView(result.view);
+        toast.success(said);
+        refreshReckoning();
+      } catch {
+        toast.error("That did not get through. Try again.");
+        setFailed(true);
+      }
+    });
+  }
+
+  function goTo(stepId: string) {
+    moved(
+      () => goToStepAction({ interviewId: view.interviewId, stepId, projectId, estimateId }),
+      "Back on that one.",
+    );
+  }
+
+  function askAgain(questionId: string) {
+    moved(
+      () => askAgainAction({ interviewId: view.interviewId, questionId, projectId, estimateId }),
+      "Asking that one again.",
+    );
+  }
+
   function send(text: string) {
     if (pending) return;
     setSaid("");
@@ -128,10 +203,16 @@ export function WalkScreen({
          *  makes it out of date, so it goes rather than misleading. */
         setProposal(null);
         if (result.view) setView(result.view);
+        refreshReckoning();
+        /**
+         * **IT NO LONGER THROWS YOU OUT AT THE END.** This pushed straight to
+         * the estimate the moment the questions ran out, so the one moment
+         * somebody most needs to see what is missing was the one moment the
+         * screen went away. Running out of questions is not the same as
+         * having a bid, and the reckoning below says which you have.
+         */
         if (result.finished) {
-          toast.success("That is the whole walk.");
-          router.push(estimateHref);
-          return;
+          toast.success("That is every question. See what is left below.");
         }
         /**
          * NO `router.refresh()` HERE EITHER. The turn returns the whole
@@ -172,27 +253,46 @@ export function WalkScreen({
               ` · ${view.progress.volunteered} it thought of`}
           </p>
         </div>
-        <div className="mt-3 flex gap-1" aria-hidden="true">
-          {Array.from({ length: Math.max(view.progress.steps, 1) }, (_, i) => (
-            <div
-              key={i}
-              className={`h-1.5 flex-1 rounded-full ${
-                i < view.progress.covered
-                  ? "bg-primary"
-                  : i === view.progress.covered
-                    ? "bg-primary/40"
-                    : "bg-border"
-              }`}
-            />
-          ))}
-        </div>
+        {/**
+          * **THE RAIL REPLACES A PROGRESS BAR.** A bar could only say how far
+          * along the conversation was — never whether any of it landed on the
+          * estimate, which is the only question that matters at the end.
+          */}
+        <WalkRail
+          reckoning={reck}
+          currentStepId={view.stepId}
+          openStepId={openStepId}
+          onOpen={(id) => setOpenStepId((was) => (was === id ? null : id))}
+        />
+        <p className="mt-2 text-xs text-muted-foreground">
+          Every step of {view.outlineName}. Click one to see what it says.
+        </p>
       </Panel>
+
+      {opened && (
+        <StepCard
+          step={opened.step}
+          index={opened.index}
+          isCurrent={opened.step.stepId === view.stepId}
+          busy={pending || working}
+          closed={done}
+          symbol={symbol}
+          onGo={() => goTo(opened.step.stepId)}
+          onAskAgain={(questionId) => askAgain(questionId)}
+          onClose={() => setOpenStepId(null)}
+        />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <Panel className="p-5">
           {done ? (
             <div className="space-y-3">
-              <p className="text-sm">That is the whole walk.</p>
+              <p className="text-sm">
+                That is every question in {view.outlineName}.
+                {reck.ready
+                  ? " Nothing is outstanding."
+                  : " What is left is below — click any phase to look at it."}
+              </p>
               <Button onClick={() => router.push(estimateHref)}>
                 Back to the estimate
               </Button>
@@ -496,6 +596,7 @@ export function WalkScreen({
                     }
                     toast.success(`${result.groupName} is on the estimate.`);
                     setProposal(null);
+                    refreshReckoning();
                   } catch {
                     toast.error("That did not get through. Try again.");
                   }
@@ -513,6 +614,12 @@ export function WalkScreen({
           </div>
         </Panel>
       )}
+
+      <WalkReckoning
+        reckoning={reck}
+        symbol={symbol}
+        onOpen={(id) => setOpenStepId((was) => (was === id ? null : id))}
+      />
     </div>
   );
 }

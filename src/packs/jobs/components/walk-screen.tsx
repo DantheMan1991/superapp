@@ -233,6 +233,11 @@ export function WalkScreen({
       <Panel className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
+            {view.stepSection && (
+              <p className="text-xs uppercase tracking-wide text-subtle-foreground">
+                {view.stepSection}
+              </p>
+            )}
             <p className="text-sm font-medium">
               {view.stepTitle || "Finished"}
               {view.stepCount > 0 && (

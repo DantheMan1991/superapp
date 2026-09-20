@@ -85,6 +85,7 @@ const questionSchema = z.object({
 const stepSchema = z.object({
   id: z.string().uuid().optional(),
   title: z.string().trim().min(1).max(200),
+  section: z.string().trim().max(120).optional(),
   costCode: z.string().trim().max(60).optional(),
   guidance: z.string().trim().max(4000).optional(),
   questions: z.array(questionSchema).max(40).optional(),
@@ -144,7 +145,15 @@ const saveSchema = z.object({
   outlineId: z.string().uuid(),
   name: z.string().trim().min(1).max(120).optional(),
   notes: z.string().trim().max(2000).optional(),
-  steps: z.array(stepSchema).max(200).optional(),
+  /**
+   * **HIGH ENOUGH THAT THE TOOL CANNOT GENERATE AN OUTLINE IT REFUSES TO
+   * SAVE.** Reading an outline off a chart used to mean one step per code,
+   * and a 291-code chart would have produced something that could be created
+   * and then never edited — including to delete the steps that made it too
+   * big. Grouping brings a chart like that to about seventy, but the cap is
+   * the backstop for a chart whose names share nothing.
+   */
+  steps: z.array(stepSchema).max(500).optional(),
   version: z.number().int().positive().optional(),
 });
 

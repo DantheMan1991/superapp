@@ -88,6 +88,7 @@ export default async function EstimateOutlinePage({
         initialSteps={steps.map((step) => ({
           id: step.id,
           title: step.title,
+          section: step.section,
           costCode: step.costCode,
           guidance: step.guidance,
           questions: step.questions.map((q) => ({

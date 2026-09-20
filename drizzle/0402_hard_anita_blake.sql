@@ -1,0 +1,1 @@
+ALTER TABLE "job_estimate_outline_steps" ADD COLUMN "section" text DEFAULT '' NOT NULL;

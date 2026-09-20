@@ -26,6 +26,8 @@ export interface WalkQuestion {
 export interface WalkStep {
   id: string;
   title: string;
+  /** The part of the bid this step belongs to. A heading, not a code. */
+  section: string;
   costCode: string;
   guidance: string;
   questions: WalkQuestion[];

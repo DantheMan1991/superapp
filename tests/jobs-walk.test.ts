@@ -40,6 +40,7 @@ function step(over: Partial<WalkStep> = {}): WalkStep {
   return {
     id: "s1",
     title: "Foundation",
+    section: "",
     costCode: "2000",
     guidance: "",
     questions: [q()],

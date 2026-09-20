@@ -120,6 +120,54 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — An outline is read off the chart as WORK, not as codes (`claude/outline-from-chart`)
+
+Loading the pilot's real chart made its default list 291 codes, and that
+**orphaned both of its outlines in one move**: 0 of 50 coded steps matched the
+new default, so a walk would have produced uncoded lines. The fix is not
+re-typing codes. It is that **his codes are finer than an outline step** —
+`Site work and excavation` is one step, `Excavation` is eight codes — which is
+the same three-level shape the price sheet has, showing up in a third place.
+
+**ONE STEP PER CODE WAS RIGHT UNTIL A REAL CHART TURNED UP.** It gave a fine
+outline off a 38-code starter list. 291 codes gives a 291-step interview,
+which is not an interview. `outlineFromCostCodes` now folds a chart into WORK
+ITEMS: his comes out at **73 steps**, which is a job somebody can walk.
+
+**GROUPED BY WHAT THE NAMES SHARE, NOT BY WORDS THE CODE KNOWS.** Nothing in
+`workItemsFrom` knows what *Labor* or *Material* mean and it must not — those
+are one business's suffixes, and the next splits by crew or by phase of
+install. Adjacent codes group while their names keep sharing a leading prefix,
+never across a category, and the prefix is the step's title.
+
+**A GROUP'S PREFIX IS SET BY ITS FIRST TWO MEMBERS AND MAY NOT SHRINK.**
+Without that rule `Interior Trim Labor` and `Interior Paint Labor` collapse
+into one step called `Interior`, which is not a thing anybody builds. The rule
+costs the odd over-split — `Masonry crew` and `Masonry scaffolding` stay two —
+and that is the deliberate direction to err in: **splitting one work item
+costs a click; merging two costs an estimator a phase of questions nobody
+asked.** There is a test named for it.
+
+**A SECTION IS NOT THE CODE'S CATEGORY.** New column on the step, arriving
+from the chart's grouping and editable afterwards, because the two genuinely
+differ: the pilot's `Siding Labor` is accounted under `04. Structural` and
+printed under *Labour* on the sheet he hands a client. The code says where the
+money goes; the section says where the row is read. This is also the column
+the price sheet's headings will come from.
+
+The step takes the FIRST of its work item's codes, as a starting point rather
+than an answer — a step spanning eight has no single one, and the lines a walk
+produces carry their own.
+
+### Driven
+
+His chart on production: 291 codes → **73 steps** across his seven sections
+(Design 4, Preconstruction 1, Infrastructure 13, Structural 14, Mechanical 13,
+Finishes 22, General Conditions 6), written as a third outline called *From
+your cost codes*. **Not made the default** — the two already there are
+hand-edited and this one arrives raw, one question per step. Which to walk is
+his call.
+
 ### 2026-09-20 — A chart of cost comes in from a spreadsheet (`claude/cost-code-import`)
 
 The founder sent the pilot's real chart: **291 codes, seven parents, 75 work
@@ -5291,6 +5339,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement.  Since X2b also `basis` / `basis_detail` (ADR 0098): where the number came from, BLANK on every line anybody typed — blank is not `none`, which means a walk produced it and could not price it. The input treats an absent basis as *leave what is there*, so the editor's autosave cannot strip it. |
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
+| `job_estimate_outline_steps.section` | **The part of the bid a step belongs to** — a heading, not a code. Arrives from the cost code's `category` when an outline is read off a chart, and editable afterwards because the two differ: `Siding Labor` is accounted under `04. Structural` and printed under *Labour*. Where the price sheet's headings will come from. Blank on every outline written before it existed. |
 | `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. Since 2026-09-19 also `always_ask`: a question the walk may never decide is irrelevant, the counterweight to letting it skip. Always ASKED, not always answered. |
 | `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |

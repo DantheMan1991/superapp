@@ -319,6 +319,8 @@ export interface CostCodeInput {
   setId: string;
   code: string;
   name: string;
+  /** The list's own grouping. A label for reading, never a posting target. */
+  category?: string;
   sortOrder?: number;
   notes?: string;
 }
@@ -372,6 +374,7 @@ export async function createCostCode(
       setId: input.setId,
       code: input.code.trim(),
       name: input.name.trim(),
+      category: input.category?.trim() ?? "",
       sortOrder: order,
       notes: input.notes?.trim() ?? "",
     })
@@ -1077,6 +1080,7 @@ export async function updateCostCode(
   input: {
     code?: string;
     name?: string;
+    category?: string;
     sortOrder?: number;
     isActive?: boolean;
     notes?: string;
@@ -1086,6 +1090,7 @@ export async function updateCostCode(
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (input.code !== undefined) patch.code = input.code.trim();
   if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.category !== undefined) patch.category = input.category.trim();
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
   if (input.isActive !== undefined) patch.isActive = input.isActive;
   if (input.notes !== undefined) patch.notes = input.notes.trim();

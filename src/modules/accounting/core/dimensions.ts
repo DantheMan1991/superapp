@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DimensionMember } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -77,6 +77,49 @@ export async function listDimensionMembers(
       : eq(schema.dimensionMembers.tenantId, tenantId),
     orderBy: (m, { asc }) => asc(m.displayName),
   });
+}
+
+/**
+ * THE SAME UPSERT, FOR A WHOLE LIST AT ONCE.
+ *
+ * One statement rather than one per member, because a pasted chart of cost is
+ * 291 rows and 291 round trips to Neon is twelve seconds inside a transaction
+ * — long enough to be a timeout rather than a wait. Same rules as the
+ * singular: owner only, and a member that comes back is active.
+ */
+export async function upsertDimensionMembers(
+  tx: Tx,
+  ctx: LedgerCtx,
+  dimensionType: string,
+  members: readonly { packEntityId: string; displayName: string }[],
+): Promise<number> {
+  requireOwnerRole(ctx);
+  if (members.length === 0) return 0;
+  const rows = await tx
+    .insert(schema.dimensionMembers)
+    .values(
+      members.map((m) => ({
+        tenantId: ctx.tenantId,
+        dimensionType,
+        packEntityId: m.packEntityId,
+        displayName: m.displayName,
+        isActive: true,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        schema.dimensionMembers.tenantId,
+        schema.dimensionMembers.dimensionType,
+        schema.dimensionMembers.packEntityId,
+      ],
+      set: {
+        displayName: sql`excluded.display_name`,
+        isActive: true,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: schema.dimensionMembers.id });
+  return rows.length;
 }
 
 export async function upsertDimensionMember(

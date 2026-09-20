@@ -1,0 +1,1 @@
+ALTER TABLE "job_estimate_interview_answers" ADD COLUMN "superseded_at" timestamp with time zone;

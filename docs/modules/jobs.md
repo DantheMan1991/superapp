@@ -120,6 +120,78 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — X4: the whole bid, and the way back into it (`claude/walk-reckoning`, [ADR 0099](../decisions/0099-a-walk-is-finished-when-nothing-is-outstanding-not-when-the-questions-run-out.md))
+
+Four slices in and the pieces did not touch each other. The founder's verdict
+after using it: *"We are heading in the right direction, but we have a ways to
+go to actually make this right and useful."* Five things were wrong and they
+had one root — **the forty-five minutes does not live inside any one piece, it
+lives in the joins.** This is the first two of them.
+
+**THE WALK COULD NOT TELL YOU WHETHER IT WAS FINISHED.** It said *"That is the
+whole walk"* and pushed straight back to the estimate, over a bid with phases
+answered and never priced, subcontractors who had not replied and allowances
+nobody filled in. The one moment somebody most needs to see what is missing
+was the moment the screen went away. Now there is a **reckoning**: every step
+in one of six standings — priced, out for bid, by others, open, unpriced,
+asks nothing — derived from the answers, the lines that reached the estimate
+and the bids that went out. Holes first, then what is merely waiting, because
+which of the two a phase is in decides whose move it is.
+
+**MONEY OUT FOR BID IS NOT IN THE TOTAL.** Not the lowest, not the average,
+not a placeholder. It is the plausible wrong number this program exists to
+refuse, at the worst possible place to put one.
+
+**A LINE AT ZERO IS NOT A PRICE**, and this rule nearly did not get written.
+X2b puts a line on at nothing when it worked out WHAT to price and could not
+work out the cost. The first draft counted those phases as priced; driving it
+against the dev tenant's own first walk showed `Cast-in-place concrete` green
+with three `basis: none` zero lines under it. **Green on the rail, nothing in
+the total, and a bid short by whatever the concrete cost.** A phase is priced
+only while its lines carry money.
+
+**THE RECKONING FOLLOWS THE ESTIMATE, NOT THE PROPOSAL.** It reads through
+`estimate_line_id` to the real line, so a price typed over a generated one is
+the one that counts — which is what the founder asked for at X1 — and deleting
+the lines re-opens the hole by itself.
+
+**YOU COULD NOT GO BACK**, and the starter outline's own masonry step says to:
+*"a no here is worth going back to the foundation step for."* `moveToStep` was
+only ever called with the step after this one. The rail now shows every step
+at once, coloured by standing, and clicking one opens it: what was asked, what
+was said, **Work on this**, and **Ask again** on any answer.
+
+**ASKING AGAIN SUPERSEDES; IT DOES NOT DELETE.** One nullable `superseded_at`.
+A superseded row stops counting, which re-opens its step, which is what
+`currentStep` already follows — so there is no "a person is revisiting" mode
+anywhere in the code, and the transcript still says what was asked and what
+was answered at the time. The must-ask guard gained a `byPerson` flag on the
+same principle `recordAnswers` already states: *a person is not the thing
+being guarded against*.
+
+**A MISREADING CAN ONLY MAKE IT MORE CAUTIOUS.** Two standings are read from
+the words of an answer — the starter outlines' own `Bidding it out` and `By
+others`. Reword those choices and the classification is lost; what comes back
+is `unpriced`, which blocks. Never the other way round, and it was built that
+way round on purpose.
+
+### Speed, which was a founder complaint once already
+
+A reckoning is five indexed reads and **it is not part of a turn**. The screen
+fires it after the view has landed and never waits for it; the panel catches
+up a beat later. `goToStep` and `askAgain` waive the cooldown because one
+click is not a conversation.
+
+### Driven
+
+Against the dev branch's own walk on EST-2: the reckoning read `1 priced, 1
+unpriced` and the priced one was the three-zero-line phase — which is how the
+rule above got written. After the fix: `Cast-in-place concrete — 3 lines on
+the estimate, no prices`. Then **Ask again** on *"Who is doing this one?"*
+flipped `Rough carpentry` from `unpriced` to `open — 1 still to ask, 1 of them
+always`, moved the walk onto it, cleared the pending question, and left both
+rows in the transcript with exactly one standing. Rolled back.
+
 ### 2026-09-20 — X3: asking subcontractors for a number (`claude/bid-requests`, ADR 0098)
 
 The thing the walk kept pointing at. Answer *"bidding it out"* on a phase and
@@ -5146,6 +5218,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
 | `job_bid_packages` | **One scope being priced** (X3, ADR 0098): what it is, the cost code by its DIGITS, the scope a subcontractor reads, when numbers are wanted by, open or closed. | Cascade from the project. Hung on the JOB, not an estimate, because a business asks for a number once and may price two revisions with it. CHECK: title present, status on the list. Behind the interview's grant in application code, not in a policy. |
 | `job_bid_invitations` | **One subcontractor asked, and what they said**: their own token, its expiry, views, and the reply — a number or a decline, with the name they typed and an IP hash. `is_awarded` for the one the business is going with. | Cascade from the package; **RESTRICT to the party** — a sub who has been asked for a number is kept. `token_hash` GLOBALLY unique with no tenant prefix (the public lookup has no tenant to scope by), token under AES-GCM so the link can be copied again. Unique per `(package, party)`: asking twice is one ask. **At most one award**, by a partial index. CHECK: **a reply is whole or absent** (ADR 0085's shape), and **`not is_awarded or amount_cents is not null`** — you cannot award a number nobody gave. |
+| `job_estimate_interview_answers.superseded_at` | **When somebody asked that one again** (X4, ADR 0099). Not a table: one nullable column, and the whole mechanism behind going back into a walk. A superseded row stops counting in `settledIds`, `walkProgress` and the reckoning, so its step is no longer covered and `currentStep` takes the walk back to it with no special case for revisiting. The old row stays, because a transcript is a record of what happened. |
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |

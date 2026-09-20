@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimateInterview, JobEstimateInterviewAnswer } from "@/db/schema";
 import { violatedUniqueIndex } from "@/lib/db-errors";
@@ -49,7 +49,13 @@ export interface LoadedWalk {
   step: WalkStep | null;
 }
 
-function asWalkAnswers(rows: readonly JobEstimateInterviewAnswer[]): WalkAnswer[] {
+/**
+ * **THE ONE PLACE A ROW BECOMES A `WalkAnswer`.** It was hand-rolled in four
+ * places, which is how X4's `superseded` could have reached the view and
+ * missed the turn — the exact shape of an earlier mistake in this repo, where
+ * seven call sites were enumerated and two were changed.
+ */
+export function asWalkAnswers(rows: readonly JobEstimateInterviewAnswer[]): WalkAnswer[] {
   return rows.map((a) => ({
     questionId: a.questionId,
     stepId: a.stepId,
@@ -57,6 +63,7 @@ function asWalkAnswers(rows: readonly JobEstimateInterviewAnswer[]): WalkAnswer[
     answer: a.answer,
     skipped: a.skipped,
     skipReason: a.skipReason,
+    superseded: a.supersededAt !== null,
   }));
 }
 
@@ -428,13 +435,23 @@ export async function moveToStep(
   ctx: JobsCtx,
   interviewId: string,
   stepId: string | null,
+  opts: { byPerson?: boolean } = {},
 ): Promise<JobEstimateInterview> {
   requireWrite(ctx, "member");
   const walk = await getWalk(tx, ctx.tenantId, interviewId);
   if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
   requireRunning(walk.interview);
 
-  if (walk.step) {
+  /**
+   * **THE MUST-ASK GUARD IS ABOUT THE WALK, NOT ABOUT A PERSON** — the same
+   * split `recordAnswers` already makes, in its own words: *"a person is not
+   * the thing being guarded against"*. The walk may not talk its way past a
+   * must-ask question by claiming a step is done; somebody who wants to go
+   * and look at the foundation may. The question is not answered by leaving
+   * it, so the step stays open, the rail stays red and the reckoning still
+   * refuses to call the bid ready.
+   */
+  if (walk.step && !opts.byPerson) {
     const left = mustAskOutstanding(walk.step, asWalkAnswers(walk.answers));
     if (left.length > 0 && stepId !== walk.step.id) {
       throw new JobsError("MUST_ASK", `"${left[0].prompt}" has to be asked first`);
@@ -498,6 +515,8 @@ export interface WalkView {
   interviewId: string;
   status: string;
   outlineName: string;
+  /** Which step the walk is standing on, so the rail can mark it. */
+  stepId: string | null;
   stepTitle: string;
   stepGuidance: string;
   stepNumber: number;
@@ -579,7 +598,7 @@ function viewOf(walk: LoadedWalk): WalkView {
   const step = walk.step;
   const answers = asWalkAnswers(walk.answers);
   const settled = walk.answers
-    .filter((a) => step && a.stepId === step.id)
+    .filter((a) => step && a.stepId === step.id && a.supersededAt === null)
     .map((a) => ({
       prompt: a.prompt,
       answer: a.answer,
@@ -592,6 +611,7 @@ function viewOf(walk: LoadedWalk): WalkView {
     interviewId: walk.interview.id,
     status: walk.interview.status,
     outlineName: walk.outlineName,
+    stepId: step?.id ?? null,
     stepTitle: step?.title ?? "",
     stepGuidance: step?.guidance ?? "",
     stepNumber: step ? walk.steps.findIndex((s) => s.id === step.id) + 1 : walk.steps.length,
@@ -609,6 +629,109 @@ function viewOf(walk: LoadedWalk): WalkView {
         }))
       : [],
   };
+}
+
+/**
+ * ASK THAT ONE AGAIN (X4, ADR 0098).
+ *
+ * The masonry step's own starter note says *"a no here is worth going back to
+ * the foundation step for"*, and until this the tool could not do what its
+ * own outline advised. Now it can, and the mechanism is one column rather
+ * than a mode: **the old answer is superseded, not deleted.**
+ *
+ * Everything else follows with no special case. The question is outstanding
+ * again, so its step is no longer covered, so `currentStep` honours the
+ * bookmark pointing at it, so the walk is there when the next turn runs. The
+ * transcript still says what was asked and what was said at the time, which
+ * is the promise this table has made since it was written.
+ *
+ * Returns where it sent the walk, so the caller can take a turn there.
+ */
+export async function reopenQuestion(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  questionId: string,
+): Promise<{ stepId: string | null; prompt: string }> {
+  requireWrite(ctx, "member");
+  const walk = await getWalk(tx, ctx.tenantId, interviewId);
+  if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+  requireRunning(walk.interview);
+
+  const standing = walk.answers.filter(
+    (a) => a.questionId === questionId && a.supersededAt === null,
+  );
+  if (standing.length === 0) {
+    throw new JobsError("NOT_FOUND", "that question has not been answered on this walk");
+  }
+
+  await tx
+    .update(schema.jobEstimateInterviewAnswers)
+    .set({ supersededAt: new Date() })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviewAnswers.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviewAnswers.interviewId, interviewId),
+        inArray(
+          schema.jobEstimateInterviewAnswers.id,
+          standing.map((a) => a.id),
+        ),
+        isNull(schema.jobEstimateInterviewAnswers.supersededAt),
+      ),
+    );
+
+  /**
+   * The walk is sent there and its pending question cleared: what was on the
+   * screen belonged to wherever it was standing, and leaving it would have
+   * the next turn answer the old question with the new step's words.
+   */
+  const stepId = standing[0].stepId;
+  await tx
+    .update(schema.jobEstimateInterviews)
+    .set({
+      currentStepId: stepId,
+      pendingSay: "",
+      pendingQuestionId: null,
+      pendingQuickReplies: [],
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    );
+
+  return { stepId, prompt: standing[0].prompt };
+}
+
+/**
+ * A PERSON PUTTING THEMSELVES ON A STEP. Unlike `moveToStep` from the walk's
+ * own reasoning, this is not policed by the must-ask guard — see the note
+ * there. The pending question goes with it, for the reason above.
+ */
+export async function goToStep(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  stepId: string,
+): Promise<JobEstimateInterview> {
+  const walk = await getWalk(tx, ctx.tenantId, interviewId);
+  if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+  if (!walk.steps.some((s) => s.id === stepId)) {
+    throw new JobsError("NOT_FOUND", "that step is not in this outline");
+  }
+  const moved = await moveToStep(tx, ctx, interviewId, stepId, { byPerson: true });
+  await tx
+    .update(schema.jobEstimateInterviews)
+    .set({ pendingSay: "", pendingQuestionId: null, pendingQuickReplies: [] })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    );
+  return moved;
 }
 
 /** Close a walk: `finished` when it ran out of steps, `abandoned` when dropped. */

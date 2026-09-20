@@ -39,12 +39,37 @@ export interface WalkAnswer {
   answer: string;
   skipped: boolean;
   skipReason: string;
+  /**
+   * SOMEBODY ASKED THIS ONE AGAIN, so it is history rather than an answer
+   * (X4). Every derivation below ignores it, which is what takes the walk
+   * back to a step whose question has been re-opened — no special case for
+   * "a person is revisiting", just a row that stopped counting.
+   */
+  superseded: boolean;
+}
+
+/** The answers that still stand, newest last. */
+export function live(answers: readonly WalkAnswer[]): WalkAnswer[] {
+  return answers.filter((a) => !a.superseded);
+}
+
+/**
+ * The answer that stands for each question, by id. Later rows win, so
+ * answering the same question twice without superseding — which the walk may
+ * do within a step — reads as the last thing said.
+ */
+export function liveByQuestion(answers: readonly WalkAnswer[]): Map<string, WalkAnswer> {
+  const out = new Map<string, WalkAnswer>();
+  for (const a of live(answers)) {
+    if (a.questionId) out.set(a.questionId, a);
+  }
+  return out;
 }
 
 /** Every outline question this walk has settled, answered or skipped. */
 export function settledIds(answers: readonly WalkAnswer[]): Set<string> {
   const out = new Set<string>();
-  for (const a of answers) {
+  for (const a of live(answers)) {
     if (a.questionId) out.add(a.questionId);
   }
   return out;
@@ -136,10 +161,7 @@ export function walkProgress(
   steps: readonly WalkStep[],
   answers: readonly WalkAnswer[],
 ): WalkProgress {
-  const byId = new Map<string, WalkAnswer>();
-  for (const a of answers) {
-    if (a.questionId) byId.set(a.questionId, a);
-  }
+  const byId = liveByQuestion(answers);
   let questions = 0;
   let answered = 0;
   let skipped = 0;
@@ -164,7 +186,7 @@ export function walkProgress(
     questions,
     answered,
     skipped,
-    volunteered: answers.filter((a) => !a.questionId).length,
+    volunteered: live(answers).filter((a) => !a.questionId).length,
     mustAskLeft,
   };
 }

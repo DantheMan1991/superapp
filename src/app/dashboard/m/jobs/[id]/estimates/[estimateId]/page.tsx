@@ -14,7 +14,8 @@ import { EstimateEditor } from "@/packs/jobs/components/estimate-editor";
 import { WalkStart } from "@/packs/jobs/components/walk-start";
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import { listOutlines } from "@/packs/jobs/outline-ops";
-import { loadWalk } from "@/packs/jobs/walk-ops";
+import { asWalkAnswers, loadWalk } from "@/packs/jobs/walk-ops";
+import { reckoningFor } from "@/packs/jobs/walk-reckoning-ops";
 import { PACK, slugLabel } from "@/packs/jobs/vocabulary";
 
 /**
@@ -63,11 +64,24 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
        * fetched and nothing is rendered.
        */
       const gate = interviewGateFrom(pack.config);
+      const latest = gate.available ? await loadWalk(tx, ctx.tenant.id, estimateId) : null;
+      /**
+       * **A FINISHED WALK IS NOT A FINISHED BID** (X4), so the estimate says
+       * what the last one left behind. Reckoned only when there IS a finished
+       * walk — the reads are cheap but this page is not, and a business that
+       * has never walked this estimate pays nothing for the feature.
+       */
+      const left =
+        latest && latest.interview.status === "finished"
+          ? await reckoningFor(tx, ctx.tenant.id, {
+              interviewId: latest.interview.id,
+              projectId: id,
+              steps: latest.steps,
+              answers: asWalkAnswers(latest.answers),
+            })
+          : null;
       const walk = gate.available
-        ? {
-            outlines: await listOutlines(tx, ctx.tenant.id),
-            running: await loadWalk(tx, ctx.tenant.id, estimateId),
-          }
+        ? { outlines: await listOutlines(tx, ctx.tenant.id), running: latest, left }
         : null;
       return { project, row, contracts, codes, labels: pack.labels, units, prices, assemblies, shares, walk };
     },
@@ -118,6 +132,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
     data.walk?.running && data.walk.running.interview.status === "running"
       ? data.walk.running
       : null;
+  const left = running ? null : (data.walk?.left ?? null);
 
   return (
     <>
@@ -142,6 +157,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
                 }
               : null
           }
+          left={left ? { blocking: left.blocking.length, priced: left.priced } : null}
         />
       )}
     <EstimateEditor

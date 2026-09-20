@@ -31,12 +31,15 @@ export function WalkStart({
   estimateId,
   outlines,
   running,
+  left,
 }: {
   projectId: string;
   estimateId: string;
   outlines: { id: string; name: string; isDefault: boolean; steps: number }[];
   /** An interview already going on this estimate, if there is one. */
   running: { stepTitle: string; covered: number; steps: number } | null;
+  /** What the last FINISHED walk left behind, when nothing is running. */
+  left: { blocking: number; priced: number } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -60,6 +63,35 @@ export function WalkStart({
         </div>
         <Button size="sm" onClick={() => router.push(href)}>
           Pick it up
+        </Button>
+      </Panel>
+    );
+  }
+
+  /**
+   * **THE LAST WALK LEFT SOMETHING**, and the estimate is where somebody
+   * finds out (X4). Running out of questions closes a walk; it does not
+   * price a phase, send a bid request or fill in an allowance, and until
+   * this the only screen that said so was one nobody could get back to.
+   */
+  if (left && left.blocking > 0) {
+    return (
+      <Panel className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <MessagesSquare className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">
+              The last walk left {left.blocking}{" "}
+              {left.blocking === 1 ? "phase" : "phases"} unfinished
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {left.priced} {left.priced === 1 ? "phase is" : "phases are"} priced. The
+              rest are answered and not priced, out for bid, or never reached.
+            </p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => router.push(href)}>
+          See what is left
         </Button>
       </Panel>
     );

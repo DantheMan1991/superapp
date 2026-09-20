@@ -2499,6 +2499,72 @@ d("jobs tables (RLS)", () => {
       ),
     ).rejects.toThrow();
 
+    /**
+     * **ASKING A QUESTION AGAIN SUPERSEDES; IT DOES NOT DELETE** (X4). The
+     * whole way back into a walk rests on this: a superseded row stops
+     * counting, which re-opens its step, which is what `currentStep` follows.
+     * The old row stays because a transcript is a record of what happened.
+     */
+    const asked = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateInterviewAnswers)
+        .values({
+          tenantId: tenantA,
+          interviewId: second[0].id,
+          prompt: "How wide is the footing?",
+          answer: "24 inches",
+        })
+        .returning(),
+    );
+    expect(asked[0].supersededAt).toBeNull();
+
+    await withSystem((tx) =>
+      tx
+        .update(schema.jobEstimateInterviewAnswers)
+        .set({ supersededAt: new Date() })
+        .where(eq(schema.jobEstimateInterviewAnswers.id, asked[0].id)),
+    );
+    const again = await withSystem((tx) =>
+      tx
+        .insert(schema.jobEstimateInterviewAnswers)
+        .values({
+          tenantId: tenantA,
+          interviewId: second[0].id,
+          prompt: "How wide is the footing?",
+          answer: "30 inches, it turns out",
+        })
+        .returning(),
+    );
+
+    /** BOTH rows are there: what was said at the time, and what stands now. */
+    const both = await asStaff((tx) =>
+      tx
+        .select()
+        .from(schema.jobEstimateInterviewAnswers)
+        .where(eq(schema.jobEstimateInterviewAnswers.interviewId, second[0].id)),
+    );
+    const footings = both.filter((a) => a.prompt === "How wide is the footing?");
+    expect(footings).toHaveLength(2);
+    expect(footings.filter((a) => a.supersededAt === null)).toHaveLength(1);
+    expect(footings.find((a) => a.supersededAt === null)?.answer).toBe(
+      "30 inches, it turns out",
+    );
+    expect(footings.find((a) => a.supersededAt !== null)?.answer).toBe("24 inches");
+    expect(again[0].supersededAt).toBeNull();
+
+    /**
+     * A superseded row is still a whole record: the skip CHECK keeps holding,
+     * so history cannot be rewritten into something that never happened.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.jobEstimateInterviewAnswers)
+          .set({ skipped: true, skipReason: "" })
+          .where(eq(schema.jobEstimateInterviewAnswers.id, asked[0].id)),
+      ),
+    ).rejects.toThrow();
+
     // A walk on another tenant's estimate is unrepresentable.
     await expect(
       withSystem((tx) =>

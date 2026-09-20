@@ -336,6 +336,33 @@ describe("the construction profile's starter outlines", () => {
     }
   });
 
+  /**
+   * **A PHASE YOU COULD NOT SUB OUT MUST NOT BE OFFERED "BIDDING IT OUT".**
+   * The founder walked a real bid and hit it at once: *"we would never bid
+   * out permits."* A button that is never a real answer teaches somebody the
+   * buttons are decoration.
+   */
+  it("never offers to bid out a phase nobody bids out", () => {
+    const NEVER_BID = ["Permits and fees", "Permits", "Plans and engineering"];
+    for (const outline of CONSTRUCTION_ESTIMATE_OUTLINES) {
+      for (const step of outline.steps) {
+        if (!NEVER_BID.includes(step.title)) continue;
+        for (const q of step.questions ?? []) {
+          expect(q.choices ?? [], `${outline.name} / ${step.title}`).not.toContain(
+            "Bidding it out",
+          );
+        }
+      }
+    }
+  });
+
+  it("still asks who does it on the phases a trade actually does", () => {
+    const asked = CONSTRUCTION_ESTIMATE_OUTLINES.flatMap((o) =>
+      o.steps.filter((s) => (s.questions ?? []).some((q) => q.prompt === WHO_DOES_IT.prompt)),
+    );
+    expect(asked.length).toBeGreaterThan(20);
+  });
+
   it("open all but the scoping stops with who is doing the work", () => {
     for (const outline of CONSTRUCTION_ESTIMATE_OUTLINES) {
       for (const step of outline.steps) {

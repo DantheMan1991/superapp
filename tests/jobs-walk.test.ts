@@ -372,6 +372,78 @@ describe("validateWalkTurn: nothing the model says is taken on trust", () => {
     expect(out?.askingQuestionId).toBeUndefined();
   });
 
+  /**
+   * **THE QUESTION IT IS ASKING, RECOVERED WHEN IT FORGETS TO SAY SO.** The
+   * founder hit this on the first real walk: it asked "Block or poured
+   * wall?" — the outline's own words — with no `askingQuestionId`, so the
+   * buttons were three guesses instead of the question's four, `Come back to
+   * this` vanished, and the answer would have been filed as volunteered with
+   * the real question left outstanding.
+   */
+  describe("recovering an untagged question", () => {
+    it("matches the outline's own words, punctuation and case aside", () => {
+      for (const said of [
+        "Block or poured?",
+        "block or poured",
+        "Right — block or poured?  ",
+      ]) {
+        const out = validateWalkTurn(
+          { record: [], skip: [], say: said, stepDone: false },
+          here,
+        );
+        expect(out?.askingQuestionId, said).toBe("a");
+        expect(out?.quickReplies, said).toEqual(["Block", "Poured"]);
+      }
+    });
+
+    it("leaves a question of its own alone", () => {
+      const out = validateWalkTurn(
+        { record: [], skip: [], say: "Is there a retaining wall?", stepDone: false },
+        here,
+      );
+      expect(out?.askingQuestionId).toBeUndefined();
+    });
+
+    /** A near miss is left alone: mislabelling an answer is worse than a
+     *  missing chip, because it files what somebody said under the wrong
+     *  question and leaves the right one outstanding. */
+    it("will not guess at a near miss", () => {
+      const out = validateWalkTurn(
+        { record: [], skip: [], say: "Is the wall block?", stepDone: false },
+        here,
+      );
+      expect(out?.askingQuestionId).toBeUndefined();
+    });
+
+    it("says nothing when two questions reduce to the same words", () => {
+      const twins = step({
+        questions: [
+          q({ id: "x", prompt: "How wide?" }),
+          q({ id: "y", prompt: "How wide!" }),
+        ],
+      });
+      const out = validateWalkTurn(
+        { record: [], skip: [], say: "How wide?", stepDone: false },
+        twins,
+      );
+      expect(out?.askingQuestionId).toBeUndefined();
+    });
+
+    it("an explicit id still wins", () => {
+      const out = validateWalkTurn(
+        {
+          record: [],
+          skip: [],
+          say: "Any asbestos?",
+          askingQuestionId: "a",
+          stepDone: false,
+        },
+        here,
+      );
+      expect(out?.askingQuestionId).toBe("a");
+    });
+  });
+
   it("caps the replies it will draw and trims them", () => {
     const out = validateWalkTurn(
       {

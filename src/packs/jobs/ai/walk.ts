@@ -1,5 +1,5 @@
 import "server-only";
-import { CLAUDE_MODEL, getClaude } from "@/lib/claude";
+import { CLAUDE_FAST_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import type { WalkAnswer, WalkQuestion, WalkStep } from "../walk-math";
 import { quickRepliesFor } from "../walk-math";
 
@@ -30,7 +30,21 @@ import { quickRepliesFor } from "../walk-math";
  * prompt is a rule a model can be talked out of.
  */
 
-export const WALK_TURN_MAX_TOKENS = 4_000;
+/**
+ * SIZED FOR THE TOOL, WITH NO THINKING IN THE WAY.
+ *
+ * The first version asked for adaptive thinking inside a 4,000-token budget,
+ * and `src/lib/claude.ts` warns in so many words what that does: **max_tokens
+ * caps thinking AND the response together, so a tight budget truncates
+ * mid-tool-call.** A truncated call has no complete `tool_use` block, the
+ * turn comes back null, and the screen says *"It could not answer just
+ * then"* — which is exactly what the founder kept hitting. Written down
+ * because the warning was already in the file when this was written.
+ *
+ * The output is one short paragraph and a handful of short records. Two
+ * thousand is generous for that, and with thinking off it cannot be eaten.
+ */
+export const WALK_TURN_MAX_TOKENS = 2_000;
 
 export const WALK_TURN_TOOL = {
   name: "walk_turn",
@@ -85,7 +99,8 @@ export const WALK_TURN_TOOL = {
       },
       askingQuestionId: {
         type: "string",
-        description: "The outline question you are now asking, copied exactly. Omit when the question is your own.",
+        description:
+          "REQUIRED whenever you are asking one of the questions listed above: copy its id exactly. Omit it only for a question of your own that is not on the list.",
       },
       quickReplies: {
         type: "array",
@@ -199,6 +214,27 @@ export function walkSystemPrompt(input: {
     .join("\n");
 }
 
+
+/** Punctuation and spacing are not the question. */
+function normalizedPrompt(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * The step's question whose words the walk just used, or nothing. Only an
+ * exact normalised hit counts, and only when one question matches: two
+ * questions that reduce to the same words are not a question this can name.
+ */
+export function matchAsked(say: string, step: WalkStep): string | undefined {
+  const said = normalizedPrompt(say);
+  if (said === "") return undefined;
+  const hits = step.questions.filter((q) => {
+    const want = normalizedPrompt(q.prompt);
+    return want !== "" && said.includes(want);
+  });
+  return hits.length === 1 ? hits[0].id : undefined;
+}
+
 /** The tool's output, cleaned into something the ops can be handed. */
 export function validateWalkTurn(raw: unknown, step: WalkStep): WalkTurn | null {
   if (!raw || typeof raw !== "object") return null;
@@ -235,10 +271,26 @@ export function validateWalkTurn(raw: unknown, step: WalkStep): WalkTurn | null 
     }
   }
 
-  const askingQuestionId =
+  /**
+   * **THE QUESTION IT IS ASKING, RECOVERED WHEN IT FORGETS TO SAY SO.**
+   *
+   * The founder hit this on the first real walk: it asked *"Block or poured
+   * wall?"* — the outline's own words, verbatim — and left `askingQuestionId`
+   * out. Three things then went wrong at once. The buttons were the model's
+   * three guesses instead of the question's four options; `Come back to this`
+   * vanished, because there was no question to come back to; and the answer
+   * would have been recorded as one the walk volunteered, leaving the real
+   * question outstanding for it to ask all over again.
+   *
+   * So when the id is missing, the words are matched against the questions
+   * this step still owes. Exact on the normalised text only — a near miss is
+   * left alone, because mislabelling an answer is worse than a missing chip.
+   */
+  const claimed =
     typeof r.askingQuestionId === "string" && known.has(r.askingQuestionId)
       ? r.askingQuestionId
       : undefined;
+  const askingQuestionId = claimed ?? matchAsked(r.say, step);
 
   /** The question's own options win over anything the model invented. */
   const asked = askingQuestionId ? known.get(askingQuestionId) : undefined;
@@ -287,15 +339,17 @@ export async function takeWalkTurn(input: {
   step: WalkStep;
 }): Promise<WalkTurn | null> {
   const response = await getClaude().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: WALK_TURN_MAX_TOKENS,
     /**
-     * ADAPTIVE, and it is the right call here even though it costs latency.
-     * The judgement this turn makes — is this question moot, what did that
-     * answer open up, what is missing — IS reasoning; a turn that only
-     * reads the next line off a list would not need a model at all.
+     * FAST, AND NOT THINKING. Both were wrong the first time round and the
+     * founder felt both: adaptive thinking on the considered model made a
+     * turn take several seconds AND ate the token budget until the tool call
+     * truncated. What this turn decides is shallow — read a list, read a
+     * transcript, pick the next question — and the deep reasoning in this
+     * feature is the sweep over a finished bid, which nobody sits waiting on.
      */
-    thinking: { type: "adaptive" },
+    model: CLAUDE_FAST_MODEL,
+    max_tokens: WALK_TURN_MAX_TOKENS,
+    thinking: CLAUDE_THINKING_OFF,
     system: input.system,
     tools: [WALK_TURN_TOOL],
     tool_choice: { type: "tool", name: WALK_TURN_TOOL.name },

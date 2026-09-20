@@ -17,6 +17,25 @@ export function getClaude(): Anthropic {
 export const CLAUDE_MODEL = "claude-opus-5";
 
 /**
+ * THE MODEL FOR A CONVERSATION SOMEBODY IS WAITING ON.
+ *
+ * `CLAUDE_MODEL` is the considered one: a chart of accounts, a close
+ * narrative, a discovery interview — things asked once where a better answer
+ * is worth several seconds. It is the wrong choice for a turn taken a hundred
+ * times in a forty-five minute sitting, and the founder said so the first
+ * afternoon he used one: *"overall it seems slow. takes a little while for
+ * each thing to load."*
+ *
+ * The judgement in a conversational turn — what to ask next, what an answer
+ * settled, what it made moot — is shallow. The deep reasoning in the estimate
+ * interview is the sweep across a finished bid, which nobody waits on.
+ *
+ * A call site that swaps back to `CLAUDE_MODEL` is one constant, so this is
+ * cheap to reverse if the answers get worse.
+ */
+export const CLAUDE_FAST_MODEL = "claude-sonnet-5";
+
+/**
  * THINKING IS ON BY DEFAULT ON THIS MODEL, and that is the one thing to know
  * before adding a call site.
  *

@@ -16,10 +16,12 @@ import {
   closeWalk,
   getWalk,
   moveToStep,
+  readAnswers,
+  readInterview,
   recordAnswers,
   savePendingTurn,
   startWalk,
-  walkView,
+  walkViewFrom,
 } from "./walk-ops";
 import { currentStep, nextStep, type WalkAnswer } from "./walk-math";
 import { PACK } from "./vocabulary";
@@ -101,6 +103,11 @@ function toResult(err: unknown): { error: string } {
  * The layer's own gate, at every door and not only on the page. A business
  * whose grant is withdrawn mid-walk stops being able to take a turn, which is
  * what "a layer that can be turned off" has to mean if it means anything.
+ *
+ * **A TURN DOES NOT CALL THIS**, and that is a speed fix rather than a hole:
+ * `oneTurn` reads `packContext` anyway, so checking there costs nothing where
+ * this cost a whole extra transaction on every exchange of a forty-five
+ * minute conversation.
  */
 async function requireWalkGranted(ctx: WalkCtx): Promise<void> {
   const available = await withTenant(
@@ -112,6 +119,13 @@ async function requireWalkGranted(ctx: WalkCtx): Promise<void> {
     { role: ctx.role },
   );
   if (!available) throw new JobsError("NOT_FOUND", "walking an estimate is not switched on");
+}
+
+/** The same refusal, from a `packContext` the caller already has. */
+function requireGrantedFrom(config: unknown): void {
+  if (!interviewGateFrom(config).available) {
+    throw new JobsError("NOT_FOUND", "walking an estimate is not switched on");
+  }
 }
 
 const startSchema = z.object({
@@ -199,6 +213,7 @@ async function oneTurn(
         const walk = await getWalk(tx, ctx.tenantId, interviewId);
         if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
         const pack = await packContext(tx, ctx.tenantId, ctx.industry, PACK);
+        requireGrantedFrom(pack.config);
         const estimate = await tx.query.jobEstimates.findFirst({
           where: (e, { and: a, eq: q }) =>
             a(q(e.tenantId, ctx.tenantId), q(e.id, walk.interview.estimateId)),
@@ -301,7 +316,9 @@ async function oneTurn(
             skipReason: sk.reason,
           })),
         ];
-        if (entries.length > 0) await recordAnswers(tx, ctx, interviewId, entries);
+        if (entries.length > 0) {
+          await recordAnswers(tx, ctx, interviewId, entries, { steps: gathered.walk.steps });
+        }
 
         await savePendingTurn(tx, ctx, interviewId, {
           say: turn.say,
@@ -310,13 +327,25 @@ async function oneTurn(
         });
 
         /**
+         * **ONLY WHAT CHANGED IS READ BACK.** This called `getWalk` three
+         * times — the whole outline, its questions and every answer, five
+         * queries each, on every exchange. The steps are act one's and the
+         * outline cannot have moved since; the answers and the interview row
+         * are the only things this transaction touched.
+         */
+        const steps = gathered.walk.steps;
+        const outlineName = gathered.walk.outlineName;
+        let interview = await readInterview(tx, ctx.tenantId, interviewId);
+        const answerRows = await readAnswers(tx, ctx.tenantId, interviewId);
+        if (!interview) return null;
+
+        /**
          * MOVING ON IS A REQUEST, NOT A DECISION. `moveToStep` refuses while
          * a must-ask question of this step is outstanding, so the walk cannot
          * talk its way past one by claiming it is done.
          */
         if (turn.stepDone) {
-          const reread = await getWalk(tx, ctx.tenantId, interviewId);
-          const answers = (reread?.answers ?? []).map((a) => ({
+          const answers = answerRows.map((a) => ({
             questionId: a.questionId,
             stepId: a.stepId,
             prompt: a.prompt,
@@ -324,14 +353,14 @@ async function oneTurn(
             skipped: a.skipped,
             skipReason: a.skipReason,
           }));
-          const onward = nextStep(reread?.steps ?? [], answers, step.id);
-          const here = currentStep(reread?.steps ?? [], answers, step.id);
+          const onward = nextStep(steps, answers, step.id);
+          const here = currentStep(steps, answers, step.id);
           if (!here || here.id !== step.id) {
-            await moveToStep(tx, ctx, interviewId, onward?.id ?? null);
-            if (!onward) await closeWalk(tx, ctx, interviewId, "finished");
+            interview = await moveToStep(tx, ctx, interviewId, onward?.id ?? null);
+            if (!onward) interview = await closeWalk(tx, ctx, interviewId, "finished");
           }
         }
-        return getWalk(tx, ctx.tenantId, interviewId);
+        return { steps, outlineName, interview, answerRows };
       },
       { role: ctx.role },
     );
@@ -339,7 +368,9 @@ async function oneTurn(
     return {
       ok: true as const,
       /** The whole fresh view, so the screen needs no second round trip. */
-      view: after ? walkView(after) : null,
+      view: after
+        ? walkViewFrom(after.steps, after.outlineName, after.interview, after.answerRows)
+        : null,
       finished: after?.interview.status !== "running",
       /** The step this turn was ABOUT, so a caller can see it has moved on. */
       ranOn: step.id,
@@ -389,12 +420,17 @@ export async function takeWalkTurnAction(input: unknown) {
   if (!parsed.success) return { error: "Check the form and try again." };
   try {
     const ctx = await gate();
-    await requireWalkGranted(ctx);
+    /** The grant is checked inside the turn, off a read it makes anyway. */
     const out = await runTurn(ctx, parsed.data.interviewId, parsed.data.said);
-    revalidatePath(
-      `${BASE}/${parsed.data.projectId}/estimates/${parsed.data.estimateId}`,
-      "layout",
-    );
+    /**
+     * **NO `revalidatePath` ON A TURN.** It was here out of habit and it was
+     * expensive: `"layout"` invalidates the whole estimate subtree, and the
+     * estimate page's loader is the heaviest in the pack — the price book up
+     * to six hundred rows, the assembly library, the client links, the cost
+     * codes. X2a writes no lines, so **nothing on that page has changed**,
+     * and the turn hands the screen its own fresh view anyway. Starting and
+     * closing a walk still revalidate, because the banner is on that page.
+     */
     return out;
   } catch (err) {
     return toResult(err);

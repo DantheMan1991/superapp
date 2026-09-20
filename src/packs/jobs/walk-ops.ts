@@ -333,18 +333,38 @@ export async function recordAnswers(
   ctx: JobsCtx,
   interviewId: string,
   entries: readonly AnswerEntry[],
-  opts: { byPerson?: boolean } = {},
+  opts: { byPerson?: boolean; steps?: readonly WalkStep[] } = {},
 ): Promise<number> {
   requireWrite(ctx, "member");
   if (entries.length === 0) return 0;
 
-  const walk = await getWalk(tx, ctx.tenantId, interviewId);
-  if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
-  requireRunning(walk.interview);
+  /**
+   * `steps` is passed by a caller that already has them, because loading the
+   * whole walk again here was a third full read on every exchange. The
+   * interview row is still read: the running check is about right now.
+   */
+  const walk = opts.steps ? null : await getWalk(tx, ctx.tenantId, interviewId);
+  const interview = walk
+    ? walk.interview
+    : (
+        await tx
+          .select()
+          .from(schema.jobEstimateInterviews)
+          .where(
+            and(
+              eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+              eq(schema.jobEstimateInterviews.id, interviewId),
+            ),
+          )
+          .limit(1)
+      )[0];
+  if (!interview) throw new JobsError("NOT_FOUND", "that walk is no longer here");
+  requireRunning(interview);
+  const steps = opts.steps ?? walk?.steps ?? [];
 
   if (!opts.byPerson) {
     const mustAsk = new Set(
-      walk.steps.flatMap((s) => s.questions.filter((q) => q.alwaysAsk).map((q) => q.id)),
+      steps.flatMap((s) => s.questions.filter((q) => q.alwaysAsk).map((q) => q.id)),
     );
     for (const entry of entries) {
       if (entry.skipped && entry.questionId && mustAsk.has(entry.questionId)) {
@@ -356,7 +376,23 @@ export async function recordAnswers(
     }
   }
 
-  const already = walk.answers.length;
+  /**
+   * Where in the order these go. A count, not a whole load — and wrapped in
+   * `Number` on purpose: a `sql<number>` is a type CLAIM that nothing
+   * checks, and a string here would make `(already + i + 1) * 10` produce
+   * "01" rather than 10 and scramble the transcript's order.
+   */
+  const already = Number((
+    await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.jobEstimateInterviewAnswers)
+      .where(
+        and(
+          eq(schema.jobEstimateInterviewAnswers.tenantId, ctx.tenantId),
+          eq(schema.jobEstimateInterviewAnswers.interviewId, interviewId),
+        ),
+      )
+  )[0].n);
   const values = entries.map((entry, i) => {
     const skipped = entry.skipped === true;
     const reason = (entry.skipReason ?? "").trim();
@@ -484,6 +520,62 @@ export interface WalkView {
 }
 
 export function walkView(walk: LoadedWalk): WalkView {
+  return walkViewFrom(walk.steps, walk.outlineName, walk.interview, walk.answers);
+}
+
+/** Just the interview row. */
+export async function readInterview(
+  tx: Tx,
+  tenantId: string,
+  interviewId: string,
+): Promise<JobEstimateInterview | null> {
+  const rows = await tx
+    .select()
+    .from(schema.jobEstimateInterviews)
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export { answersOf as readAnswers };
+
+/**
+ * THE VIEW FROM ITS PARTS, so a caller that already holds the outline does
+ * not read it again.
+ *
+ * A turn used to call `getWalk` three times — five queries each, on every
+ * exchange of a forty-five minute conversation — and the outline is the
+ * expensive half of that read and the half that cannot have changed since
+ * the turn began. The founder felt the total: *"overall it seems slow."*
+ */
+export function walkViewFrom(
+  steps: readonly WalkStep[],
+  outlineName: string,
+  interview: JobEstimateInterview,
+  answerRows: readonly JobEstimateInterviewAnswer[],
+): WalkView {
+  const answers = asWalkAnswers(answerRows);
+  const derived = currentStep(steps, answers, interview.currentStepId);
+  const step =
+    derived ??
+    (interview.status === "running" ? (steps[steps.length - 1] ?? null) : null);
+  const walk: LoadedWalk = {
+    interview,
+    steps: [...steps],
+    outlineName,
+    answers: [...answerRows],
+    progress: walkProgress(steps, answers),
+    step,
+  };
+  return viewOf(walk);
+}
+
+function viewOf(walk: LoadedWalk): WalkView {
   const step = walk.step;
   const answers = asWalkAnswers(walk.answers);
   const settled = walk.answers

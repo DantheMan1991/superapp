@@ -130,6 +130,19 @@ export const jobEstimateOutlineSteps = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
     /** "Foundation", "Rough framing", "Demolition and protection". */
     title: text("title").notNull(),
+    /**
+     * THE PART OF THE BID THIS STEP BELONGS TO — the pilot's *Infrastructure*,
+     * *Structural*, *Mechanical*, *Finishes*, *General conditions*; a CSI
+     * division; whatever the business heads its price sheet with.
+     *
+     * It arrives from the cost code's `category` when an outline is read off
+     * a chart, and **it is the tenant's to change afterwards, because the two
+     * genuinely differ**: the pilot's `Siding Labor` is accounted under
+     * `04. Structural` and printed under *Labour* on the sheet it hands a
+     * client. The code says where the money goes; this says where the row is
+     * read. Blank on every outline written before this existed.
+     */
+    section: text("section").notNull().default(""),
     /** The code this stop's lines are charged to, by its DIGITS. Blank is fine. */
     costCode: text("cost_code").notNull().default(""),
     /** What to establish here, in prose, for the interviewer to read. */

@@ -34,6 +34,8 @@ export interface OutlineStepShape {
    */
   key?: string;
   title: string;
+  /** The part of the bid this step belongs to; a heading, not a code. */
+  section?: string;
   costCode?: string;
   guidance?: string;
   questions?: OutlineQuestionShape[];
@@ -163,30 +165,126 @@ export const WHO_DOES_IT: OutlineQuestionShape = {
     "Bidding it out sends the scope to the subcontractors you pick. By others means somebody else's contract pays for it, so it is an exclusion rather than a line.",
 };
 
+/* ------------------------------------------------------------------------
+ * A STARTER OUTLINE READ OFF A CHART OF COST.
+ *
+ * A business's chart is already its phases in the order it builds them, so
+ * the shortest road to a usable outline is the list it already keeps.
+ *
+ * ── ONE STEP PER CODE WAS RIGHT UNTIL A REAL CHART TURNED UP ───────────────
+ *
+ * It gave a fine outline off a 38-code starter list. The pilot's own chart is
+ * **291 codes**, because it splits every phase by the KIND of cost —
+ * `03.20 Excavation Labor`, `03.21 Excavation Trucking`, `03.40 Excavation
+ * Material`, five more. A 291-step interview is not an interview. What a
+ * person walks is the WORK ITEM, `Excavation`, once; the kinds of cost
+ * underneath it are the lines that come out the other end.
+ *
+ * ── GROUPED BY WHAT THE NAMES SHARE, NOT BY WORDS THIS FILE KNOWS ──────────
+ *
+ * **Nothing here knows what "Labor" or "Material" mean**, and it must not:
+ * those are one business's suffixes, and the next business splits by crew, or
+ * by phase of install, or not at all. Adjacent codes are grouped while their
+ * names keep sharing a leading prefix, and the prefix is the step's title.
+ *
+ * **A GROUP'S PREFIX IS SET BY ITS FIRST TWO MEMBERS AND MAY NOT SHRINK
+ * AFTERWARDS.** Without that rule `Interior Trim Labor` and `Interior Paint
+ * Labor` collapse into one step called `Interior`, which is not a thing
+ * anybody builds. With it they stay two, and `Excavation`'s eight stay one.
+ *
+ * Codes are only ever grouped with their NEIGHBOURS, so the chart's own order
+ * is what decides — which is the same order the walk then follows.
+ *
+ * ── A STARTER IS A FLOOR, NOT A CEILING ────────────────────────────────────
+ *
+ * The grouping is a guess at somebody's naming and it will occasionally join
+ * two things or split one. That is fine and always was: what comes out is an
+ * outline to prune and rewrite, not a contract. Retired codes are left out —
+ * a chart keeps them so old budgets still read, and an interview should not
+ * stop at a phase the business no longer sells.
+ * ---------------------------------------------------------------------- */
+
+/** The leading words every one of these names shares, in the first's casing. */
+export function sharedPrefix(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  const split = names.map((n) => n.trim().split(/\s+/).filter(Boolean));
+  const first = split[0] ?? [];
+  let i = 0;
+  while (
+    i < first.length &&
+    split.every((w) => (w[i] ?? "").toLowerCase() === first[i].toLowerCase())
+  ) {
+    i += 1;
+  }
+  return first.slice(0, i).join(" ");
+}
+
+export interface WorkItem {
+  /** The shared prefix — `Excavation`, `Interior Trim` — or the lone name. */
+  title: string;
+  /** The part of the bid it belongs to, from the codes' own category. */
+  section: string;
+  /** Every code that rolls up into it, in the chart's order. */
+  codes: { code: string; name: string }[];
+}
+
+export interface ChartCode {
+  code: string;
+  name: string;
+  category?: string;
+  isActive?: boolean;
+}
+
 /**
- * A STARTER OUTLINE READ OFF A COST CODE LIST.
- *
- * A business's chart of cost is already its phases, in the order it builds
- * them — the residential starter list is in build order for exactly that
- * reason — so the fastest way to a usable outline is to take the list it
- * already keeps and ask the one question above at every stop. A builder then
- * prunes the phases this kind of job never has and writes the real questions
- * into the ones it does.
- *
- * Retired codes are left out: a chart keeps them so old budgets still read,
- * and an interview should not stop at a phase the business no longer sells.
+ * The chart, folded into the things a person actually walks. Grouping never
+ * crosses a category, because two phases that happen to start with the same
+ * word in different parts of a bid are not one phase.
  */
-export function outlineFromCostCodes(
-  codes: readonly { code: string; name: string; isActive?: boolean }[],
-): OutlineStepShape[] {
-  return codes
-    .filter((c) => c.isActive !== false)
-    .map((c) => ({
-      title: c.name,
-      costCode: c.code,
-      guidance: "",
-      questions: [{ ...WHO_DOES_IT }],
-    }));
+export function workItemsFrom(codes: readonly ChartCode[]): WorkItem[] {
+  const live = codes.filter((c) => c.isActive !== false);
+  const out: WorkItem[] = [];
+  let prefix = "";
+
+  for (const c of live) {
+    const section = c.category?.trim() ?? "";
+    const last = out[out.length - 1];
+    if (last && last.section === section) {
+      const merged = sharedPrefix([...last.codes.map((x) => x.name), c.name]);
+      const keeps =
+        merged !== "" && (prefix === "" || merged.toLowerCase() === prefix.toLowerCase());
+      if (keeps) {
+        last.codes.push({ code: c.code, name: c.name });
+        prefix = merged;
+        continue;
+      }
+    }
+    out.push({ title: c.name, section, codes: [{ code: c.code, name: c.name }] });
+    prefix = "";
+  }
+
+  for (const item of out) {
+    item.title = sharedPrefix(item.codes.map((c) => c.name)) || item.codes[0].name;
+  }
+  return out;
+}
+
+/**
+ * An outline off the chart: one step per work item, carrying its section and
+ * the one question that needs no knowledge of the trade to ask.
+ *
+ * **THE STEP TAKES THE FIRST OF ITS CODES, as a starting point rather than an
+ * answer.** A work item spanning eight codes has no single one, and the lines
+ * a walk produces carry their own — the step's is what a bid request is
+ * matched on and what shows on the step card, and it is meant to be edited.
+ */
+export function outlineFromCostCodes(codes: readonly ChartCode[]): OutlineStepShape[] {
+  return workItemsFrom(codes).map((item) => ({
+    title: item.title,
+    section: item.section,
+    costCode: item.codes[0].code,
+    guidance: "",
+    questions: [{ ...WHO_DOES_IT }],
+  }));
 }
 
 /* ------------------------------------------------------------------------

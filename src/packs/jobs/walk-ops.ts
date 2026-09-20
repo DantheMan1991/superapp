@@ -80,6 +80,7 @@ async function stepsOfOutline(
     steps: loaded.steps.map((s) => ({
       id: s.id,
       title: s.title,
+      section: s.section,
       costCode: s.costCode,
       guidance: s.guidance,
       questions: s.questions.map((q) => ({
@@ -518,6 +519,8 @@ export interface WalkView {
   /** Which step the walk is standing on, so the rail can mark it. */
   stepId: string | null;
   stepTitle: string;
+  /** The part of the bid it is in, when the outline says. */
+  stepSection: string;
   stepGuidance: string;
   stepNumber: number;
   stepCount: number;
@@ -613,6 +616,7 @@ function viewOf(walk: LoadedWalk): WalkView {
     outlineName: walk.outlineName,
     stepId: step?.id ?? null,
     stepTitle: step?.title ?? "",
+    stepSection: step?.section ?? "",
     stepGuidance: step?.guidance ?? "",
     stepNumber: step ? walk.steps.findIndex((s) => s.id === step.id) + 1 : walk.steps.length,
     stepCount: walk.steps.length,

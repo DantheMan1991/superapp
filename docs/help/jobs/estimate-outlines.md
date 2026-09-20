@@ -67,11 +67,26 @@ anyone being walked through one needs to be able to.
 `Commercial fit-out`.
 
 `Start from` — and this is the one worth reading. Pick one of your cost code
-lists and you get **a step for every code, in the same order, each one already
-asking who does the work**. Your chart of cost is already the phases of your
-work in the order you build them, so this is far quicker than typing thirty
-step names. Then prune the phases this kind of job never has and write the real
-questions into the ones it does.
+lists and you get **a step for every piece of work in it, in the same order,
+each one already asking who does the work**. Your chart of cost is already the
+phases of your work in the order you build them, so this is far quicker than
+typing thirty step names. Then prune the phases this kind of job never has and
+write the real questions into the ones it does.
+
+**A step is a piece of work, not a code.** Charts often carry several codes
+for one phase — labour, material, a subcontractor, mileage. You do not want to
+be asked about each of those in turn, so codes whose names begin the same way
+are folded into one step named after what they share: `Excavation Labor`,
+`Excavation Trucking` and `Excavation Material` become one step, **Excavation**.
+A 291-code chart comes out as about seventy steps.
+
+It reads your names, so it occasionally joins two things or splits one. It
+leans towards splitting, because merging two phases into one loses the
+questions you never got asked. Fix either in a moment by renaming a step or
+deleting one.
+
+**If your codes are grouped**, that grouping comes across as each step's
+section — see below.
 
 Pick `Nothing — start empty` if your codes are not in build order, or if you
 would rather write the walk yourself.
@@ -105,11 +120,28 @@ there. The same as moving a row on an estimate.
 **The name** — what the walk says out loud. `Foundation`, `Demolition`,
 `Rough framing`.
 
+**The section** — the part of the bid this step belongs to.
+`Infrastructure`, `Structural`, `Mechanical`, `Finishes`, `Labour`, whatever
+you head your own price sheet with. It arrives filled in when the outline was
+read off a chart that groups its codes, and as you type it offers the sections
+already in use so they stay spelled the same.
+
+**It is not the same thing as the cost code's group, and it is yours to
+change.** A code can be accounted under one heading and printed under another:
+siding labour might be charged to `Structural` and shown to the client under
+`Labour`. The code says where the money goes; the section says where the row
+is read. Leave it blank and the step simply has no heading.
+
 **The cost code** — written as the digits you use, `2000` or `03 30 00`,
 matched against whichever cost code list the job is on when you walk it.
 Spacing does not matter. Leave it blank if this step's money does not belong to
 one code. A code the job's list does not have simply means no code on those
 lines, never a guess at a near one.
+
+On a step read off a chart that had several codes for the phase, **this is the
+first of them, as a starting point rather than an answer** — a step covering
+eight codes has no single one. The lines a walk produces carry their own codes;
+this one is what a bid request is matched on, and it is meant to be edited.
 
 **Beside the box, the screen tells you where that code lives.** If every one of
 your cost code lists has it, you just see what it is called — `Foundation`. If

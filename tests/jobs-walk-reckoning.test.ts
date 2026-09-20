@@ -30,6 +30,7 @@ function q(over: Partial<WalkQuestion> & { id: string }): WalkQuestion {
 function step(over: Partial<WalkStep> & { id: string }): WalkStep {
   return {
     title: "Electrical",
+    section: "",
     costCode: "5200",
     guidance: "",
     questions: [q({ id: `${over.id}-who` })],

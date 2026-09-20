@@ -108,6 +108,7 @@ interface StepDraft {
   key: string;
   id?: string;
   title: string;
+  section: string;
   costCode: string;
   guidance: string;
   questions: QuestionDraft[];
@@ -116,6 +117,7 @@ interface StepDraft {
 export interface LoadedStep {
   id: string;
   title: string;
+  section: string;
   costCode: string;
   guidance: string;
   questions: {
@@ -140,6 +142,7 @@ function draftsFrom(steps: readonly LoadedStep[]): StepDraft[] {
     key: s.id,
     id: s.id,
     title: s.title,
+    section: s.section,
     costCode: s.costCode,
     guidance: s.guidance,
     questions: s.questions.map((q) => ({
@@ -170,6 +173,7 @@ function payloadOf(name: string, notes: string, steps: readonly StepDraft[]) {
     steps: steps.map((s) => ({
       id: s.id,
       title: s.title.trim(),
+      section: s.section.trim(),
       costCode: s.costCode.trim(),
       guidance: s.guidance.trim(),
       questions: s.questions.map((q) => ({
@@ -319,6 +323,16 @@ export function OutlineEditor({
         </div>
       </Panel>
 
+      {/**
+        * The sections already in use, offered as you type. Free text still —
+        * a business adds one by writing it, and nothing here is a fixed list.
+        */}
+      <datalist id="outline-sections">
+        {[...new Set(steps.map((x) => x.section.trim()).filter(Boolean))].map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+
       {steps.map((step, index) => (
         <Panel key={step.key} className="p-5">
           <div className="flex flex-wrap items-start gap-3">
@@ -345,6 +359,24 @@ export function OutlineEditor({
               placeholder="Foundation"
               aria-label="Step name"
               maxLength={200}
+            />
+            {/**
+              * **THE SECTION IS NOT THE CODE'S CATEGORY, AND IT HAS TO BE
+              * EDITABLE FOR THAT REASON.** It arrives from the chart when an
+              * outline is read off one, and the pilot's own price sheet is
+              * why it must not be locked to it: `Siding Labor` is accounted
+              * under `04. Structural` and printed under *Labour* on the
+              * sheet the client reads.
+              */}
+            <Input
+              className="w-40"
+              value={step.section}
+              onChange={(e) => patchStep(step.key, { section: e.target.value })}
+              disabled={!canWrite}
+              placeholder="Section"
+              aria-label="Section of the bid"
+              list="outline-sections"
+              maxLength={120}
             />
             <Input
               className="w-32 font-mono text-xs"
@@ -567,6 +599,7 @@ export function OutlineEditor({
                 {
                   key: newKey(),
                   title: "",
+                  section: "",
                   costCode: "",
                   guidance: "",
                   questions: [],

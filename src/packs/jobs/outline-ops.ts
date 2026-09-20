@@ -402,6 +402,7 @@ async function writeSteps(
   for (const [index, step] of steps.entries()) {
     const values = {
       title: step.title.trim(),
+      section: (step.section ?? "").trim(),
       costCode: (step.costCode ?? "").trim(),
       guidance: (step.guidance ?? "").trim(),
       sortOrder: sortOrderAt(index),
@@ -417,6 +418,7 @@ async function writeSteps(
       /** An untouched step writes nothing, so its version still means something. */
       if (
         row.title !== values.title ||
+        row.section !== values.section ||
         row.costCode !== values.costCode ||
         row.guidance !== values.guidance ||
         row.sortOrder !== values.sortOrder
@@ -578,6 +580,7 @@ export async function duplicateOutline(
     isDefault: false,
     steps: loaded.steps.map((step) => ({
       title: step.title,
+      section: step.section,
       costCode: step.costCode,
       guidance: step.guidance,
       questions: step.questions.map((q) => ({

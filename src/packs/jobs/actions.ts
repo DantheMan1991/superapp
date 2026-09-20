@@ -2617,6 +2617,10 @@ const estimateGroupSchema = z.object({
   key: z.string().trim().max(64).optional(),
   name: z.string().trim().max(200),
   clientNote: z.string().trim().max(4000).optional(),
+  /** The heading it prints under. A label, never a code. */
+  section: z.string().trim().max(120).optional(),
+  /** Whether the client sees what is in it. Absent means yes. */
+  showLines: z.boolean().optional(),
   priceMode: z.enum(GROUP_PRICE_MODES).optional(),
   /** The price the client pays, on a group that is priced by hand. */
   fixedPriceCents: moneyToCents,
@@ -2689,6 +2693,8 @@ function estimateGroups(
         key: g.key,
         name: g.name,
         clientNote: g.clientNote,
+        section: g.section,
+        showLines: g.showLines,
         priceMode,
         fixedPriceCents: priceMode === "fixed" ? (g.fixedPriceCents ?? 0) : null,
       };

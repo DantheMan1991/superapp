@@ -93,6 +93,10 @@ export interface EstimateGroupInput {
   key?: string;
   name: string;
   clientNote?: string;
+  /** The heading it is printed under. A label, never a code. */
+  section?: string;
+  /** Whether the client sees what is in it. Absent means yes. */
+  showLines?: boolean;
   /** "rollup" — its lines sum — or "fixed" — the price is typed. */
   priceMode?: string;
   /** Required by `fixed`, refused by `rollup`. */
@@ -274,6 +278,8 @@ async function saveGroups(
     const values = {
       name: g.name.trim(),
       clientNote: g.clientNote?.trim() ?? "",
+      section: g.section?.trim() ?? "",
+      showLines: g.showLines ?? true,
       priceMode: mode,
       fixedPriceCents: mode === "fixed" ? (g.fixedPriceCents ?? null) : null,
       sortOrder: (i + 1) * 10,

@@ -64,6 +64,10 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
       id: g.id,
       name: g.name,
       clientNote: g.clientNote,
+      section: g.section,
+      /** Without this the switch would set on the estimate and do nothing
+       *  where it is meant to act — on the document the client reads. */
+      showLines: g.showLines,
       priceMode: g.priceMode,
       fixedPriceCents: g.fixedPriceCents,
     })),

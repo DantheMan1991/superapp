@@ -140,6 +140,7 @@ export async function proposeLines(
       interviewId: input.interviewId,
       stepId: input.step.id,
       stepTitle: input.step.title,
+      stepSection: input.step.section,
       description: `${input.step.title} — ${awarded.partyName}`,
       unit: "ls",
       quantityThousandths: 1_000,
@@ -203,6 +204,7 @@ export async function proposeLines(
       interviewId: input.interviewId,
       stepId: input.step.id,
       stepTitle: input.step.title,
+      stepSection: input.step.section,
       description: l.description,
       clientDescription: l.clientDescription,
       clientVisible: l.clientVisible,
@@ -257,6 +259,8 @@ export async function applyProposal(
     : [];
 
   const groupName = proposed[0].stepTitle.trim() || "From the walk";
+  /** The heading the step sat under, recorded when the line was proposed. */
+  const groupSection = proposed[0].stepSection.trim();
   const key = `walk-${input.stepId ?? "loose"}`;
 
   /**
@@ -267,14 +271,22 @@ export async function applyProposal(
   await updateEstimate(tx, ctx, input.estimateId, {
     version: loaded.estimate.version,
     groups: [
+      /**
+       * **EVERY FIELD OF AN EXISTING ITEM, NOT MOST OF THEM.** This posts
+       * the whole form, so a column left out of this map is a column reset
+       * to its default on every apply. `section` and `show_lines` were
+       * nearly lost that way the day they were added.
+       */
       ...loaded.groups.map((g) => ({
         id: g.id,
         name: g.name,
         clientNote: g.clientNote,
+        section: g.section,
+        showLines: g.showLines,
         priceMode: g.priceMode,
         fixedPriceCents: g.fixedPriceCents,
       })),
-      { key, name: groupName },
+      { key, name: groupName, section: groupSection },
     ],
     lines: [
       ...loaded.lines.map((l) => ({

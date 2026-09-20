@@ -46,6 +46,11 @@ export interface EstimateGroupFigures {
   priceMode: string;
   /** The price the client pays, on a fixed group; null on a rollup. */
   fixedPriceCents: number | null;
+  /**
+   * Whether the client sees what is in it. Absent means yes, which is what
+   * every item written before the switch existed did.
+   */
+  showLines?: boolean;
 }
 
 export interface EstimateTerms {
@@ -98,11 +103,22 @@ export function isFixedPrice(group: EstimateGroupFigures): boolean {
  * that does not add up (the proposal's takeoff, and a schedule written line by
  * line) both ask this and nothing else.
  */
+/**
+ * **THREE REASONS, AND THE SWITCH IS ONLY ONE OF THEM.** A typed price and a
+ * hidden line both collapse an item whatever the switch says, because those
+ * are the two cases where printing the build-up would show rows that do not
+ * add up to the price above them ([ADR 0080](../../docs/decisions/0080-an-estimate-line-carries-the-clients-words-beside-the-estimators-and-a-line-kept-off-the-proposal-collapses-the-item-that-holds-it.md)).
+ * `show_lines` is an extra reason to collapse, never a reason to expand.
+ */
 export function itemCollapses(
   group: EstimateGroupFigures,
   children: readonly EstimateLineFigures[],
 ): boolean {
-  return isFixedPrice(group) || children.some((l) => l.clientVisible === false);
+  return (
+    isFixedPrice(group) ||
+    group.showLines === false ||
+    children.some((l) => l.clientVisible === false)
+  );
 }
 
 /** The fixed groups by id, with the price each was given. */

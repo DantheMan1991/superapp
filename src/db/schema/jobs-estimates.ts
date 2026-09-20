@@ -177,6 +177,42 @@ export const jobEstimateGroups = pgTable(
     name: text("name").notNull(),
     /** One paragraph under the item on the proposal; the brochure's narrative, later. */
     clientNote: text("client_note").notNull().default(""),
+    /**
+     * THE PART OF THE BID THIS ITEM IS PRINTED UNDER — the pilot's
+     * *Infrastructure*, *Structural*, *Mechanical*, *Finishes*, *Labour*,
+     * *General conditions*; a CSI division; whatever a business heads its
+     * own price sheet with.
+     *
+     * Arrives from the outline step that produced the item and is the
+     * tenant's afterwards, because **it is not the cost code's category and
+     * the pilot's own sheet is why**: his `Siding Labor` is accounted under
+     * `04. Structural` and printed under *Labour*, since Turkel supplied the
+     * material and labour is what he sold. The code says where the money
+     * goes; this says where the row is read.
+     *
+     * Blank on every item written before this existed, which prints exactly
+     * as it always did.
+     */
+    section: text("section").notNull().default(""),
+    /**
+     * WHETHER THE CLIENT SEES WHAT IS IN THIS ITEM (one price, or the
+     * material and labour under it). The founder asked for both: *"there
+     * are times I want something like a group from framing and then the
+     * material, labor etc are in it. then there are times where I want to
+     * show the client the labor and material separate."*
+     *
+     * **BOTH ALREADY WORKED AND NEITHER WAS SAYABLE.** You got one price by
+     * HIDING A LINE, and the item collapsed as a side effect — a real rule
+     * ([ADR 0080](../../../docs/decisions/0080-an-estimate-line-carries-the-clients-words-beside-the-estimators-and-a-line-kept-off-the-proposal-collapses-the-item-that-holds-it.md))
+     * but not one anybody would ever find. This is the same decision said
+     * out loud.
+     *
+     * **DEFAULT TRUE, SO NOTHING ALREADY PRINTED CHANGES.** It is an extra
+     * reason to collapse, never a reason to expand: a hidden line or a typed
+     * price still collapses whatever this says, because those items would
+     * otherwise print a build-up that does not add up to the price above it.
+     */
+    showLines: boolean("show_lines").notNull().default(true),
     /** text + CHECK: rollup (the children sum) or fixed (the price is typed). */
     priceMode: text("price_mode").notNull().default("rollup"),
     /** The price the client pays, on a fixed group; null on a rollup, by CHECK. */

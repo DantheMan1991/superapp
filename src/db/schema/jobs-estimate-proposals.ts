@@ -60,6 +60,12 @@ export const jobEstimateProposedLines = pgTable(
     stepId: uuid("step_id"),
     /** Its name AS IT WAS, so a renamed step cannot rewrite the record. */
     stepTitle: text("step_title").notNull().default(""),
+    /**
+     * And the heading it sat under, for the same reason: the item this line
+     * lands in is printed under it, and re-sectioning the outline next month
+     * must not silently re-section a bid that already went out.
+     */
+    stepSection: text("step_section").notNull().default(""),
 
     description: text("description").notNull(),
     clientDescription: text("client_description").notNull().default(""),

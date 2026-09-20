@@ -1,0 +1,1 @@
+ALTER TABLE "job_cost_codes" ADD COLUMN "category" text DEFAULT '' NOT NULL;

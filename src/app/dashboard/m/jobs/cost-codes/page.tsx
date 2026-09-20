@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { ChevronLeft, ListTree } from "lucide-react";
 import { withTenant } from "@/db";
@@ -25,6 +26,7 @@ import {
   NewCodeButton,
   NewSetButton,
 } from "@/packs/jobs/components/cost-code-controls";
+import { ImportCodesButton } from "@/packs/jobs/components/cost-code-import-dialog";
 
 /**
  * The chart of cost: every list this business keeps, and the codes in each.
@@ -104,6 +106,7 @@ export default async function CostCodesPage() {
               {isOwner && (
                 <div className="flex items-center gap-1">
                   {!set.isDefault && <MakeDefaultButton setId={set.id} />}
+                  <ImportCodesButton setId={set.id} setName={set.name} />
                   <NewCodeButton setId={set.id} />
                 </div>
               )}
@@ -123,21 +126,41 @@ export default async function CostCodesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {codes.map((c) => (
-                      <TableRow key={c.id} className={c.isActive ? "" : "opacity-55"}>
-                        <TableCell className="font-mono text-xs">{c.code}</TableCell>
-                        <TableCell>
-                          {c.name}
-                          {!c.isActive && (
-                            <Badge variant="secondary" className="ml-2">
-                              Retired
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="w-10 text-right">
-                          {isOwner && <EditCodeButton code={c} />}
-                        </TableCell>
-                      </TableRow>
+                    {codes.map((c, i) => (
+                      <Fragment key={c.id}>
+                        {/**
+                          * **A CATEGORY IS A HEADING, NOT A ROW YOU CAN CHARGE
+                          * TO.** The founder's rule: *"the sub cost codes need
+                          * cost tracked to them, not just the parent."* So the
+                          * grouping is drawn here and exists nowhere in the
+                          * data as something postable — there is no
+                          * `03. Infrastructure` to budget against.
+                          */}
+                        {c.category !== "" && c.category !== (codes[i - 1]?.category ?? "") && (
+                          <TableRow className="hover:bg-transparent">
+                            <TableCell
+                              colSpan={3}
+                              className="whitespace-normal pt-5 text-xs font-medium uppercase tracking-wide text-subtle-foreground"
+                            >
+                              {c.category}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        <TableRow className={c.isActive ? "" : "opacity-55"}>
+                          <TableCell className="font-mono text-xs">{c.code}</TableCell>
+                          <TableCell className="whitespace-normal">
+                            {c.name}
+                            {!c.isActive && (
+                              <Badge variant="secondary" className="ml-2">
+                                Retired
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="w-10 text-right">
+                            {isOwner && <EditCodeButton code={c} />}
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>

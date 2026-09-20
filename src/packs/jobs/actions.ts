@@ -95,6 +95,7 @@ import {
   createContract,
   createCostCode,
   createCostCodeSet,
+  listCostCodes,
   createPayApplication,
   createProject,
   deletePayApplication,
@@ -153,6 +154,8 @@ import {
   BOND_STATUSES,
   WARRANTY_DECISIONS,
 } from "./vocabulary";
+import { parseCostCodes, planImport } from "./cost-code-import";
+import { importCostCodes } from "./cost-code-import-ops";
 
 /**
  * The jobs write surface.
@@ -4626,6 +4629,102 @@ export async function deleteAssemblyAction(input: unknown) {
     );
     revalidatePath(`${BASE}/${parsed.data.projectId}`);
     return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+
+/* ------------------------------------------------------------------------
+ * BRINGING A COST CODE LIST IN FROM A SPREADSHEET.
+ * ---------------------------------------------------------------------- */
+
+const pasteSchema = z.object({
+  setId: z.string().uuid(),
+  /**
+   * Room for a chart of a couple of thousand codes. The parser caps the ROWS
+   * as well, and says so on the ones it drops.
+   */
+  text: z.string().max(400_000),
+});
+
+/**
+ * **THE SERVER PARSES, ALWAYS — BOTH TIMES.** The preview and the write each
+ * read the pasted TEXT from scratch rather than the preview handing parsed
+ * rows to the write. A client that could post rows could post a code the
+ * parser would have refused, and a chart of cost is the last place to take
+ * somebody's word for the shape of a row.
+ */
+export async function previewCostCodeImportAction(input: unknown) {
+  const parsed = pasteSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const read = parseCostCodes(parsed.data.text);
+    const out = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const existing = await listCostCodes(tx, ctx.tenantId, parsed.data.setId);
+        const plan = planImport(read.codes, existing);
+        const mentioned = new Set(read.codes.map((c) => c.code.toLowerCase()));
+        return {
+          plan,
+          reordered:
+            read.codes.length > 0 &&
+            existing.every((e) => mentioned.has(e.code.trim().toLowerCase())),
+        };
+      },
+      { role: ctx.role },
+    );
+    return {
+      ok: true as const,
+      ...out.plan,
+      reordered: out.reordered,
+      skippedHeader: read.skippedHeader,
+      /** Enough to recognise the list, not the whole thing back again. */
+      sample: read.codes.slice(0, 8),
+      total: read.codes.length,
+      issues: read.issues.slice(0, 20),
+      issueCount: read.issues.length,
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function importCostCodesAction(input: unknown) {
+  const parsed = pasteSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again." };
+  try {
+    const ctx = await gate();
+    const read = parseCostCodes(parsed.data.text);
+    if (read.codes.length === 0) {
+      return { error: "Nothing in that paste looked like a cost code." };
+    }
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const out = await importCostCodes(tx, ctx, parsed.data.setId, read.codes);
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "jobs.cost_codes.imported",
+          targetType: "job_cost_code_set",
+          targetId: parsed.data.setId,
+          /** Counts only. The chart itself is the tenant's data, not audit. */
+          meta: {
+            added: out.adding,
+            updated: out.updating,
+            unchanged: out.unchanged,
+            reordered: out.reordered,
+          },
+        });
+        return out;
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(`${BASE}/cost-codes`);
+    return { ok: true as const, ...result, skipped: read.issues.length };
   } catch (err) {
     return toResult(err);
   }

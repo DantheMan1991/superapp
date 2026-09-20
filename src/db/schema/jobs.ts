@@ -143,6 +143,25 @@ export const jobCostCodes = pgTable(
     setId: uuid("set_id").notNull(),
     code: text("code").notNull(),
     name: text("name").notNull(),
+    /**
+     * THE LIST'S OWN GROUPING, AND IT IS A LABEL RATHER THAN A ROW.
+     *
+     * The pilot's chart runs `03. Infrastructure` over `03.20 Excavation
+     * Labor`; CSI runs a division over its sections. Either way the grouping
+     * is for READING — a job cost report that rolls up, a price sheet with
+     * headings — and the founder's rule on it was exact: *"the sub cost codes
+     * need cost tracked to them, not just the parent."*
+     *
+     * **SO THERE IS NO PARENT ROW, AND NOTHING CAN POST TO ONE.** A text
+     * label makes that structural instead of a rule somebody has to remember:
+     * there is simply no `03. Infrastructure` to budget against, commit
+     * against or code an invoice to. Compare `accounts.parent_id`, which IS a
+     * row, because a chart of accounts really does roll up through real
+     * accounts. A chart of COST does not.
+     *
+     * Blank on every code that has no grouping, which is most starter lists.
+     */
+    category: text("category").notNull().default(""),
     sortOrder: integer("sort_order").notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
     notes: text("notes").notNull().default(""),

@@ -120,6 +120,64 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — A chart of cost comes in from a spreadsheet (`claude/cost-code-import`)
+
+The founder sent the pilot's real chart: **291 codes, seven parents, 75 work
+items** — `03. Infrastructure` over `03.20 Excavation Labor`, with Labor,
+Material, Mileage and Subcontractor under 48 of the 75. Cost codes were
+created one at a time and the table was flat, so there was no way to get it
+in and nowhere for the grouping to live. **Nothing else about the price sheet
+is real until that is fixed**, so this is first.
+
+**A CATEGORY IS A LABEL, NOT A ROW, AND THAT IS THE FOUNDER'S RULE MADE
+STRUCTURAL.** His words: *"the sub cost codes need cost tracked to them, not
+just the parent."* A `category` text column means there is simply no
+`03. Infrastructure` in the database to budget against, commit against or
+code an invoice to — the constraint cannot be forgotten because there is
+nothing to forget. Compare `accounts.parent_id`, which IS a row, because a
+chart of accounts really does roll up through real accounts. A chart of cost
+does not.
+
+**DETERMINISTIC, NOT A MODEL.** The platform has an AI paste extractor for
+the messy case; a chart of cost is the wrong place for it. A model that
+misreads `03.100` as `03.10` produces a chart that looks right and posts
+money to the wrong phase for a year. Parsing can fail loudly; a model fails
+plausibly.
+
+**THE FIRST MATCH IS THE WRONG CODE**, and the tests caught it before the
+founder did. His parent column reads `03. Infrastructure`, which is ITSELF
+code-shaped, so a left-to-right scan took `03` off every row and called all
+291 duplicates of each other. **The leaf wins, and a leaf's code is longer
+than its parent's** — true of his numbering and of CSI, because a child
+extends its parent.
+
+**251 OF HIS 291 CODES SORT WRONG AS TEXT.** `03.100` is less than `03.20` to
+a computer. `listCostCodes` orders by `sort_order` first, so carrying the
+paste's row order across is the only thing holding his chart in the shape he
+wrote it in. There is a test on exactly that sequence.
+
+**ONE STATEMENT, NOT 291.** Each code is two writes — the code, and the cost
+object Accounting charges against it. A row at a time is ~600 round trips
+inside one transaction, which on Neon is a timeout rather than a wait. Both
+halves are a single upsert; `upsertDimensionMembers` is the new bulk twin of
+the singular, added beside it in `accounting/core/dimensions.ts`.
+
+**NOTHING IS DELETED AND NOTHING IS SWITCHED OFF.** A code the paste does not
+mention may have a year of costs posted against it. `is_active` and `notes`
+are untouched by a re-import, so a retired code stays retired and a note
+survives. The preview says how many rows that is.
+
+### Driven
+
+The founder's actual workbook, all 291 rows, through the real write path on
+dev: **679ms**, order identical to the paste including the `03.95 → 03.100`
+rollover, 7 categories, 291 cost objects, `Service` dropped as a uniform
+column. Re-importing the same list read `0 added, 0 changed, 291 unchanged`.
+A one-row partial paste added one, touched nothing and did not re-order.
+Then in the browser: the preview named both bad lines by number (`no code and
+name on this line`, `the same code as line 10`), the import toast read
+`9 added, 0 changed, 2 skipped`, and the page drew the codes under their
+category headings in the pasted order.
 ### 2026-09-20 — A zero with a reason is a decision (`claude/zero-with-a-reason`, [ADR 0099](../decisions/0099-a-walk-is-finished-when-nothing-is-outstanding-not-when-the-questions-run-out.md))
 
 X4 shipped a rule that a line at zero is not a price. **The founder's own
@@ -5207,6 +5265,7 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | --- | --- | --- |
 | `job_cost_code_sets` | A named list of cost codes. One or several per tenant. | FORCE RLS, member-wide. `job_cost_code_sets_one_default_idx` is a PARTIAL unique index, so **two defaults fail at the database** rather than depending on the action having cleared the first. |
 | `job_cost_codes` | One line of the chart of cost. | Composite FK to `(tenant_id, set_id)`, **cascade** — deleting a list deletes its codes. `code` is free text, never a number: CSI writes `03 30 00`, NAHB writes `1000`, a builder writes `CONC-SLAB`. `sort_order` is what orders the list, so a code never has to be sortable to be right. |
+| `job_cost_codes.category` | **The list's own grouping** — the pilot's `03. Infrastructure`, a CSI division. A LABEL, never a row: there is nothing to post to, which is how *"the sub cost codes need cost tracked to them, not just the parent"* is kept without a rule anybody has to remember. Blank on most starter lists. |
 | `job_contracts` | **Many per project.** Kind, value, billing method, counterparty, role, status, a `sequence` that keeps the ladder in agreed order — and, since slice 5b, the cost-plus terms `fee_ppm` / `fee_cents` / `gmax_cents`, nullable, read only when the method is cost plus a fee; since 5d, `labor_rate_cents` — one rate for every hour on a time-and-materials contract, null for each person's rate from Time, locked once an application has issued. | Composite FK to the project, **cascade** — a project's agreements are part of it, proved in the isolation suite rather than assumed, because a dangling contract would still be summed by `projectValues`. `kind` is an open taxonomy (format check only); `role`, `status` and `billing_method` are CHECK lists. **No `direction` column** — see the build log. |
 | `job_budget_lines` | What each cost code was PLANNED to cost. | One line per code per project, enforced by a unique index rather than by the action remembering — two would make every variance ambiguous. `cost_code_id` is NOT NULL, unlike a commitment line's: a budget without a code is a single number for the whole job, which is what this table exists to stop being the answer. `original_cents` is the ORIGINAL; revised is original plus approved change-order lines, computed by `jobCostRows` and never stored. RESTRICT to the code, so a budgeted code is retired and never deleted. |
 | `job_change_orders` | A change to ONE contract: its price to the client (`value_cents`), its status, and when it was approved. | Composite FK to the CONTRACT, **cascade** — never to the project, which is reachable through the contract and deliberately not duplicated. Number unique per `(tenant, contract)`. `value_cents` **may be negative** — the one money column in the pack without a floor; a deduction is a negative number, not a credit concept. `job_change_orders_approved_has_date` makes `(status = 'approved') = (approved_on is not null)` a database fact, both ways. |

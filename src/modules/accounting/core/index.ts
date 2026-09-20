@@ -95,6 +95,7 @@ export {
   listDimensionMembers,
   loadDimensionMembers,
   upsertDimensionMember,
+  upsertDimensionMembers,
 } from "./dimensions";
 export { getLedgerIntegrity, type LedgerIntegrity } from "./integrity";
 export {

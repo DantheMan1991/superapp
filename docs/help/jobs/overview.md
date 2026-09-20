@@ -1581,8 +1581,44 @@ You can also renumber a code in place, which is what moving from your own scheme
 - {button:New list|primary} — give it a name. **The first list you add becomes the default**, so jobs use it without being asked.
 - {button:Make default|ghost} — on any list that is not already the default. Only one list can be the default at a time; making a new one takes it off the old one for you.
 - {button:Add code|outline} — a `Code` and a `Name`. The code is free text, so `03 30 00`, `1000` and `CONC-SLAB` are all fine. Two codes cannot share a code in one list; you see `That code is already in this list.` if they would.
+- {button:Paste a list|outline} — bring a whole chart in from a spreadsheet. See below.
 
 New codes are added to the end of the list, not the top, so a list you arranged stays arranged.
+
+### Pasting a list in from a spreadsheet
+
+Nobody types three hundred codes. Copy the columns out of Excel or Sheets and
+paste them into {button:Paste a list|outline}.
+
+**It shows you what it will do before it does any of it.** Press
+{button:See what this does|primary} and you get how many are new, how many
+change, how many are already the same, and **every line it could not read,
+with its line number**. Only then does the button become
+{button:Bring in N codes|primary}.
+
+What it reads:
+
+- **One code per line**, in whatever shape your sheet uses — `03.20 - Excavation Labor`, `1000 Permits`, or a code in one column and its name in the next.
+- **A code must start with a number.** A line that does not carry one is skipped and named.
+- **A grouping column to the left of the code becomes its category** — your `03. Infrastructure`, a CSI division, whatever you call it. Codes are then shown under that heading on this page.
+- **A column that reads the same on every row is ignored.** Exports often carry one (`Service` on every line); it is not a category anybody chose.
+- **A header row at the top is skipped**, and the preview says so.
+
+Three things it will not do:
+
+- **It never deletes or retires anything.** A code already in the list that your paste does not mention is left exactly as it is — it may have a year of costs against it. The preview tells you how many those are.
+- **It keeps your order exactly as pasted.** This matters more than it sounds: a list numbered `03.95, 03.100, 03.105` is in the right order to you and the wrong order to a computer, which would put `03.100` next to `03.10`. Your order is what is kept.
+- **It only re-orders the whole list when your paste covers all of it.** Paste three new codes into a list of three hundred and they go on the end; paste the whole chart and it sets the order.
+
+Pasting the same list twice is safe — the second time reads `0 new, 0 changed`
+and the preview says so.
+
+### A category is a heading, not something you charge to
+
+Your grouping is for **reading** — the headings on this page, and rolling a
+job cost report up. **There is no `03. Infrastructure` to budget against,
+commit against or code an invoice to.** Cost is tracked against the codes
+themselves, every one of them, which is the level your chart actually names.
 
 ## What this does not do yet
 

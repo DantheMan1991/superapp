@@ -26,6 +26,11 @@ On any estimate that is not yet accepted you will see a panel above the lines:
 *Walk it instead of typing it*. Pick which outline to use and press
 {button:Start the walk|primary}. It asks its first question straight away.
 
+**If the panel says there is no outline to walk yet**, that is all that is
+missing. {button:Set one up|outline} takes you to
+[Estimate outlines](estimate-outlines.md), where starting one from a cost code
+list gives you a step per phase in a couple of clicks.
+
 If you leave and come back, that panel says **A walk is part way through** and
 how far you got. {button:Pick it up|primary} carries on exactly where you were,
 down to the question you were on — nothing is lost by closing the laptop.

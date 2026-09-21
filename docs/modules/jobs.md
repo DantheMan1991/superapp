@@ -126,6 +126,80 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — Don't ask what never varies (`claude/dont-ask-what-never-varies`, X13, [ADR 0105](../decisions/0105-a-question-can-carry-the-answer-this-business-always-gives-and-the-walk-states-them-all-before-it-takes-any.md))
+
+> *"i'd say 80/20 standard vs custom."*
+
+and, with a screenshot of the walk asking it for the ninth time:
+
+> *"I'm getting questions like this one: who is doing this one. it doesn't
+> give any context."*
+
+Thirty-three phases asking who is doing each one is thirty-three questions
+with a single answer, against a target of a bid in forty-five minutes.
+
+**Migration `0416`:** `standard_answer` on
+`job_estimate_outline_questions`, `from_standard` on
+`job_estimate_interview_answers`, and `usual_asked_at` + `usual_accepted` on
+`job_estimate_interviews`.
+
+### Per QUESTION, which is the whole safety of it
+
+The same prompt on the roofing step stays blank, so the walk still asks the
+phases that really are decided job by job. **The difference between skipping
+what never varies and assuming what does is exactly which boxes a business
+chose to fill**, which is why this is not a business-wide default.
+
+`always_ask` refuses a standard at both ends — `writeSteps` will not store one
+and `standardsIn` will not read one — because *"is there asbestos?"* is the
+reason that flag exists and a default answer is the quiet judgement it was
+written to refuse.
+
+### Stated before anything is taken
+
+Before the first phase: *"here is what I will take as read — 3 questions
+across 3 phases"*, with **That's right** and **Ask me everything**. Grouped by
+what they SAY (`- Who is doing this one? In-house — every phase`), because
+thirty-three identical lines is a rubber stamp and a rubber stamp is worse
+than no confirmation at all.
+
+Each standard is then settled **as its phase opens**, and only while still
+outstanding — so a phase somebody has been through is not re-answered
+underneath them, and `Ask again` gets the standard back, which is where the
+walk was before. Everything settled that way carries `from_standard` and reads
+*your usual* on the screen and in the reckoning.
+
+### Three states, two columns
+
+`usual_asked_at` (null = not stated) and `usual_accepted` (null = on screen,
+true = agreed, false = ask me everything). **A `false` has to be as durable as
+a `true`**, or a walk that asked to be asked everything meets the same offer
+on its next turn.
+
+### THE BUG DRIVING FOUND: three ways out of measuring, one gate
+
+`startMeasuring` when there is nothing to measure, `afterMeasuring` when the
+last number lands, and **the rooms answer — which is the way every walk with a
+measuring outline actually leaves.** The first two had the gate; `answerRooms`
+has its own `finishMeasuring` and went straight to the opening turn.
+
+It read `usual_asked: false` on a walk that had finished measuring, so
+**nothing would ever have been taken as read on any real walk** — the feature
+would have shipped inert, with every test passing. The same shape as X7's
+measurements reaching one prompt and not the other.
+
+Two smaller things the same drive found: the walk's own line breaks were being
+collapsed (nothing had ever put a LIST on that screen, so every `say` was one
+line), and `WalkAnswer` had to carry `from_standard` as well as the view, or
+the reckoning — the place somebody checks what is going out — would have shown
+an assumed answer as if somebody had typed it.
+
+### The walk that was already running
+
+A walk past measuring when this shipped never sees the gate and takes no
+standards. Deliberate: the alternative is a walk in progress suddenly
+answering its own questions.
+
 ### 2026-09-21 — The allowance (`claude/the-allowance`, X12, [ADR 0104](../decisions/0104-an-item-can-be-an-allowance-and-accepting-the-estimate-makes-it-a-selection-at-the-price-the-client-signed-for.md))
 
 > *"one more thing, we ususaly have some items listed as an allowance. things

@@ -24,6 +24,8 @@ export interface OutlineQuestionShape {
   notes?: string;
   /** The interview may never decide this one is irrelevant (ADR 0098). */
   alwaysAsk?: boolean;
+  /** The answer this business gives every time (X13); blank means ask. */
+  standardAnswer?: string;
 }
 
 export interface OutlineStepShape {

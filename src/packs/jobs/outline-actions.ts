@@ -83,6 +83,8 @@ const questionSchema = z.object({
   unit: z.string().trim().max(24).optional(),
   notes: z.string().trim().max(2000).optional(),
   alwaysAsk: z.boolean().optional(),
+  /** The answer this business gives every time (X13); blank means ask. */
+  standardAnswer: z.string().trim().max(500).optional(),
 });
 
 const stepSchema = z.object({

@@ -147,6 +147,28 @@ export const jobEstimateInterviews = pgTable(
      * which. `measured_at` is stamped for the same reason.
      */
     roomsAskedAt: timestamp("rooms_asked_at", { withTimezone: true }),
+    /**
+     * WHEN THE WALK STATED THE USUAL (X13) — the third of the three things
+     * that happen before the first phase: measure the building, list the
+     * rooms, agree the usual.
+     *
+     * Its own column for the reason `rooms_asked_at` has one: *"asked and
+     * waiting"* and *"not asked yet"* are otherwise the same nulls, and the
+     * walk would either state the standards twice or never.
+     */
+    usualAskedAt: timestamp("usual_asked_at", { withTimezone: true }),
+    /**
+     * AND WHAT THEY SAID: null while the question is on the screen, true
+     * when the standards were agreed, false when somebody asked to be asked
+     * everything.
+     *
+     * **NOTHING IS SETTLED FROM A STANDARD UNLESS THIS IS TRUE.** That is
+     * the whole safety of the slice — a default answer nobody has read is an
+     * answer nobody gave — and a `false` has to be as durable as a `true`,
+     * or a walk that asked to be asked everything would be met with the same
+     * offer on its next turn.
+     */
+    usualAccepted: boolean("usual_accepted"),
     startedByClerkUserId: text("started_by_clerk_user_id"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /**
@@ -244,6 +266,17 @@ export const jobEstimateInterviewAnswers = pgTable(
     skipped: boolean("skipped").notNull().default(false),
     /** Why, in the walk's own words. Blank unless skipped. */
     skipReason: text("skip_reason").notNull().default(""),
+    /**
+     * THIS ANSWER CAME FROM THE OUTLINE'S STANDARD, NOT FROM A PERSON (X13).
+     *
+     * A walk that skips what never varies has to be able to SAY which
+     * answers it took that way — on the screen, in the transcript and in the
+     * reckoning — because the whole layer's rule is that anything derived
+     * carries a basis you can see. The person agreed to the standards
+     * wholesale before the first phase; this is which of them that agreement
+     * actually produced.
+     */
+    fromStandard: boolean("from_standard").notNull().default(false),
     /** The order they were asked in, which is the order they read back. */
     sortOrder: integer("sort_order").notNull().default(0),
     /**

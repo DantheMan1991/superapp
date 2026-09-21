@@ -20,6 +20,7 @@ import {
 } from "./walk-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { phaseOnScreen, type PendingPrice } from "./walk-price-math";
+import { standardsOutstanding } from "./usual-math";
 import { asDeclared, asTaken, listMeasurements, listOutlineMeasures } from "./measure-ops";
 import { formatMeasurement, measureSlug } from "./measure-math";
 import { asRoomViews, listRooms, type RoomRow, type RoomView } from "./room-ops";
@@ -88,6 +89,7 @@ export function asWalkAnswers(rows: readonly JobEstimateInterviewAnswer[]): Walk
     skipped: a.skipped,
     skipReason: a.skipReason,
     superseded: a.supersededAt !== null,
+    fromStandard: a.fromStandard,
   }));
 }
 
@@ -116,6 +118,7 @@ async function stepsOfOutline(
         unit: q.unit,
         notes: q.notes,
         alwaysAsk: q.alwaysAsk,
+        standardAnswer: q.standardAnswer,
       })),
     })),
   };
@@ -483,6 +486,8 @@ export interface AnswerEntry {
   answer?: string;
   skipped?: boolean;
   skipReason?: string;
+  /** This came from the outline's standard, not from a person (X13). */
+  fromStandard?: boolean;
 }
 
 /**
@@ -494,6 +499,119 @@ export interface AnswerEntry {
  * one — this guards against judgement, not against a decision somebody makes
  * with their eyes open — and `byPerson` is how the caller says which it is.
  */
+
+/* ------------------------------------------------------------------------
+ * WHAT NEVER VARIES, SETTLED (X13).
+ *
+ * The founder: *"i'd say 80/20 standard vs custom"*, and his complaint about
+ * the 80 — *"I'm getting questions like this one: who is doing this one."*
+ *
+ * A question the outline answers for itself is settled the moment its phase
+ * opens, so the conversation spends its time on the 20 that is actually a
+ * decision. Three things make that safe rather than presumptuous, and all
+ * three are load-bearing:
+ *
+ *   1. **Nothing is settled until the person has seen the standards.**
+ *      `usual_confirmed_at` is the gate, and it is stamped by a turn that
+ *      states every one of them and waits to be told it is right.
+ *   2. **A must-ask question never has one** — refused at the write, refused
+ *      again when they are read.
+ *   3. **Every answer says where it came from.** `from_standard` on the row,
+ *      *"your usual"* on the screen, and `askAgain` re-opens any of them
+ *      exactly as it re-opens one somebody typed.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Put the standards on the screen and stamp that they were put there.
+ *
+ * One call rather than two, because *"asked"* and *"the question is showing"*
+ * coming apart is how the rooms question got asked twice before X8 made it
+ * one act. The stamp goes on when the question is PUT, never when it is
+ * answered.
+ */
+export async function askTheUsual(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  turn: { say: string; questionId: string | null; quickReplies: string[] },
+): Promise<void> {
+  requireWrite(ctx, "member");
+  await savePendingTurn(tx, ctx, interviewId, turn);
+  await tx
+    .update(schema.jobEstimateInterviews)
+    .set({ usualAskedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    );
+}
+
+/**
+ * Record what they said to it — and stamp `asked` too, because the outline
+ * with no standards in it is answered without ever having been asked.
+ */
+export async function recordUsual(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  accepted: boolean,
+): Promise<void> {
+  requireWrite(ctx, "member");
+  await tx
+    .update(schema.jobEstimateInterviews)
+    .set({ usualAskedAt: new Date(), usualAccepted: accepted, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    );
+}
+
+/**
+ * Answer this phase's standard questions, and say how many.
+ *
+ * Idempotent by construction: it reads what is still OUTSTANDING, so a second
+ * call settles nothing, and a question somebody re-opened with `askAgain` is
+ * outstanding again and gets its standard back — which is the right answer,
+ * because re-opening it puts the walk back where it was before.
+ */
+export async function settleStandards(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  step: WalkStep,
+  answers: readonly WalkAnswer[],
+  accepted: boolean | null,
+): Promise<number> {
+  if (accepted !== true) return 0;
+  const standards = standardsOutstanding(step, answers);
+  if (standards.length === 0) return 0;
+  return recordAnswers(
+    tx,
+    ctx,
+    interviewId,
+    standards.map((s) => ({
+      questionId: s.questionId,
+      stepId: s.stepId,
+      stepTitle: s.stepTitle,
+      prompt: s.prompt,
+      answer: s.answer,
+      fromStandard: true,
+    })),
+    /**
+     * **BY PERSON, because a person agreed to every one of these by name**
+     * before the first phase opened. Nothing turns on it today — the
+     * must-ask guard only refuses a SKIP, and a standard is never a skip —
+     * but the flag means *"this is not the walk's own judgement"*, and that
+     * is exactly what a standard is not.
+     */
+    { byPerson: true, steps: [step] },
+  );
+}
+
 export async function recordAnswers(
   tx: Tx,
   ctx: JobsCtx,
@@ -575,6 +693,7 @@ export async function recordAnswers(
       answer: skipped ? "" : (entry.answer ?? "").trim(),
       skipped,
       skipReason: skipped ? reason : "",
+      fromStandard: entry.fromStandard === true,
       sortOrder: (already + i + 1) * 10,
     };
   });
@@ -711,6 +830,8 @@ export interface WalkView {
     skipped: boolean;
     skipReason: string;
     volunteered: boolean;
+    /** Taken from the outline's standard rather than given by a person (X13). */
+    fromStandard: boolean;
   }[];
   /** What this step still needs, so a person can see what is coming. */
   outstanding: { id: string; prompt: string; alwaysAsk: boolean }[];
@@ -878,6 +999,13 @@ function viewOf(walk: LoadedWalk): WalkView {
       skipReason: a.skipReason,
       /** Asked by the walk rather than read off the outline. */
       volunteered: a.questionId === null,
+      /**
+       * **NEVER SILENT.** A standard is agreed wholesale before the first
+       * phase; this is what says which answers that agreement produced, so
+       * an assumption can be seen and re-opened rather than discovered in a
+       * bid.
+       */
+      fromStandard: a.fromStandard,
     }));
   return {
     interviewId: walk.interview.id,

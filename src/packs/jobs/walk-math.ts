@@ -21,6 +21,11 @@ export interface WalkQuestion {
   notes: string;
   /** The walk may never decide this one does not apply. */
   alwaysAsk: boolean;
+  /**
+   * The answer this business gives every time (X13); blank means ask. Never
+   * set on a must-ask question, which `writeSteps` refuses at the write.
+   */
+  standardAnswer: string;
 }
 
 export interface WalkStep {
@@ -54,6 +59,14 @@ export interface WalkAnswer {
    * "a person is revisiting", just a row that stopped counting.
    */
   superseded: boolean;
+  /**
+   * Taken from the outline's standard rather than given by a person (X13).
+   *
+   * On `WalkAnswer` rather than only on the view, because **the reckoning is
+   * where somebody checks what is going out** — and an answer nobody typed
+   * is exactly the one they need to see there.
+   */
+  fromStandard: boolean;
 }
 
 /** The answers that still stand, newest last. */

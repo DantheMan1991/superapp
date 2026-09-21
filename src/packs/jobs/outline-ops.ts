@@ -453,6 +453,17 @@ async function writeSteps(
         unit: (question.unit ?? "").trim(),
         notes: (question.notes ?? "").trim(),
         alwaysAsk: question.alwaysAsk === true,
+        /**
+         * **A MUST-ASK QUESTION CANNOT CARRY A STANDARD** (X13). The flag
+         * exists so the walk may never decide a question is moot, and a
+         * default answer is exactly that judgement wearing another hat.
+         * Refused here rather than in the editor so no writer can get round
+         * it, and silently rather than with an error because the two
+         * settings are edited side by side and the rule is written beside
+         * them.
+         */
+        standardAnswer:
+          question.alwaysAsk === true ? "" : (question.standardAnswer ?? "").trim(),
         sortOrder: sortOrderAt(qIndex),
       };
       if (question.id) {
@@ -470,6 +481,7 @@ async function writeSteps(
           row.unit !== values.unit ||
           row.notes !== values.notes ||
           row.alwaysAsk !== values.alwaysAsk ||
+          row.standardAnswer !== values.standardAnswer ||
           row.sortOrder !== values.sortOrder ||
           !sameChoices
         ) {

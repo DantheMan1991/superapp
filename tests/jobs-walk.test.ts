@@ -34,6 +34,7 @@ function q(over: Partial<WalkQuestion> = {}): WalkQuestion {
     unit: "",
     notes: "",
     alwaysAsk: false,
+    standardAnswer: "",
     ...over,
   };
 }
@@ -59,6 +60,7 @@ function answer(over: Partial<WalkAnswer> = {}): WalkAnswer {
     answer: "Poured",
     skipped: false,
     superseded: false,
+    fromStandard: false,
     skipReason: "",
     ...over,
   };

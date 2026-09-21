@@ -263,6 +263,34 @@ export const jobEstimateOutlineQuestions = pgTable(
      * before the bid goes out instead, which is where it is useful.
      */
     alwaysAsk: boolean("always_ask").notNull().default(false),
+    /**
+     * **THE ANSWER THIS BUSINESS GIVES EVERY TIME** (X13), or blank when it
+     * genuinely varies.
+     *
+     * The founder, on the shape of his work: *"i'd say 80/20 standard vs
+     * custom"*, and on what the walk felt like: *"I'm getting questions like
+     * this one: who is doing this one."* Thirty-three phases each asking who
+     * is doing it is thirty-three questions with one answer, and the target
+     * is a bid in forty-five minutes.
+     *
+     * **BLANK IS THE DEFAULT AND MEANS ASK.** Filling it in is a statement —
+     * *we never sub framing* — and it is made per QUESTION, which is what
+     * makes it safe: the same prompt on the roofing step stays blank, so the
+     * walk still asks the phases that really are decided job by job. That is
+     * the difference between skipping what never varies and assuming what
+     * does.
+     *
+     * A standard is never taken silently. The walk states every one of them
+     * before the first phase and waits to be told it is right; an answer it
+     * then settles says on the record that it came from here, and a person
+     * can re-open any of them.
+     *
+     * **`always_ask` WINS.** A question the outline says may never be judged
+     * irrelevant is never settled from a standard either — *"is there
+     * asbestos?"* is the reason that flag exists, and a default answer is
+     * exactly the quiet judgement it refuses.
+     */
+    standardAnswer: text("standard_answer").notNull().default(""),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

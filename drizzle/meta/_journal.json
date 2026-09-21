@@ -2913,6 +2913,13 @@
       "when": 1789991976156,
       "tag": "0415_absurd_jubilee",
       "breakpoints": true
+    },
+    {
+      "idx": 416,
+      "version": "7",
+      "when": 1789996142611,
+      "tag": "0416_bitter_mongu",
+      "breakpoints": true
     }
   ]
 }

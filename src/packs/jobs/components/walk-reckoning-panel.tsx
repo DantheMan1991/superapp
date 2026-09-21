@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Check, CornerUpLeft, RotateCcw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/app/panel";
 import { formatMoney } from "@/lib/money";
@@ -173,7 +174,14 @@ export function StepCard({
               className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b py-2.5 last:border-b-0"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted-foreground">{a.prompt}</p>
+                <p className="text-xs text-muted-foreground">
+                  {a.prompt}
+                  {a.fromStandard && (
+                    <Badge variant="secondary" className="ml-2 text-[10px]">
+                      your usual
+                    </Badge>
+                  )}
+                </p>
                 {a.skipped ? (
                   <p className="mt-0.5 text-sm italic text-muted-foreground">
                     Passed — {a.skipReason}

@@ -102,6 +102,8 @@ interface QuestionDraft {
   unit: string;
   notes: string;
   alwaysAsk: boolean;
+  /** The answer this business gives every time (X13); blank means ask. */
+  standardAnswer: string;
 }
 
 interface StepDraft {
@@ -142,6 +144,7 @@ export interface LoadedStep {
     unit: string;
     notes: string;
     alwaysAsk: boolean;
+    standardAnswer: string;
   }[];
 }
 
@@ -169,6 +172,7 @@ function draftsFrom(steps: readonly LoadedStep[]): StepDraft[] {
       unit: q.unit,
       notes: q.notes,
       alwaysAsk: q.alwaysAsk,
+      standardAnswer: q.standardAnswer,
     })),
   }));
 }
@@ -201,6 +205,8 @@ function payloadOf(name: string, notes: string, steps: readonly StepDraft[]) {
         unit: q.kind === "number" ? q.unit.trim() : "",
         notes: q.notes.trim(),
         alwaysAsk: q.alwaysAsk,
+        /** A must-ask question never carries one — the ops refuse it too. */
+        standardAnswer: q.alwaysAsk ? "" : q.standardAnswer.trim(),
       })),
     })),
   };
@@ -608,6 +614,39 @@ export function OutlineEditor({
                   aria-label="Notes for the interviewer"
                   maxLength={2000}
                 />
+                {/**
+                  * **THE ANSWER YOU GIVE EVERY TIME** (X13). The founder:
+                  * *"i'd say 80/20 standard vs custom"*, and the walk was
+                  * asking all of it — *"I'm getting questions like this one:
+                  * who is doing this one."*
+                  *
+                  * Hidden on a must-ask question rather than disabled,
+                  * because the two settings contradict each other and a
+                  * greyed box invites the question of why.
+                  */}
+                {!question.alwaysAsk && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="shrink-0 text-xs text-muted-foreground">Usually</span>
+                    <Input
+                      className="h-8 min-w-48 flex-1 text-xs"
+                      value={question.standardAnswer}
+                      onChange={(e) =>
+                        patchQuestion(step.key, question.key, {
+                          standardAnswer: e.target.value,
+                        })
+                      }
+                      disabled={!canWrite}
+                      placeholder="Leave blank to ask it every time"
+                      aria-label="The answer this business gives every time"
+                      maxLength={500}
+                    />
+                    {question.standardAnswer.trim() !== "" && (
+                      <span className="text-xs text-muted-foreground">
+                        stated up front, then taken as read
+                      </span>
+                    )}
+                  </div>
+                )}
                 <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
                   <Checkbox
                     className="mt-0.5"
@@ -645,6 +684,7 @@ export function OutlineEditor({
                         unit: "",
                         notes: "",
                         alwaysAsk: false,
+                        standardAnswer: "",
                       },
                     ],
                   })

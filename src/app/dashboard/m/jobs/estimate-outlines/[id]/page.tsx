@@ -156,6 +156,7 @@ export default async function EstimateOutlinePage({
             unit: q.unit,
             notes: q.notes,
             alwaysAsk: q.alwaysAsk,
+            standardAnswer: q.standardAnswer,
           })),
         }))}
       />

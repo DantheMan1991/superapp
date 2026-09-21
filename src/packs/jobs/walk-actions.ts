@@ -27,6 +27,9 @@ import {
   readInterview,
   readPendingPrice,
   recordAnswers,
+  askTheUsual,
+  recordUsual,
+  settleStandards,
   savePendingTurn,
   startWalk,
   walkView,
@@ -58,6 +61,13 @@ import {
   setMeasureAsk,
 } from "./walk-measure-ops";
 import { currentStep, live, onwardStep, type WalkAnswer, type WalkStep } from "./walk-math";
+import {
+  groupStandards,
+  refusesTheUsual,
+  standardsIn,
+  usualLines,
+  usualSize,
+} from "./usual-math";
 import { PACK } from "./vocabulary";
 
 /**
@@ -279,8 +289,31 @@ async function oneTurn(
               columns: { name: true, number: true },
             })
           : null;
+        /**
+         * **WHAT NEVER VARIES IS SETTLED AS THE PHASE OPENS** (X13), inside
+         * the same transaction that read the walk, so the turn that follows
+         * sees the phase as it now stands rather than asking a question that
+         * is already answered.
+         *
+         * Idempotent — it reads what is still OUTSTANDING — so this costs a
+         * re-read only on the turn that actually settles something, and
+         * nothing at all on an outline with no standards or a walk whose
+         * person asked to be asked everything.
+         */
+        const settled = walk.step
+          ? await settleStandards(
+              tx,
+              ctx,
+              interviewId,
+              walk.step,
+              asWalkAnswers(walk.answers),
+              walk.interview.usualAccepted,
+            )
+          : 0;
+        const after = settled > 0 ? await getWalk(tx, ctx.tenantId, interviewId) : walk;
+
         return {
-          walk,
+          walk: after ?? walk,
           labels: pack.labels,
           estimateNumber: estimate?.number ?? "",
           jobName: project ? `${project.number} ${project.name}` : "",
@@ -622,7 +655,8 @@ async function startMeasuring(ctx: WalkCtx, interviewId: string): Promise<boolea
   await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
     role: ctx.role,
   });
-  return false;
+  /** **AND THEN THE USUAL** (X13) — the last gate before the first phase. */
+  return askForTheUsual(ctx, interviewId);
 }
 
 /** The fresh view, read once, for the several places below that end with one. */
@@ -663,6 +697,141 @@ async function askForRooms(ctx: WalkCtx, interviewId: string): Promise<boolean> 
   return true;
 }
 
+
+/* ------------------------------------------------------------------------
+ * AGREE THE USUAL, ONCE (X13).
+ *
+ * The third of the three things that happen before the first phase: measure
+ * the building, list the rooms, agree the usual.
+ *
+ * The founder, on the shape of his work: *"i'd say 80/20 standard vs
+ * custom"*; and on the 80, with a screenshot of the walk asking it for the
+ * ninth time: *"I'm getting questions like this one: who is doing this one.
+ * it doesn't give any context."*
+ *
+ * **NOTHING IS ASSUMED UNTIL IT HAS BEEN READ.** The standards go on the
+ * screen grouped by what they SAY — *"Who is doing this one? In-house —
+ * every phase"* — because thirty-three separate lines is a rubber stamp
+ * rather than a check. Only when somebody agrees are they settled, phase by
+ * phase, each marked as having come from the outline rather than from them.
+ * ---------------------------------------------------------------------- */
+
+/** Where this walk's standards stand, and what they say. */
+async function usualContext(ctx: WalkCtx, interviewId: string) {
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      if (!walk) return null;
+      const standards = standardsIn(walk.steps);
+      return {
+        askedAt: walk.interview.usualAskedAt,
+        accepted: walk.interview.usualAccepted,
+        measuredAt: walk.interview.measuredAt,
+        standards,
+        lines: usualLines(groupStandards(standards), walk.steps.length),
+        size: usualSize(standards),
+      };
+    },
+    { role: ctx.role },
+  );
+}
+
+/**
+ * State the usual and wait to be told it is right.
+ *
+ * Returns true when the walk is now asking, which is the signal not to take
+ * an opening turn. An outline with no standards on it never sees this — the
+ * gate is stamped straight through, so nothing changes for a business that
+ * has not filled any in.
+ */
+async function askForTheUsual(ctx: WalkCtx, interviewId: string): Promise<boolean> {
+  const where = await usualContext(ctx, interviewId);
+  if (!where || where.askedAt !== null) return false;
+
+  /**
+   * **AN OUTLINE WITH NO STANDARDS NEVER SEES THIS.** Stamped through rather
+   * than skipped, so a standard added to the outline next week does not put
+   * the question in front of a walk that is already half way down the house.
+   */
+  if (where.standards.length === 0) {
+    await withTenant(ctx.tenantId, (tx) => recordUsual(tx, ctx, interviewId, false), {
+      role: ctx.role,
+    });
+    return false;
+  }
+
+  const { questions, steps } = where.size;
+  await withTenant(
+    ctx.tenantId,
+    (tx) =>
+      askTheUsual(tx, ctx, interviewId, {
+        say: [
+          `Before we start, here is what I will take as read — ${questions} ${
+            questions === 1 ? "question" : "questions"
+          } across ${steps} ${steps === 1 ? "phase" : "phases"}:`,
+          "",
+          ...where.lines,
+          "",
+          "Right for this one? Anything you say no to, I will ask you about as we go.",
+        ].join("\n"),
+        questionId: null,
+        quickReplies: ["That's right", "Ask me everything"],
+      }),
+    { role: ctx.role },
+  );
+  return true;
+}
+
+/**
+ * THE ANSWER TO THE USUAL — agreed, or ask me everything.
+ *
+ * Null when the walk is not on this question, so the turn is handled as an
+ * ordinary one. **Both answers stamp the gate**: saying no does not mean ask
+ * again next turn, it means this walk takes no standards at all.
+ */
+async function answerTheUsual(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+): Promise<TurnOutcome | null> {
+  const where = await usualContext(ctx, interviewId);
+  if (!where || where.askedAt === null || where.accepted !== null) return null;
+
+  /**
+   * **AN EMPTY REPLY IS NOT AN ANSWER**, and this is the one question where
+   * that matters: there are two buttons under it, and reading a stray return
+   * as either a yes or a no would settle — or throw away — a screenful of
+   * answers nobody chose. The question stays up.
+   */
+  if ((said ?? "").trim() === "") {
+    return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+  }
+
+  /**
+   * **A "NO" IS ANY REFUSAL, AND EVERYTHING ELSE IS A YES.** The two buttons
+   * are what this is answered with in practice; the words below are what
+   * somebody types instead of pressing one. Reading an unclear answer as a
+   * YES would settle answers on somebody who meant to object, so the
+   * uncertain case goes the other way: `refusesTheUsual` is generous, and
+   * agreeing has to actually look like agreement.
+   */
+  const accepted = !refusesTheUsual(said ?? "");
+  await withTenant(
+    ctx.tenantId,
+    (tx) => recordUsual(tx, ctx, interviewId, accepted),
+    { role: ctx.role },
+  );
+
+  try {
+    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
+  } catch {
+    /** A failed opening turn is not a failed agreement: the gate is stamped. */
+  }
+  return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+}
+
 /**
  * THE ROOMS ANSWER — a pasted list, or a word that means carry on.
  *
@@ -698,6 +867,19 @@ async function answerRooms(
   await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
     role: ctx.role,
   });
+
+  /**
+   * **AND THEN THE USUAL** (X13). **THERE ARE THREE WAYS OUT OF MEASURING**
+   * and this was the one that forgot: `startMeasuring` when there is nothing
+   * to measure, `afterMeasuring` when the last number lands, and here when
+   * the rooms are answered — which is the way EVERY walk with an outline
+   * that declares measurements actually leaves. Driving it is what said so;
+   * the gate read `usual_asked: false` on a walk that had finished
+   * measuring, so nothing would ever have been taken as read.
+   */
+  if (await askForTheUsual(ctx, interviewId)) {
+    return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+  }
 
   try {
     const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
@@ -811,6 +993,11 @@ async function afterMeasuring(
    */
   const asked = await askForRooms(ctx, interviewId);
   if (asked) return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+
+  /** And then the usual, once (X13), before any phase opens. */
+  if (await askForTheUsual(ctx, interviewId)) {
+    return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+  }
 
   /** Measuring is over — stamped HERE now, not by `askNextMeasure`. */
   await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
@@ -1311,6 +1498,10 @@ export async function takeWalkTurnAction(input: unknown) {
     /** The rooms, which close the measure-up (X8). Also not the model's. */
     const roomed = await answerRooms(ctx, parsed.data.interviewId, parsed.data.said);
     if (roomed) return roomed;
+
+    /** Agreeing the usual (X13) — a yes or a no, read here and not by a model. */
+    const usual = await answerTheUsual(ctx, parsed.data.interviewId, parsed.data.said);
+    if (usual) return usual;
 
     const priced = await answerPrice(ctx, parsed.data.interviewId, parsed.data.said);
     if (priced) return priced;

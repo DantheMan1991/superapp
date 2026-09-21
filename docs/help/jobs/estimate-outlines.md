@@ -224,6 +224,26 @@ and nothing else would ever tell you. If no list has it at all you get
 counts how many steps are in that state. That line is how you catch a typo
 before a bid goes out with a hole in its budget.
 
+**`Usually`** — the answer you give every time, or blank to be asked.
+
+This is how you stop a walk asking you thirty-three times who is doing the
+work. Fill it in and the question is not asked: the walk states every one of
+your standards before the first phase, and once you say they are right it
+takes them as read, phase by phase.
+
+- **Blank means ask, and blank is the point.** Fill it in on the phases you
+  never sub and leave it blank on the ones that go either way. That is the
+  difference between skipping what never varies and assuming what does.
+- **Nothing is taken quietly.** The walk lists them up front — *"Who is doing
+  this one? In-house — every phase"* — and waits for {button:That's right|outline}.
+  {button:Ask me everything|outline} turns them all off for that bid.
+- **Every answer it takes this way says so**, marked {badge:your usual} beside
+  it, and {button:Ask again|ghost|rotate-ccw} re-opens it like any other.
+- **A question marked `Always ask` cannot have one**, and the box disappears
+  when you tick it. Those are the questions where being asked is the point.
+- **A bid already under way is not affected.** Standards are agreed at the
+  start of a walk, so a walk you are half way through carries on asking.
+
 **The guidance box** underneath — what has to be established at this step, in
 your own words. This is where you write the thing that is true of *your* work:
 that you never sub framing, that a walkout needs the engineer's number before

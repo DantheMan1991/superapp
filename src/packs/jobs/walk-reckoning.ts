@@ -110,6 +110,8 @@ export interface AskedAndAnswered {
   answer: string;
   skipped: boolean;
   skipReason: string;
+  /** Taken from the outline's standard rather than given by a person (X13). */
+  fromStandard: boolean;
 }
 
 export interface StepReckoning {
@@ -226,6 +228,8 @@ export function reckonStep(
       answer: a.answer,
       skipped: a.skipped,
       skipReason: a.skipReason,
+      /** Nothing the walk assumed is allowed to be invisible here (X13). */
+      fromStandard: a.fromStandard,
     })),
     outstanding: left.length,
   };

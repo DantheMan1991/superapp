@@ -288,6 +288,21 @@ export async function JobsModule({
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/dashboard/m/jobs/cost-codes">Cost codes</Link>
                 </Button>
+                {/**
+                  * **THE TWO SCREENS THAT TEACH THE WALK, AND NEITHER WAS
+                  * LINKED FROM ANYWHERE SOMEBODY LANDS.** The founder, after
+                  * a real walk: *"I don't see how to edit and manage the
+                  * questions"* — they were at `/estimate-outlines`, reachable
+                  * only from the panel shown when a tenant has NO outline and
+                  * from module settings. The place you teach it has to be
+                  * reachable from the place you notice it needs teaching.
+                  */}
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/dashboard/m/jobs/estimate-outlines">Estimate outlines</Link>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/dashboard/m/jobs/assemblies">Assemblies</Link>
+                </Button>
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/dashboard/m/jobs/setup">What you use</Link>
                 </Button>

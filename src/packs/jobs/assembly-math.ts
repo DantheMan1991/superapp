@@ -16,6 +16,8 @@
  * to more places than the column has to survive the round trip.
  */
 
+import { thousandthsToQuantityString } from "./billing-math";
+
 /** Quantities are thousandths, so `320` reads as `320_000`. */
 const ONE = 1_000;
 
@@ -149,4 +151,54 @@ export function resolveCostCode(
  */
 export function normalizedCode(written: string): string {
   return written.replace(/\s+/g, "").toLowerCase();
+}
+
+/* ------------------------------------------------------------------------
+ * A LINE AS A FORM SHOWS IT (X10).
+ *
+ * Stored money is cents and stored quantity is thousandths; a text input
+ * holds neither. This is the conversion between them, and it lives HERE
+ * rather than in the editor because **a server component cannot call a
+ * function out of a `"use client"` module** — it may only render one. The
+ * page reads the rows and shapes them; the editor takes them as props.
+ *
+ * `tsc` and `next build` were both green with it in the wrong file. Only
+ * opening the page said so, which is the client half of the lesson this
+ * repo already learned about `server-only`.
+ * ---------------------------------------------------------------------- */
+
+export interface EditableLine {
+  description: string;
+  clientDescription: string;
+  clientVisible: boolean;
+  unit: string;
+  quantity: string;
+  unitCost: string;
+  costCode: string;
+  markupPpm: number | null;
+  unitPriceCents: number | null;
+}
+
+export function toEditable(l: {
+  description: string;
+  clientDescription: string;
+  clientVisible: boolean;
+  unit: string;
+  quantityThousandths: number;
+  unitCostCents: number;
+  costCode: string;
+  markupPpm: number | null;
+  unitPriceCents: number | null;
+}): EditableLine {
+  return {
+    description: l.description,
+    clientDescription: l.clientDescription,
+    clientVisible: l.clientVisible,
+    unit: l.unit,
+    quantity: thousandthsToQuantityString(l.quantityThousandths),
+    unitCost: (l.unitCostCents / 100).toFixed(2),
+    costCode: l.costCode,
+    markupPpm: l.markupPpm,
+    unitPriceCents: l.unitPriceCents,
+  };
 }

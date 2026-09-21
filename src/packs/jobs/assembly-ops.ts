@@ -154,6 +154,100 @@ export async function saveItemAsAssembly(
   return assembly;
 }
 
+/**
+ * **CHANGE ONE YOU ALREADY HAVE.**
+ *
+ * The verb the library was missing. Until this, `saveItemAsAssembly` and
+ * `deleteAssembly` were the whole of it: to fix a typo in a line you had to
+ * delete the assembly and build an item to re-save from — which is why
+ * nobody was ever going to own thirty of them.
+ *
+ * ── THE LINES ARE REPLACED, NOT MERGED ──────────────────────────────────────
+ *
+ * The outline's `writeSteps` makes the same call for the same reason: the
+ * editor hands back the whole list as it now stands, and reconciling row by
+ * row would need identity the screen does not carry. Nothing points AT an
+ * assembly line — an assembly that made an estimate item copied itself into
+ * that item and the copy is the job's — so replacing them loses nothing.
+ *
+ * ── AND NOTHING IT HAS ALREADY MADE CHANGES ─────────────────────────────────
+ *
+ * The same rule `deleteAssembly` keeps. An item on a bid you sent in March
+ * is that bid's; editing the library must never reach back into a job.
+ */
+export async function updateAssembly(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: SaveAssemblyInput & { version: number },
+): Promise<JobAssembly> {
+  requireWrite(ctx, "member");
+  const name = input.name.trim();
+  if (name === "") throw new JobsError("INVALID_VALUE", "an assembly needs a name");
+  if (input.drivingQuantityThousandths <= 0) {
+    throw new JobsError("INVALID_VALUE", "an assembly has to be per something more than nothing");
+  }
+  const lines = input.lines.filter((l) => l.description.trim() !== "");
+  if (lines.length === 0) throw new JobsError("NO_LINES", "an assembly with no lines is not one");
+
+  let rows: JobAssembly[];
+  try {
+    rows = await tx
+      .update(schema.jobAssemblies)
+      .set({
+        name,
+        clientNote: input.clientNote.trim(),
+        notes: input.notes.trim(),
+        drivingQuantityThousandths: input.drivingQuantityThousandths,
+        drivingUnit: input.drivingUnit.trim(),
+        version: input.version + 1,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.jobAssemblies.tenantId, ctx.tenantId),
+          eq(schema.jobAssemblies.id, id),
+          eq(schema.jobAssemblies.version, input.version),
+        ),
+      )
+      .returning();
+  } catch (err) {
+    if (violatedUniqueIndex(err) === "job_assemblies_tenant_name_idx") {
+      throw new JobsError("NAME_TAKEN", `you already have an assembly called ${name}`);
+    }
+    throw err;
+  }
+  if (rows.length === 0) {
+    throw new JobsError("STALE_VERSION", "assembly changed since it was loaded");
+  }
+
+  await tx
+    .delete(schema.jobAssemblyLines)
+    .where(
+      and(
+        eq(schema.jobAssemblyLines.tenantId, ctx.tenantId),
+        eq(schema.jobAssemblyLines.assemblyId, id),
+      ),
+    );
+  await tx.insert(schema.jobAssemblyLines).values(
+    lines.map((l, i) => ({
+      tenantId: ctx.tenantId,
+      assemblyId: id,
+      description: l.description.trim(),
+      clientDescription: l.clientDescription.trim(),
+      clientVisible: l.clientVisible,
+      unit: l.unit.trim(),
+      quantityThousandths: l.quantityThousandths,
+      unitCostCents: l.unitCostCents,
+      markupPpm: l.markupPpm,
+      unitPriceCents: l.unitPriceCents,
+      costCode: l.costCode.trim(),
+      sortOrder: (i + 1) * 10,
+    })),
+  );
+  return rows[0];
+}
+
 /** Take one out of the library. Nothing it made is touched — those are lines on a job. */
 export async function deleteAssembly(tx: Tx, ctx: JobsCtx, id: string): Promise<void> {
   requireWrite(ctx, "member");

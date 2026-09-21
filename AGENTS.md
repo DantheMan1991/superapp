@@ -103,7 +103,7 @@ and skipped by the build-docs walker:
 | --- | --- | --- |
 | `docs/modules/<slug>.md` | Dossier per module *and* per platform-level area (retainer-hours, public-site, health-check, mail-infrastructure): purpose, build log, data model, decisions & gotchas, open items | Every PR that touches that area |
 | `docs/*.md` | `architecture`, `security`, `conventions`, `extension-model` — the invariants every module inherits | When a boundary moves or a statement stops being true |
-| `docs/decisions/` | ADRs. Immutable once accepted — reverse one by writing a new ADR that supersedes it | When a decision closes off a credible alternative |
+| `docs/decisions/` | ADRs, plus the index row in `decisions/README.md` that makes one findable — same commit as the ADR, date and status copied from its header. Immutable once accepted — reverse one by writing a new ADR that supersedes it | When a decision closes off a credible alternative |
 | `docs/runbooks/` | Operational procedures | When a step turns out to be wrong |
 | `docs/help/<feature>/<topic>.md` | Tenant-facing how-to guides, in the client's voice (`docs/help/_TEMPLATE.md` explains the header, the `**Route:**` grammar and `{{vocabulary}}`), rendered at `/dashboard/guides` and in the page help panel | Every PR that changes a screen the guide describes |
 

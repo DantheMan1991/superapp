@@ -38,6 +38,13 @@ export interface OutlineStepShape {
   section?: string;
   costCode?: string;
   guidance?: string;
+  /**
+   * The assembly this step always makes (X11), by id, or null for none.
+   * **Absent and null differ**: absent leaves the pin alone, null clears it,
+   * which is what an editor posting the whole outline needs in order to be
+   * able to unpin one.
+   */
+  assemblyId?: string | null;
   questions?: OutlineQuestionShape[];
 }
 

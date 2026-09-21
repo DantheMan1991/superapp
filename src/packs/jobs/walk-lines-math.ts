@@ -57,6 +57,18 @@ export interface ProposedShape {
    * one is not**, so the working is required and it is shown on the line.
    */
   derivedFrom?: string;
+  /**
+   * THE ROOMS THIS LINE COVERS (X11), by name, beside the description rather
+   * than inside it.
+   *
+   * X8b asked for the rooms to be named in the words of the line and got
+   * them. A field is what makes them USABLE: you cannot split *"Tiled shower
+   * — master bath, hall bath"* into two lines without knowing where the name
+   * ends and the list begins, and the description is composed from this in
+   * the building's own spelling, so the same room reads the same on every
+   * bid. See `line-shaping.ts`.
+   */
+  rooms?: string[];
   /** By its digits, resolved against the job's own list (ADR 0086). */
   costCode?: string;
   /** A saved item of theirs to build this from, by name. */

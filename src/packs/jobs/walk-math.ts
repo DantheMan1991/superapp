@@ -30,6 +30,12 @@ export interface WalkStep {
   section: string;
   costCode: string;
   guidance: string;
+  /**
+   * The item this phase always makes (X11), or null when it is different
+   * every time. Null is the normal case: a step with no pin behaves exactly
+   * as every step did before this existed.
+   */
+  assemblyId: string | null;
   questions: WalkQuestion[];
 }
 

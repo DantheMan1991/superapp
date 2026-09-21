@@ -894,17 +894,22 @@ async function proposeForStep(
           jobName: project ? `${project.number} ${project.name}` : "",
           projectId: project?.id,
           assemblies: assemblies.map((a) => ({
+            id: a.assembly.id,
             name: a.assembly.name,
             per:
               a.assembly.drivingQuantityThousandths === 1000 && a.assembly.drivingUnit === ""
                 ? "each"
                 : `per ${a.assembly.drivingQuantityThousandths / 1000} ${a.assembly.drivingUnit}`.trim(),
+            /** How this one is bid, which is the estimator's to set (X11). */
+            perRoom: a.assembly.lineShape === "per_room",
           })),
           costCodes: codes.filter((c) => c.isActive).map((c) => ({ code: c.code, name: c.name })),
           /** The building's numbers, read with the walk in the same call (X7). */
           measurements: measureLines(asTaken(walk.measurements)),
           /** And its rooms, so a line can be per-room (X8). */
           rooms: roomLines(asRoomFacts(walk.rooms)),
+          /** The same rooms as FACTS, for the shaping rather than the prompt (X11). */
+          roomFacts: asRoomFacts(walk.rooms),
         };
       },
       { role: ctx.role },
@@ -919,6 +924,9 @@ async function proposeForStep(
         step: gathered.step,
         answers: live(asWalkAnswers(here)),
         assemblies: gathered.assemblies,
+        /** The item this phase always makes, when the outline names one (X11). */
+        pinnedAssembly:
+          gathered.assemblies.find((a) => a.id === gathered.step.assemblyId)?.name ?? null,
         costCodes: gathered.costCodes,
         /** The building's numbers, so a line comes out measured, not lump. */
         measurements: gathered.measurements,
@@ -936,6 +944,7 @@ async function proposeForStep(
           shapes: proposal.lines,
           /** Only what was actually SAID counts as having been said. */
           answers: here.filter((a) => !a.skipped).map((a) => a.answer),
+          rooms: gathered.roomFacts,
           today: new Date().toISOString().slice(0, 10),
           projectId: gathered.projectId,
         }),
@@ -1484,11 +1493,14 @@ export async function proposeStepAction(input: unknown) {
           jobName: project ? `${project.number} ${project.name}` : "",
           projectId: project?.id,
           assemblies: assemblies.map((a) => ({
+            id: a.assembly.id,
             name: a.assembly.name,
             per:
               a.assembly.drivingQuantityThousandths === 1000 && a.assembly.drivingUnit === ""
                 ? "each"
                 : `per ${a.assembly.drivingQuantityThousandths / 1000} ${a.assembly.drivingUnit}`.trim(),
+            /** How this one is bid, which is the estimator's to set (X11). */
+            perRoom: a.assembly.lineShape === "per_room",
           })),
           costCodes: codes
             .filter((c) => c.isActive)
@@ -1496,6 +1508,7 @@ export async function proposeStepAction(input: unknown) {
           /** The building's numbers, the same as the automatic path (X7). */
           measurements: measureLines(asTaken(walk.measurements)),
           rooms: roomLines(asRoomFacts(walk.rooms)),
+          roomFacts: asRoomFacts(walk.rooms),
         };
       },
       { role: ctx.role },
@@ -1508,6 +1521,8 @@ export async function proposeStepAction(input: unknown) {
       step: gathered.step,
       answers: live(asWalkAnswers(here)),
       assemblies: gathered.assemblies,
+      pinnedAssembly:
+        gathered.assemblies.find((a) => a.id === gathered.step.assemblyId)?.name ?? null,
       costCodes: gathered.costCodes,
       measurements: gathered.measurements,
       rooms: gathered.rooms,
@@ -1525,6 +1540,7 @@ export async function proposeStepAction(input: unknown) {
           shapes: proposal.lines,
           /** Only what was actually SAID counts as having been said. */
           answers: here.filter((a) => !a.skipped).map((a) => a.answer),
+          rooms: gathered.roomFacts,
           today: new Date().toISOString().slice(0, 10),
           projectId: gathered.projectId,
         }),

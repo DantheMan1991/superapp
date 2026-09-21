@@ -8,6 +8,8 @@ import { allowsWrite } from "@/lib/packs/authorize";
 import { packContext } from "@/lib/packs/tenant-context";
 import { PageHeader } from "@/components/app/page-header";
 import { listCostCodes, listCostCodeSets } from "@/packs/jobs/ops";
+import { listAssemblies } from "@/packs/jobs/assembly-ops";
+import { thousandthsToQuantityString } from "@/packs/jobs/billing-math";
 import { choicesOf, listOutlines, loadOutline } from "@/packs/jobs/outline-ops";
 import { BringQuestionsButton } from "@/packs/jobs/components/bring-questions-dialog";
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
@@ -42,7 +44,7 @@ export default async function EstimateOutlinePage({
       const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
       const gate = interviewGateFrom(pack.config);
       if (!gate.available)
-        return { gate, loaded: null, books: [], others: [], measures: [] };
+        return { gate, loaded: null, books: [], others: [], measures: [], assemblies: [] };
       /**
        * EVERY LIST, NOT JUST THE DEFAULT. A step's code is checked against all
        * of them, because "2000 is in Residential phases but not in CSI
@@ -72,12 +74,23 @@ export default async function EstimateOutlinePage({
         }));
       /** What this outline wants measured before it starts asking (X7). */
       const measures = await listOutlineMeasures(tx, ctx.tenant.id, id);
+      /** Their saved items, so a step can name the one it always makes (X11). */
+      const assemblies = (await listAssemblies(tx, ctx.tenant.id)).map((a) => ({
+        id: a.assembly.id,
+        name: a.assembly.name,
+        per:
+          a.assembly.drivingQuantityThousandths === 1000 && a.assembly.drivingUnit === ""
+            ? "each"
+            : `per ${thousandthsToQuantityString(a.assembly.drivingQuantityThousandths)} ${a.assembly.drivingUnit}`.trim(),
+        perRoom: a.assembly.lineShape === "per_room",
+      }));
       return {
         gate,
         loaded: await loadOutline(tx, ctx.tenant.id, id),
         books,
         others,
         measures,
+        assemblies,
       };
     },
     { role: ctx.role },
@@ -127,12 +140,14 @@ export default async function EstimateOutlinePage({
         initialVersion={outline.version}
         canWrite={canWrite}
         books={data.books}
+        assemblies={data.assemblies}
         initialSteps={steps.map((step) => ({
           id: step.id,
           title: step.title,
           section: step.section,
           costCode: step.costCode,
           guidance: step.guidance,
+          assemblyId: step.assemblyId,
           questions: step.questions.map((q) => ({
             id: q.id,
             prompt: q.prompt,

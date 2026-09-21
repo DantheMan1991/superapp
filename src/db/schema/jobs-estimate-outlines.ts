@@ -58,6 +58,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { jobAssemblies } from "./jobs-estimates";
 
 /**
  * ONE WAY THIS BUSINESS WALKS AN ESTIMATE. "New build", "Remodel", "Garage
@@ -147,6 +148,25 @@ export const jobEstimateOutlineSteps = pgTable(
     costCode: text("cost_code").notNull().default(""),
     /** What to establish here, in prose, for the interviewer to read. */
     guidance: text("guidance").notNull().default(""),
+    /**
+     * **THE ITEM THIS PHASE ALWAYS MAKES** (X11), or null when it is different
+     * every time.
+     *
+     * The founder, having seen the walk price a phase: *"I'm struggling to
+     * see that we are going to get the consistent items being put on the
+     * estimate in the way I want with the verbiage I want."* An assembly is
+     * the answer to that and always was — but until now the model DECIDED
+     * whether to reach for one, from a list of names in a prompt, on every
+     * bid. Naming it here is what takes the decision away: *Drywall* is
+     * always *Drywall, hung and finished*, and the conversation is left with
+     * the only thing it is good at, which is how much of it there is.
+     *
+     * **NULL IS THE NORMAL CASE AND MUST STAY COMFORTABLE.** He builds luxury
+     * custom homes — *"a Fully custom wood door... maybe a client wants a
+     * safe room"* — and a phase with no pin behaves exactly as it did before
+     * this column existed.
+     */
+    assemblyId: uuid("assembly_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -168,6 +188,17 @@ export const jobEstimateOutlineSteps = pgTable(
       columns: [t.tenantId, t.outlineId],
       foreignColumns: [jobEstimateOutlines.tenantId, jobEstimateOutlines.id],
     }).onDelete("cascade"),
+    // Hand-edited in the migration to the column-list form
+    // `ON DELETE SET NULL ("assembly_id")`. A bare SET NULL on a composite
+    // (tenant_id, x) key would try to null tenant_id too and can NEVER run —
+    // the trap this repo has now paid for twice. An assembly taken out of the
+    // library leaves the step unpinned, which is what unpinning means; it
+    // never takes the step with it.
+    foreignKey({
+      name: "job_estimate_outline_steps_assembly_fk",
+      columns: [t.tenantId, t.assemblyId],
+      foreignColumns: [jobAssemblies.tenantId, jobAssemblies.id],
+    }).onDelete("set null"),
     check(
       "job_estimate_outline_steps_title_present",
       sql`length(btrim(${t.title})) > 0`,

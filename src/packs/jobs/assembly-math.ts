@@ -22,7 +22,7 @@ import { thousandthsToQuantityString } from "./billing-math";
 const ONE = 1_000;
 
 /** A line of a saved item, as the assembly keeps it. */
-export interface AssemblyLineShape {
+export interface AssemblyLine {
   description: string;
   clientDescription: string;
   clientVisible: boolean;
@@ -57,7 +57,7 @@ export function scaleQuantity(
   return Math.round((savedThousandths * wantedThousandths) / savedDrivingThousandths);
 }
 
-export interface ExplodedLine extends Omit<AssemblyLineShape, "sortOrder"> {
+export interface ExplodedLine extends Omit<AssemblyLine, "sortOrder"> {
   sortOrder: number;
 }
 
@@ -67,7 +67,7 @@ export interface ExplodedLine extends Omit<AssemblyLineShape, "sortOrder"> {
  */
 export function explodeAssembly(
   assembly: { drivingQuantityThousandths: number },
-  lines: readonly AssemblyLineShape[],
+  lines: readonly AssemblyLine[],
   wantedThousandths: number,
 ): ExplodedLine[] {
   return lines.map((l) => ({
@@ -95,7 +95,7 @@ export function explodeAssembly(
  * useful assembly (a kitchen, a bathroom suite), not a broken one.
  */
 export function suggestDriver(
-  lines: readonly Pick<AssemblyLineShape, "unit" | "quantityThousandths">[],
+  lines: readonly Pick<AssemblyLine, "unit" | "quantityThousandths">[],
 ): { quantityThousandths: number; unit: string } {
   const counts = new Map<string, { n: number; quantityThousandths: number; unit: string }>();
   for (const l of lines) {

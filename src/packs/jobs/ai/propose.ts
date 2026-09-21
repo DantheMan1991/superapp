@@ -72,6 +72,13 @@ export const PROPOSE_TOOL = {
               description:
                 "REQUIRED when the quantity is not a figure they said outright: the arithmetic, briefly. '2 baths at 3 fixtures each'. This is shown on the line.",
             },
+            rooms: {
+              type: "array",
+              items: { type: "string" },
+              maxItems: 40,
+              description:
+                "The rooms this line covers, copied from the room list by name. PUT THEM HERE AND NOT IN THE DESCRIPTION — the software writes them into the line itself, in the spelling the building uses, and it is how a line covering four rooms can be turned into four lines when that is how this item is bid.",
+            },
             costCode: {
               type: "string",
               description: "The cost code's digits, copied from the step or the list you were given.",
@@ -117,6 +124,13 @@ export function validateProposal(raw: unknown): Proposal | null {
     const num = (v: unknown) =>
       typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined;
     const str = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+    /** Room names only — anything that is not a non-empty string is not one. */
+    const names = Array.isArray(l.rooms)
+      ? l.rooms
+          .filter((r): r is string => typeof r === "string" && r.trim() !== "")
+          .map((r) => r.trim().slice(0, 120))
+          .slice(0, 40)
+      : [];
     lines.push({
       description: l.description.trim().slice(0, 300),
       clientDescription: str(l.clientDescription)?.slice(0, 300),
@@ -124,6 +138,7 @@ export function validateProposal(raw: unknown): Proposal | null {
       unit: str(l.unit)?.slice(0, 24),
       quantityThousandths: num(l.quantityThousandths),
       derivedFrom: str(l.derivedFrom)?.slice(0, 200),
+      rooms: names.length > 0 ? names : undefined,
       costCode: str(l.costCode)?.slice(0, 60),
       assembly: str(l.assembly)?.slice(0, 200),
       saidUnitCostCents: num(l.saidUnitCostCents),
@@ -140,8 +155,22 @@ export function proposeSystemPrompt(input: {
   jobName: string;
   step: WalkStep;
   answers: readonly WalkAnswer[];
-  /** Their own saved items, by name and what each is priced per. */
-  assemblies: { name: string; per: string }[];
+  /**
+   * Their own saved items: the name, what each is priced per, and **how each
+   * one is bid** — one line covering its rooms, or a line per room (X11).
+   * The last of those used to be rule 2b's judgement and is now theirs.
+   */
+  assemblies: { name: string; per: string; perRoom: boolean }[];
+  /**
+   * **THE ITEM THIS PHASE ALWAYS MAKES** (X11), when the outline names one.
+   *
+   * Saying it here is courtesy, not mechanism: `applyPin` puts the assembly
+   * on the first line whatever comes back. Telling the model anyway is what
+   * makes the rest of the answer fit — the quantity, the rooms and the cost
+   * code come out addressed to the right item instead of to a line it
+   * invented and then had replaced underneath it.
+   */
+  pinnedAssembly: string | null;
   /** The codes on THIS job's list, so a line lands somewhere real. */
   costCodes: { code: string; name: string }[];
   /**
@@ -190,9 +219,12 @@ export function proposeSystemPrompt(input: {
     ``,
     input.assemblies.length > 0
       ? `THEIR SAVED ASSEMBLIES — name one and it supplies its own lines and prices:\n${input.assemblies
-          .map((a) => `- ${a.name} (${a.per})`)
+          .map((a) => `- ${a.name} (${a.per})${a.perRoom ? " — BID A LINE PER ROOM" : ""}`)
           .join("\n")}`
       : `THEY HAVE NO SAVED ASSEMBLIES YET.`,
+    input.pinnedAssembly
+      ? `THIS PHASE IS ALWAYS "${input.pinnedAssembly}". Use it. What you work out is how much of it there is and which rooms it is in; the item itself is settled.`
+      : ``,
     ``,
     input.costCodes.length > 0
       ? `COST CODES ON THIS JOB:\n${input.costCodes.map((c) => `- ${c.code} ${c.name}`).join("\n")}`
@@ -203,8 +235,8 @@ export function proposeSystemPrompt(input: {
     `1. YOU NEVER PRICE ANYTHING. There is no field for a cost you worked out, and there is no point trying — a figure that is not in what they said is dropped and the line comes out unpriced.`,
     `2. A QUANTITY IS QUOTED OR EXPLAINED. Use the number they gave, or give the arithmetic in derivedFrom. No quantity and no working means leave it out, and the line becomes a lump they can fill in.`,
     `2a. THE MEASUREMENTS ABOVE COUNT AS NUMBERS THEY GAVE. Work from them and put the working in derivedFrom: "perimeter 128 lf x wall height 9.5 = 1,216 sf". A phase that could have been measured and came out a lump is a phase somebody now has to price blind.`,
-    `2b. ROLL UP WHAT IS IDENTICAL; SPLIT WHAT DIFFERS. The same product in four rooms is ONE line — add their floor areas, name the rooms in the description, put the addition in derivedFrom. Things that differ from each other get a line each, with the room in the description: three showers with different tile are three lines, not one. Fifteen flooring lines is a bill of materials; one line for three different showers is a number nobody can check.`,
-    `2c. NAME THE ROOMS EITHER WAY. A line that covers rooms says which — it is how somebody checks nothing was missed, and how the same line is recognised on the next job.`,
+    `2b. ROLL UP WHAT IS IDENTICAL; SPLIT WHAT DIFFERS. The same product in four rooms is ONE line — add their floor areas and put the addition in derivedFrom. Things that differ from each other get a line each: three showers with different tile are three lines, not one. Fifteen flooring lines is a bill of materials; one line for three different showers is a number nobody can check.`,
+    `2c. PUT THE ROOMS IN "rooms" AND NOT IN THE DESCRIPTION. Every line that covers rooms lists them there, by the names above; the software writes them into the line itself. An assembly marked BID A LINE PER ROOM is split up for you — name all of its rooms on ONE line and let it be split, rather than writing the lines out yourself.`,
     `3. USE AN ASSEMBLY when one of theirs is what the line is. That is how a phase gets priced properly, and it is better than several bare lines.`,
     `4. BID OUT IS ONE LINE. A phase they are subbing is a single lump for the subcontract, not a breakdown of somebody else's work.`,
     // No backtick may appear inside this template literal — the same trap

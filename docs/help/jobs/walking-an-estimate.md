@@ -321,6 +321,20 @@ Quantities work the same way. A figure you said is used as you said it. A figure
 
 {button:Put it on the estimate|primary} adds them as one item named after the phase, with the lines inside it — the same shape as anything you build by hand, so the proposal prints it normally. {button:Not yet|ghost} leaves it alone.
 
+**A line that covers rooms says which.** The rooms are written into the
+description in the spelling your room list uses, so the same room reads the
+same on every bid and you can see at a glance that nothing was missed —
+*"LVP flooring — Great room, Kitchen, Dining"*.
+
+**Whether that is one line or several is the item's own setting, not a
+judgement.** An assembly set to *A line for each room* comes out as a line per
+room, each named after its room and sized by that room's floor area when it is
+priced in the unit the rooms are measured in. One set to *One line, naming the
+rooms* comes out as a single line. You set that once on the assembly
+(*Assemblies* on the projects page), and a step can name the assembly it
+always makes (*Always makes*, on the outline), which is how a phase comes out
+the same on every bid.
+
 **A phase you walk twice is still one item.** Go back into a phase, answer it
 again and price it, and the new lines replace the ones that phase put on
 before — in the same item, keeping the name if you renamed it, and leaving

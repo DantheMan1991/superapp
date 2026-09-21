@@ -45,6 +45,7 @@ function step(over: Partial<WalkStep> = {}): WalkStep {
     section: "",
     costCode: "2000",
     guidance: "",
+    assemblyId: null,
     questions: [q()],
     ...over,
   };
@@ -628,6 +629,7 @@ describe("the building's numbers in the proposal prompt", () => {
     step: step(),
     answers: [],
     assemblies: [],
+    pinnedAssembly: null,
     costCodes: [],
     rooms: [],
   };
@@ -691,6 +693,7 @@ describe("the rooms in the prompts", () => {
     step: step(),
     answers: [],
     assemblies: [],
+    pinnedAssembly: null,
     costCodes: [],
     measurements: [],
   };
@@ -738,13 +741,56 @@ describe("the rooms in the prompts", () => {
   });
 
   /**
-   * And the rooms are named EITHER WAY — which is not decoration. It is what
-   * `roomsWithNothingPriced` reads to tell somebody the powder room has
-   * nothing on the bid, and what lets the same line be recognised next job.
+   * The rooms are named on every line that covers them — which is not
+   * decoration. It is what `roomsWithNothingPriced` reads to tell somebody
+   * the powder room has nothing on the bid, and what lets the same line be
+   * recognised next job.
+   *
+   * **X11 MOVED THEM OUT OF THE SENTENCE AND INTO A FIELD.** The software
+   * writes them into the description, from the building's own spelling, and
+   * that is what makes a line covering four rooms splittable into four.
    */
-  it("tells the proposal to name the rooms a line covers", () => {
+  it("tells the proposal to put the rooms in a field, not in the words", () => {
     const prompt = proposeSystemPrompt({ ...proposeBase, rooms });
-    expect(prompt).toContain("NAME THE ROOMS EITHER WAY");
+    expect(prompt).toContain('PUT THE ROOMS IN "rooms" AND NOT IN THE DESCRIPTION');
+    expect(prompt).toContain("the software writes them into the line itself");
+  });
+
+  /**
+   * **THE PIN** (X11). The founder: *"I'm struggling to see that we are
+   * going to get the consistent items being put on the estimate in the way I
+   * want."* A step that names its assembly says so here — and `applyPin`
+   * makes it true whatever comes back, which is the half a prompt cannot do.
+   */
+  it("tells the proposal which item this phase always makes", () => {
+    const prompt = proposeSystemPrompt({
+      ...proposeBase,
+      rooms: [],
+      pinnedAssembly: "Drywall, hung and finished",
+    });
+    expect(prompt).toContain('THIS PHASE IS ALWAYS "Drywall, hung and finished"');
+    expect(prompt).toContain("the item itself is settled");
+  });
+
+  it("says nothing about a pin on a step that has none", () => {
+    expect(proposeSystemPrompt({ ...proposeBase, rooms: [] })).not.toContain(
+      "THIS PHASE IS ALWAYS",
+    );
+  });
+
+  /** And an assembly bid a line per room says so beside its name. */
+  it("marks the assemblies that are bid a line per room", () => {
+    const prompt = proposeSystemPrompt({
+      ...proposeBase,
+      rooms: [],
+      assemblies: [
+        { name: "LVP flooring", per: "per 100 sf", perRoom: false },
+        { name: "Tiled shower", per: "each", perRoom: true },
+      ],
+    });
+    expect(prompt).toContain("- Tiled shower (each) — BID A LINE PER ROOM");
+    expect(prompt).toContain("- LVP flooring (per 100 sf)");
+    expect(prompt).not.toContain("- LVP flooring (per 100 sf) — BID A LINE PER ROOM");
   });
 
   it("keeps the walk's ask-once rule, and says to group the ones that match", () => {

@@ -501,6 +501,28 @@ export const jobEstimateShares = pgTable(
  * would not.
  * ---------------------------------------------------------------------- */
 
+/**
+ * WHAT AN ASSEMBLY MAKES WHEN IT COVERS SEVERAL ROOMS (X11).
+ *
+ * The founder's own rule, asked how an estimate sheet should read: *"with
+ * LVP flooring I typically just have one item for lvp that lists all of the
+ * rooms that includes. But for Showers I typically list each one seperatly.
+ * not always though."*
+ *
+ * Until now that was rule 2b of a prompt — a judgement a model made afresh
+ * on every bid, which is the part he could not trust. **It is a property of
+ * the ITEM, so it belongs on the item**: set it once on *LVP flooring* and
+ * every bid rolls it up; set it once on *Tiled shower* and every bid lists
+ * them one by one.
+ *
+ * *"Not always though"* stays true and stays his: this decides what the WALK
+ * produces, the estimate is his to restructure afterwards, and saving the
+ * result back over the assembly is how an exception becomes the rule.
+ */
+export const ASSEMBLY_LINE_SHAPES = ["one_line", "per_room"] as const;
+
+export type AssemblyLineShape = (typeof ASSEMBLY_LINE_SHAPES)[number];
+
 export const jobAssemblies = pgTable(
   "job_assemblies",
   {
@@ -519,6 +541,13 @@ export const jobAssemblies = pgTable(
       .notNull()
       .default(1_000),
     drivingUnit: text("driving_unit").notNull().default(""),
+    /**
+     * `one_line` names every room it covers in a single line and adds their
+     * areas; `per_room` makes a line each with the room in the description.
+     * Everything saved before this existed is `one_line`, which is what the
+     * walk did anyway.
+     */
+    lineShape: text("line_shape").notNull().default("one_line"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -534,6 +563,7 @@ export const jobAssemblies = pgTable(
      * divide by zero — so it is refused at the table, not only in the ops.
      */
     check("job_assemblies_driving_positive", sql`${t.drivingQuantityThousandths} > 0`),
+    check("job_assemblies_line_shape_valid", sql`${t.lineShape} in ('one_line', 'per_room')`),
   ],
 );
 

@@ -91,6 +91,14 @@ const stepSchema = z.object({
   section: z.string().trim().max(120).optional(),
   costCode: z.string().trim().max(60).optional(),
   guidance: z.string().trim().max(4000).optional(),
+  /**
+   * The assembly this step always makes (X11). **Nullable on purpose**: the
+   * editor posts the whole outline, so `null` is how a step is unpinned and
+   * an omitted field leaves the pin alone. The id is not checked here — the
+   * composite `(tenant_id, assembly_id)` foreign key refuses another
+   * tenant's, which is a check no application code can forget to make.
+   */
+  assemblyId: z.string().uuid().nullable().optional(),
   questions: z.array(questionSchema).max(40).optional(),
 });
 

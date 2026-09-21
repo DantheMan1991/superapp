@@ -432,7 +432,24 @@ what one of it costs. Open one to change it:
 | The name, and the size it is priced per | Everything scales off that size, so changing it changes what a dropped assembly works out to. |
 | The sentence the client reads | Carried onto the item this makes. |
 | Your own note | Never printed. |
+| **When it covers several rooms** | *One line, naming the rooms* or *A line for each room*. See below. |
 | The lines | Description, quantity, unit, unit cost and cost code, plus whether each line stays off the proposal. Add lines, remove them, reword them. |
+
+**One line, or a line for each room.** Some items you list once and name the
+rooms it covers — LVP flooring through the great room, kitchen and dining is
+one line on most sheets. Others you list separately, one per room, because
+each one is its own piece of work: showers, usually. Which one this item is is
+set here, once, and every walk from then on writes it that way.
+
+| Setting | What the walk writes |
+| --- | --- |
+| **One line, naming the rooms** | One line covering every room it is in, with the rooms named in the description. |
+| **A line for each room** | A line per room, each named after its room — and each sized by that room's own floor area when the item is priced in the same unit the rooms are measured in. A shower priced `ea` comes out as one per room; carpet priced `sf` comes out at each room's measured area. |
+
+This decides where the walk **starts**, not where you have to finish. Any bid
+can be restructured by hand afterwards, and if you find yourself doing the
+same restructure every time, save the result back over the assembly and it
+stops happening.
 
 **{button:New assembly|outline}** makes one from nothing — give it a name and a
 size and it opens with a single line to fill in. Useful when you know what an

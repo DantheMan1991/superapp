@@ -188,6 +188,33 @@ export function linesFrom(items: readonly PageText[]): PageLine[] {
 /** `A-101`, `A1.1`, `S-201A`, `E-001`, `FP-2`, `C1.0`, `M101`, `L-1`. Not a date, not a scale, not `1/4"`. */
 export const SHEET_NUMBER_PATTERN = /^[A-Z]{1,3}[-. ]?\d{1,4}(?:\.\d{1,3})?[A-Z]?$/;
 
+/** A paper size is not a sheet number, however well it matches. */
+const PAPER_SIZE = /^(?:A[0-4]|B[0-5])$/;
+
+/**
+ * **THE NUMBER IS A WORD IN THE LINE, NOT ALWAYS THE WHOLE LINE.**
+ *
+ * This matched whole lines only, and on a real Revit set that is why it read
+ * one page in five. The title block's number cell is `A1.1` in 37pt type, and
+ * it sits beside an index cell holding `2` — two cells, two text runs, no
+ * width reported for either, so `linesFrom` joins them into **`"2 A1.1"`**
+ * and an anchored pattern rejects it. Every page of the set failed the same
+ * way, and the handful that "read" picked up a detail callout — `FW3`, `W9`,
+ * `FN14` — from somewhere else on the paper.
+ *
+ * **TWO CANDIDATES IN ONE LINE IS NOT AN ANSWER.** `A1.1 A1.2` on a cover's
+ * index row could be either, and a wrong sheet number is silently wrong
+ * forever — the rule the whole pack keeps about a plausible wrong figure.
+ * One or none.
+ */
+export function sheetNumberIn(text: string): string {
+  const hits = text
+    .trim()
+    .split(/\s+/)
+    .filter((word) => SHEET_NUMBER_PATTERN.test(word) && !PAPER_SIZE.test(word));
+  return hits.length === 1 ? hits[0] : "";
+}
+
 /** Words a title block labels its cells with, which are never the title. */
 const BLOCK_LABELS = new Set([
   "SHEET",
@@ -243,24 +270,35 @@ export interface SheetGuess {
 }
 
 /**
- * Read a page's title block. The sheet number is the number-shaped line
- * nearest the page's bottom-right corner, where every convention puts it —
- * a cover sheet's index lists forty numbers in the middle of the page, and
- * the corner rule ignores all of them. The title is the largest other line
- * in the same corner that is not a label, a date or a scale, ties broken by
- * nearness to the number. A scanned set has no text and says so; the office
- * types the numbers, and the thumbnails are there to read them from.
+ * Read a page's title block.
+ *
+ * **THE NUMBER IS THE BIGGEST NUMBER-SHAPED THING IN THE CORNER, and that
+ * is the order that matters.** It used to be the one NEAREST the corner,
+ * broken by size — and on a real set that hands the answer to whatever
+ * callout bubble happens to sit lowest and furthest right, because a title
+ * block's number cell is inset from the paper edge while a callout can be
+ * anywhere. The number is set in 37pt type where nothing else in the corner
+ * is over 25; size is the signal, and the corner is the filter.
+ *
+ * The title is the sheet NAME, which is commonly set on two or three lines —
+ * `FOUNDATION` / `PLAN` — so it is read as a stack rather than one line, and
+ * the stack stops where the leading opens out (below that is the PROJECT
+ * name, in the same size, and it is not the title of anything).
+ *
+ * A cover sheet's index lists forty numbers in the middle of the page, and
+ * the corner filter ignores all of them. A scanned set has no text and says
+ * so; the office types the numbers, and the page is there to read them from.
  */
 export function guessSheet(items: readonly PageText[], pageWidth: number, pageHeight: number): SheetGuess {
   const lines = linesFrom(items);
   if (lines.length === 0) return { sheetNumber: "", title: "", reason: "no text on the page" };
 
   const numbers = lines
-    .filter((l) => SHEET_NUMBER_PATTERN.test(l.text) && !/^(?:A[0-4]|B[0-5])$/.test(l.text))
-    .map((l) => ({ line: l, corner: cornerScore(l, pageWidth, pageHeight) }))
-    .sort((a, b) => b.corner - a.corner || b.line.height - a.line.height);
+    .map((l) => ({ line: l, number: sheetNumberIn(l.text), corner: cornerScore(l, pageWidth, pageHeight) }))
+    .filter((c) => c.number !== "" && c.corner >= CORNER_ENOUGH)
+    .sort((a, b) => b.line.height - a.line.height || b.corner - a.corner);
   const chosen = numbers[0];
-  if (!chosen || chosen.corner < 0.9) return { sheetNumber: "", title: "", reason: "no number found" };
+  if (!chosen) return { sheetNumber: "", title: "", reason: "no number found" };
   const number = chosen.line;
 
   const inBlock = lines.filter(
@@ -270,18 +308,54 @@ export function guessSheet(items: readonly PageText[], pageWidth: number, pageHe
       l.text.length >= 3 &&
       /[A-Z]{2,}/i.test(l.text) &&
       !BLOCK_LABELS.has(l.text.toUpperCase().replace(/:$/, "")) &&
-      !SHEET_NUMBER_PATTERN.test(l.text) &&
+      sheetNumberIn(l.text) === "" &&
       !isDateOrScale(l.text),
   );
-  const title = inBlock
+  const nearest = inBlock
     .map((l) => ({ line: l, distance: Math.hypot(l.x - number.x, l.y - number.y) }))
     .sort((a, b) => b.line.height - a.line.height || a.distance - b.distance)[0];
   return {
-    sheetNumber: normaliseSheetNumber(number.text),
-    title: title ? titleCase(title.line.text) : "",
+    sheetNumber: normaliseSheetNumber(chosen.number),
+    title: nearest ? titleCase(stackedTitle(nearest.line, inBlock)) : "",
     reason: "title block",
   };
 }
+
+/** Below this a line is not in a corner at all; 2 is the bottom-right itself. */
+const CORNER_ENOUGH = 0.9;
+
+/**
+ * **A SHEET NAME IS OFTEN SET ON TWO OR THREE LINES**, and one line of it is
+ * not the name: `FOUNDATION` over `PLAN`, read as a stack from the top down.
+ *
+ * What stops the stack is the LEADING. Directly under the sheet name, in the
+ * same size, sits the project name — `SAM & TATE` / `WRIGHT - NEW` /
+ * `RESIDENCE` — which is a different thing and the title of nothing. On a
+ * real set the lines within a name are 28pt apart and the gap to the next
+ * block is 43, so a step wider than the type is tall ends it.
+ */
+export function stackedTitle(seed: PageLine, candidates: readonly PageLine[]): string {
+  const sameSize = candidates
+    .filter((l) => Math.abs(l.height - seed.height) <= seed.height * 0.15)
+    .sort((a, b) => a.y - b.y);
+  const at = sameSize.indexOf(seed);
+  if (at === -1) return seed.text;
+  /** Upward on the page is a bigger y: these were flipped when they were read. */
+  const stack = [seed];
+  for (let i = at + 1; i < sameSize.length; i++) {
+    const step = sameSize[i].y - stack[stack.length - 1].y;
+    if (step > seed.height * LEADING) break;
+    stack.push(sameSize[i]);
+  }
+  return stack
+    .slice()
+    .reverse()
+    .map((l) => l.text)
+    .join(" ");
+}
+
+/** A line's leading within one name, as a multiple of its height. */
+const LEADING = 1.35;
 
 /** 0 at the top-left corner, 2 at the bottom-right; a run is where its centre is. */
 function cornerScore(l: PageLine, pageWidth: number, pageHeight: number): number {

@@ -776,6 +776,8 @@ async function proposeForStep(
                 : `per ${a.assembly.drivingQuantityThousandths / 1000} ${a.assembly.drivingUnit}`.trim(),
           })),
           costCodes: codes.filter((c) => c.isActive).map((c) => ({ code: c.code, name: c.name })),
+          /** The building's numbers, read with the walk in the same call (X7). */
+          measurements: measureLines(asTaken(walk.measurements)),
         };
       },
       { role: ctx.role },
@@ -791,6 +793,8 @@ async function proposeForStep(
         answers: live(asWalkAnswers(here)),
         assemblies: gathered.assemblies,
         costCodes: gathered.costCodes,
+        /** The building's numbers, so a line comes out measured, not lump. */
+        measurements: gathered.measurements,
       }),
     });
     if (!proposal) return null;
@@ -1272,6 +1276,8 @@ export async function proposeStepAction(input: unknown) {
           costCodes: codes
             .filter((c) => c.isActive)
             .map((c) => ({ code: c.code, name: c.name })),
+          /** The building's numbers, the same as the automatic path (X7). */
+          measurements: measureLines(asTaken(walk.measurements)),
         };
       },
       { role: ctx.role },
@@ -1285,6 +1291,7 @@ export async function proposeStepAction(input: unknown) {
       answers: live(asWalkAnswers(here)),
       assemblies: gathered.assemblies,
       costCodes: gathered.costCodes,
+      measurements: gathered.measurements,
     });
 
     const proposal = await takeProposal({ system });

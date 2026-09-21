@@ -270,7 +270,13 @@ export function WalkScreen({
       <Panel className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            {view.stepSection && (
+            {/**
+              * **THE PHASE'S SECTION IS NOT TRUE WHILE MEASURING.** The step
+              * underneath is only where the walk WILL start; printing
+              * *04. Structural* over "Wall perimeter — how many lf?" says the
+              * screen is somewhere it is not.
+              */}
+            {!measuring && view.stepSection && (
               <p className="text-xs uppercase tracking-wide text-subtle-foreground">
                 {view.stepSection}
               </p>

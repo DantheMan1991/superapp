@@ -120,6 +120,43 @@ there. The same as moving a row on an estimate.
 **The name** — what the walk says out loud. `Foundation`, `Demolition`,
 `Rough framing`.
 
+## Measure first
+
+At the top of an open outline is **Measure first** — the numbers the walk
+collects about the building *before* it asks anything.
+
+The walk asks for each of these one at a time, with
+{button:Measure it on a drawing|outline} beside the box, and then keeps them
+in front of it for the whole walk. That is the point of the list: give it the
+wall area once and it works from it at insulation, at drywall and at paint
+instead of asking you three times.
+
+**What belongs here is a number more than one phase needs.** A perimeter is
+your footing, your foundation wall, your backfill and your siding. A number
+only one phase ever reads is better as a question on that phase — putting it
+here only makes the walk longer before it starts.
+
+{button:Add one|outline} opens a short form:
+
+| Field | What it is |
+| --- | --- |
+| **What it is** | The name, as you would say it: *Wall perimeter*, *Roof area*. It is also how the number is stored, so two outlines asking for *Wall perimeter* are asking for the same one number. |
+| **In what** | The unit the answer is in — `lf`, `sf`, `ea`. It goes into the question, because the answer is a bare figure. |
+| **How it is taken** | A length, an area or a count. This is which drawing tool gets offered, and **only traces of that kind are offered back** — ask for an area and nobody can hand you a length. |
+| **What to include, in your own words** | Shown in brackets after the question. *"Outside face of the foundation, all the way round"* is the difference between two estimators getting the same number and getting different ones. |
+| **Always ask for this one** | On, and the walk asks for it every time. Off, and it still asks, but it is fair game to wave past. |
+
+{button:Change|ghost} edits a row in place; the bin takes it off the list and
+asks once before it does.
+
+**Taking one off does not unmeasure a job.** The numbers belong to the jobs
+they were taken on; this list only decides what future walks ask for.
+
+**An outline that already existed does not get the starter list.** Nothing
+ever puts rows back into an outline you have — that is the same rule that
+stops a deleted step reappearing. Add the ones you want; it takes a minute and
+they are yours from then on.
+
 ## Bringing questions in from another outline
 
 An outline read off your chart has the right steps and one question on each.

@@ -120,6 +120,179 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-20 — The walk measures the house before it prices it (`claude/measure-the-house`, X7, [ADR 0100](../decisions/0100-a-measurement-is-a-fact-about-the-building-not-an-answer-to-a-question.md))
+
+Two asks from the founder, one message apart, and a defect nobody had
+reported.
+
+> *"I don't see where it allows you to open the takeoff inline... there are
+> numerous times it asks for a square footage. I need the takeoff tool to get
+> that a lot of the time."*
+
+> *"What if before the questions it prompts you to grab measurements. Full
+> exterior elevation square footage, wall square footage, wall perimeter etc.
+> Then the questions can use this information as it goes."*
+
+And the defect: **the walk forgets the house.** `EARLIER_CONTEXT = 30`, and a
+new build outline read off a real chart of cost is 73 steps and well over a
+hundred questions — so 2,400 square feet given at framing is gone by drywall.
+
+His idea answers all three, which the obvious fix does not. A *Measure it*
+button on every quantity question is fifteen interruptions instead of one
+pass, and it does nothing about the forgetting, because **a measured number
+recorded as an ANSWER falls out of the prompt exactly as a typed one does.**
+
+### A measurement is a fact about the BUILDING
+
+`job_measurements` hangs off the PROJECT, keyed by the reduced name, unique
+per project. So re-measuring corrects one row; a second estimate on the same
+job starts already measured; and there are only a handful of them, which is
+what lets them go into **every turn's prompt** from the first phase to the
+last. That is the entire return: the walk stops asking for numbers it was
+given, and does arithmetic out loud from them.
+
+**Rule 2 needed a companion.** *Gather, never price* forbids inventing a
+quantity, and a model reading it strictly would hold the measurements and do
+nothing with them. Rule 2a now says so: *"Arithmetic on a number you were
+GIVEN is not pricing; inventing the number would be."*
+
+### What to measure is the tenant's
+
+`job_estimate_outline_measures` sits beside the steps and the questions,
+seeded from the profile, edited from a panel on the outline page. The
+starters say a remodel is measured differently from a new build — rooms
+worked in and existing wall height, not a perimeter — and nothing in the pack
+names a measurement.
+
+**The test for the list is whether MORE THAN ONE phase reads the number.** A
+perimeter is footing, foundation wall, backfill and siding. One that only one
+phase needs is a question on that phase.
+
+### The drawings, over the walk
+
+*Measure it on a drawing* picks a sheet and puts the real `SheetViewer` in a
+dialog behind ONE new optional prop. Not a cut-down copy: it is a thousand
+lines of pdf.js, scale and geometry, and a second one is a second thing to
+keep right — the mistake this pack already made with four hand-rolled copies
+of one answer shape. Only traces of the kind being asked for are offered, and
+several of them offer their total.
+
+### The parser, and the three things it refuses
+
+`2,400 sf`, `38'-6"`, `24 x 40`, `40 + 24 + 40 + 24`, `40x9 + 24x9`. Refusing
+those would be correct and useless.
+
+- **Two figures with no operator is not an answer** — `240 to 260` is asked
+  again, X6's rule unchanged.
+- **A minus sign is never arithmetic**, because `38-6` is feet and inches to
+  the person typing it and would silently become 32.
+- **One figure among unknown words is still that figure** — *"2,400 sf gross"*
+  is 2,400. Two numbers among words is still unclear.
+
+### The one that nearly got away, and only driving it found
+
+The first cut put the measurements into the WALK's prompt and stopped there.
+Driving it showed what that is worth: the conversation knew the numbers, and
+the phase still came out
+
+```
+Framing labor — what are you getting for that?
+```
+
+a lump, over a building whose wall area was sitting right there. **The
+proposal is where a quantity is set, and it had never been told.**
+`proposeSystemPrompt` now carries the same lines, with a rule 2a beside the
+existing *a quantity is quoted or explained*: the measurements COUNT as
+numbers they gave, and the working goes in `derivedFrom`. Both call sites —
+the automatic one and the *What does this come to?* button — were changed,
+because changing one of two is a mistake this repo has made before.
+
+The same phase, after:
+
+```
+Wall framing lumber, 1,216 sf — what are you getting per sf?
+```
+
+### Three traps paid for again
+
+- **The composite `SET NULL` came out bare.** `db:generate` emitted
+  `ON DELETE set null` on `(tenant_id, sheet_id)`, which can never fire — it
+  would null `tenant_id` too. Rewritten to PG 15's column-list form and
+  **proved in the isolation test by actually deleting a sheet**, not by
+  reading the file.
+- **A hand-written migration left a hole in the snapshot chain.** 0408 was
+  written by hand, so drizzle-kit never wrote `0408_snapshot.json` — the only
+  index in 409 without one. Written, and 0409's `prevId` repointed, then
+  `db:generate` run to prove it produces no spurious diff.
+- **A pass matched on a substring.** `PASS_WORDS` contains `na`, and
+  `"internal 40"` contains `na`, so a measurement somebody was giving would
+  have been recorded as *not on this job*. Both sides are reduced to words
+  before comparing.
+
+### Two things the type checker caught that reading would not have
+
+- **`view: null` on every error branch collapsed the narrowing.** The screen
+  does `if ("error" in result) { if (result.view) ... }`, and because each
+  error branch typed `view` as literally `null`, TypeScript narrowed the
+  whole result to `never`. The fix is the behaviour the wrong-answer bug
+  already bought: **an error goes back with the real view**, read fresh.
+- **A second return shape that merely LACKED `put`** collapsed `result.put`
+  to `{}`. One `TurnOutcome` interface now, shared by the pricing door and the
+  measuring door.
+
+### Driven end to end, on dev
+
+Three measurements added by hand to the New build outline, then a fresh walk
+on EST-3:
+
+```
+Measuring the building · 3 to go
+  Wall perimeter — how many lf? (Outside face, all the way round…)
+    "40 + 24 + 40 + 24"   → 128 lf
+  Wall height — how many lf? (Floor to plate on the main level.)
+    "9 or 10"             → asked again: "— one figure, please."
+    "9'-6\""               → 9.5 lf
+  Roof area — how many sf?
+    [Measure it on a drawing] → A-101 → Use this on the 59 sq ft area
+                          → 59.026 sf, with the ruler mark
+→ measuring closed itself and the walk opened Rough carpentry, step 1 of 10
+```
+
+The viewer offered *Use this* on the area and NOT on the length or the count
+beside it, which is the kind guard doing its job.
+
+Then a SECOND walk on the same job, to prove a measurement outlives the walk
+that took it: it went **straight to the questions** — nothing left to measure —
+and its first phase proposed, from the database:
+
+```
+Wall framing lumber | 1,216 sf @ $3.10 | said/derived
+    perimeter 128 lf x wall height 9.5 = 1,216 sf
+Roof framing lumber | 59.026 sf        | none/derived
+    roof area per A-101 = 59.026 sf
+Framing labor       | 1 ls             | none/none
+```
+
+The third line is a lump and is meant to be: no measurement gives it a
+quantity, and the model saying so is the honest answer. The measurement it
+did use keeps where it came from — *area on this sheet · A-101 · First floor
+plan*.
+
+Migrations 0407–0409, applied to dev and production; `db:verify-rls` green on
+both at 242 tables.
+
+### Not built, and worth knowing
+
+- **An outline that already exists does not gain the starter list** (ADR
+  0098's rule: a re-install never puts back what somebody deleted). Every
+  tenant walking today adds their own on the outline page — which is what was
+  done to drive this.
+- **A walk already running never measures.** `startMeasuring` is called when
+  a walk begins and nowhere else.
+- **No formula engine.** Wall area as perimeter × height is arithmetic the
+  walk can already do out loud from the prompt. `source` allows `derived` so
+  it can start writing one without a migration.
+
 ### 2026-09-20 — The money is part of the conversation (`claude/the-money-in-the-conversation`, X6)
 
 The founder, having walked a real bid: *"I'm still not seeing how the estimate
@@ -5643,6 +5816,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
 | `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
+| `job_estimate_outline_measures` | **What to measure before the questions start** (X7, ADR 0100): the name, the `unit` the answer lands in, the `kind` of takeoff tool it wants (length / area / count), `guidance` in the business's own words, and `required`. | Composite FK to the outline, **cascade** — it is the outline's list, beside the steps and the questions, and **owner work** to edit for the same reason the steps are. CHECK: name present, kind on the list. Unique per `(outline, name)`. The test for belonging on it is whether MORE THAN ONE phase reads the number. |
+| `job_measurements` | **A number about the BUILDING** (X7, ADR 0100): name, `slug`, unit, `value_thousandths`, `source` (measured / said / derived), a note, and `passed_at` for *not on this job*. `sheet_id` / `markup_id` when it was traced. | Hangs off the **PROJECT**, not the estimate and not the walk — a perimeter does not change between revisions, so two walks and three revisions read one row. **Unique on `(tenant, project, slug)`**, which is what makes the name the identity and makes re-measuring a correction. CHECK: name and slug present, source on the list, and **a value OR a pass, never neither**. The two composite FKs are `ON DELETE SET NULL ("sheet_id")` / `("markup_id")` in **PG 15's column-list form** — the bare one drizzle-kit emits can never fire, because it would null `tenant_id`; the trace can go and the number stays, since it was true when it was taken. |
+| `job_estimate_interviews.pending_measure_id` / `.measured_at` | The measurement being asked for right now (so the answer lands on the row whose id was on screen, never on one the model inferred), and **when the walk stopped measuring and started asking**. `measured_at` is STAMPED, not derived: deriving it from "is the list answered" would drop every walk in progress back into measuring the moment somebody added a measurement to the outline. |
 | `job_bid_packages` | **One scope being priced** (X3, ADR 0098): what it is, the cost code by its DIGITS, the scope a subcontractor reads, when numbers are wanted by, open or closed. | Cascade from the project. Hung on the JOB, not an estimate, because a business asks for a number once and may price two revisions with it. CHECK: title present, status on the list. Behind the interview's grant in application code, not in a policy. |
 | `job_bid_invitations` | **One subcontractor asked, and what they said**: their own token, its expiry, views, and the reply — a number or a decline, with the name they typed and an IP hash. `is_awarded` for the one the business is going with. | Cascade from the package; **RESTRICT to the party** — a sub who has been asked for a number is kept. `token_hash` GLOBALLY unique with no tenant prefix (the public lookup has no tenant to scope by), token under AES-GCM so the link can be copied again. Unique per `(package, party)`: asking twice is one ask. **At most one award**, by a partial index. CHECK: **a reply is whole or absent** (ADR 0085's shape), and **`not is_awarded or amount_cents is not null`** — you cannot award a number nobody gave. |
 | `job_estimate_interview_answers.superseded_at` | **When somebody asked that one again** (X4, ADR 0099). Not a table: one nullable column, and the whole mechanism behind going back into a walk. A superseded row stops counting in `settledIds`, `walkProgress` and the reckoning, so its step is no longer covered and `currentStep` takes the walk back to it with no special case for revisiting. The old row stays, because a transcript is a record of what happened. |
@@ -5684,6 +5860,20 @@ migrations, so their unique indexes already existed when the FKs were added. The
 ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
+
+- `src/packs/jobs/measure-math.ts` + `measure-ops.ts` + `walk-measure-ops.ts`
+  + `measure-actions.ts` + `components/measure-on-a-drawing.tsx` +
+  `components/outline-measures.tsx` — **measuring the building before pricing
+  it** (X7, ADR 0100). The split is X6's, deliberately identical: the pure
+  half reads what an estimator types (`38'-6"`, `24 x 40`,
+  `40 + 24 + 40 + 24`) and refuses everything it would have to guess at, the
+  ops half writes it, and `walk-measure-ops.ts` is the walk's end — ask, park
+  on the interview, bank, stamp `measured_at`. **The model is in none of it.**
+  `LoadedWalk` carries the project, the declared list and the measurements so
+  there is ONE place they are read, and `measureLines` puts them into every
+  turn's prompt, which is the whole point of the slice. The drawings open over
+  the walk through `SheetViewer`'s one optional `measuringFor` prop — not a
+  second viewer.
 
 - `src/packs/jobs/bonding-ops.ts` + `bonding-math.ts` +
   `components/bond-form.tsx` — surety bonds and the line behind them

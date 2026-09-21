@@ -627,8 +627,6 @@ export interface WalkMeasuring {
   }[];
   /** How many of the outline's list are still to come. */
   left: number;
-  /** The walk has finished measuring and is on the questions. */
-  done: boolean;
 }
 
 export function walkView(walk: LoadedWalk): WalkView {
@@ -780,7 +778,6 @@ function measuringOf(walk: LoadedWalk): WalkMeasuring {
     left: declared.filter(
       (d) => !taken.some((t) => t.slug === measureSlug(d.name)),
     ).length,
-    done: walk.interview.measuredAt !== null,
   };
 }
 

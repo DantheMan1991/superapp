@@ -173,6 +173,12 @@ what your business wrote as guidance for that phase. The line beside it counts
 what you have answered, what got passed over, and how many questions **it
 thought of** — ones your outline did not contain.
 
+While it is asking you for prices the header adds **what it costs** beside the
+phase name, and keeps naming **the phase the money belongs to** — the one whose
+questions you have just finished, not the one you are about to start. The panel
+on the right stays on that phase too, so what you said about it is still beside
+you while you price it.
+
 ### The rail
 
 Under that is a row of small squares, one for every phase in your outline, in
@@ -275,8 +281,13 @@ Type a figure. It goes on that line with the basis reading *you said it*, and
 the walk asks for the next one. When they are all in, the item goes on the
 estimate and it tells you what the phase came to.
 
-Three things worth knowing:
+Four things worth knowing:
 
+- **The header says whose money it is.** While the prices are being asked it
+  reads the phase they belong to with **what it costs** beside it —
+  *Gutters · what it costs · step 5 of 10* — and the square for that phase
+  keeps its ring on the rail. The walk has not moved on yet, and neither has
+  the header.
 - **The question says which number it wants.** *Per lf* when there is a
   quantity, the amount outright when the line is a lump. That is not fussiness:
   `$3,400` read as a rate against 240 lf is **$816,000**.

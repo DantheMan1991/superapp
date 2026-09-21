@@ -11,6 +11,8 @@ import {
   issuesOf,
   tickedByDefault,
   linesFrom,
+  sheetNumberIn,
+  stackedTitle,
   normaliseSheetNumber,
   summariseDrawings,
   titleCase,
@@ -211,5 +213,109 @@ describe("reading a title block", () => {
     expect(titleCase("FIRST FLOOR PLAN")).toBe("First floor plan");
     expect(titleCase("Roof Plan")).toBe("Roof Plan");
     expect(titleCase("  ELECTRICAL   LIGHTING ")).toBe("Electrical lighting");
+  });
+});
+
+/**
+ * **A REAL SET'S TITLE BLOCK**, and the reason this block exists.
+ *
+ * The founder uploaded a 37-page Revit set and it read **7 pages, badly**:
+ * five of the seven were detail callouts — `FW3`, `W9`, `FN14` — picked up
+ * from the middle of the paper, and the titles were the PROJECT name. The
+ * tests above all passed throughout, because every one of them is a title
+ * block somebody made up. The geometry below is measured off that file: a
+ * 2592x1728 sheet, the number cell in 37.5pt type at y=111, the sheet name
+ * in 24.9pt on two lines at y=265 and 293, and the project name in the same
+ * 24.9pt directly under it at 336, 364 and 392.
+ *
+ * With them the reader gets **37 of 37**.
+ */
+describe("a Revit title block, off the real set", () => {
+  const W = 2592;
+  const H = 1728;
+  const at = (str: string, x: number, y: number, height: number): PageText => ({ str, x, y, width: 0, height });
+
+  /** Every run in that set reports width 0, which is why the cells join. */
+  const titleBlock = (number: string, name: string[]) => [
+    at("9/21/2026 4:19:58 PM", 2535, 73, 9.5),
+    at("Scale", 2281, 87, 9.6),
+    at(number, 2336, 111, 37.5),
+    at("JS/DH/RK", 2447, 154, 12.5),
+    at("Checked by", 2281, 155, 9.6),
+    at("RLR", 2480, 172, 12.5),
+    at("Drawn by", 2281, 173, 9.6),
+    at("09/21/26", 2456, 190, 12.5),
+    at("Date", 2281, 191, 9.6),
+    ...name.map((line, i) => at(line, 2334, 265 + i * 28, 24.9)),
+    at("RESIDENCE", 2321, 336, 24.9),
+    at("WRIGHT - NEW", 2303, 364, 24.9),
+    at("SAM & TATE", 2319, 392, 24.9),
+  ];
+
+  it("reads the number out of a cell joined to its neighbour", () => {
+    /** The index cell and the number cell arrive as one line: "2 A1.1". */
+    expect(guessSheet(titleBlock("2 A1.1", ["3D VIEWS"]), W, H)).toEqual({
+      sheetNumber: "A1.1",
+      title: "3d views",
+      reason: "title block",
+    });
+  });
+
+  it("reads a sheet name set on two lines, and stops before the project name", () => {
+    const guess = guessSheet(titleBlock("22 S1.0", ["PLAN", "FOUNDATION"]), W, H);
+    expect(guess.sheetNumber).toBe("S1.0");
+    /** NOT "Plan", and NOT "Foundation plan sam & tate wright - new residence". */
+    expect(guess.title).toBe("Foundation plan");
+  });
+
+  /**
+   * **SIZE BEATS NEARNESS, and this is what the old order got wrong.** A
+   * title block's number cell is inset from the paper edge; a callout bubble
+   * can sit anywhere, including lower and further right. The number is the
+   * biggest thing in that corner by a factor of three.
+   */
+  it("does not hand the answer to a callout sitting closer to the corner", () => {
+    const withCallout = [...titleBlock("22 S1.0", ["PLAN", "FOUNDATION"]), at("FW3", 2560, 40, 9.5)];
+    expect(guessSheet(withCallout, W, H).sheetNumber).toBe("S1.0");
+  });
+});
+
+describe("sheetNumberIn", () => {
+  it("takes the one number-shaped word in a line", () => {
+    expect(sheetNumberIn("2 A1.1")).toBe("A1.1");
+    expect(sheetNumberIn("A-101")).toBe("A-101");
+    expect(sheetNumberIn("13 A2.4")).toBe("A2.4");
+  });
+
+  /** A plausible wrong sheet number is silently wrong forever. One or none. */
+  it("refuses a line with two of them", () => {
+    expect(sheetNumberIn("A1.1 A1.2")).toBe("");
+  });
+
+  it("still refuses a paper size, and anything with no number in it", () => {
+    expect(sheetNumberIn("A4")).toBe("");
+    expect(sheetNumberIn("22 A4")).toBe("");
+    expect(sheetNumberIn("FOUNDATION PLAN")).toBe("");
+    expect(sheetNumberIn("")).toBe("");
+  });
+});
+
+describe("stackedTitle", () => {
+  const line = (text: string, y: number, height = 24.9) => ({ text, x: 2300, y, width: 0, height });
+
+  it("reads a name up the page and joins it top down", () => {
+    const plan = line("PLAN", 265);
+    const all = [plan, line("FOUNDATION", 293), line("RESIDENCE", 336)];
+    expect(stackedTitle(plan, all)).toBe("FOUNDATION PLAN");
+  });
+
+  it("keeps a one-line name to itself", () => {
+    const views = line("3D VIEWS", 293);
+    expect(stackedTitle(views, [views, line("RESIDENCE", 336)])).toBe("3D VIEWS");
+  });
+
+  it("ignores lines of another size, whatever the leading", () => {
+    const seed = line("DETAILS", 265);
+    expect(stackedTitle(seed, [seed, line("IN-FLOOR BEAM", 290, 12.6)])).toBe("DETAILS");
   });
 });

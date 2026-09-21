@@ -26,6 +26,7 @@ import {
 } from "../actions";
 import { guessSheet, normaliseSheetNumber, tickedByDefault } from "../drawings-math";
 import { readPdf, type ReadPdf } from "./pdf-reading";
+import { PageLoupe } from "./page-loupe";
 
 const NONE = "__none__";
 
@@ -85,7 +86,7 @@ export function AddDrawingSetDialog({
   const [fromPartyId, setFromPartyId] = useState(NONE);
   const [notes, setNotes] = useState("");
   const [setId, setSetId] = useState<string | null>(null);
-  const [file, setFile] = useState<{ documentId: string; fileName: string; read: ReadPdf } | null>(null);
+  const [file, setFile] = useState<{ documentId: string; fileName: string; read: ReadPdf; bytes: Uint8Array } | null>(null);
 
   function reset() {
     setStep("set");
@@ -161,8 +162,8 @@ export function AddDrawingSetDialog({
             <FileStep
               setId={setId}
               tenantId={tenantId}
-              onRead={(documentId, fileName, read) => {
-                setFile({ documentId, fileName, read });
+              onRead={(documentId, fileName, read, bytes) => {
+                setFile({ documentId, fileName, read, bytes });
                 setStep("sheets");
               }}
             />
@@ -173,6 +174,7 @@ export function AddDrawingSetDialog({
               documentId={file.documentId}
               fileName={file.fileName}
               read={file.read}
+              bytes={file.bytes}
               existing={[]}
               onDone={() => {
                 setOpen(false);
@@ -271,7 +273,12 @@ function FileStep({
 }: {
   setId: string;
   tenantId: string;
-  onRead: (documentId: string, fileName: string, read: ReadPdf) => void;
+  /**
+   * The BYTES go with the read. The loupe re-renders a page at a readable
+   * size, and re-fetching a 50MB set to do it — when the browser has just
+   * had it in hand — is the slow way round.
+   */
+  onRead: (documentId: string, fileName: string, read: ReadPdf, bytes: Uint8Array) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -301,7 +308,7 @@ function FileStep({
         return;
       }
       const read = await readPdf(bytes, (done, total) => setBusy(`Reading page ${done} of ${total}…`));
-      onRead(attached.documentId, picked.name, read);
+      onRead(attached.documentId, picked.name, read, bytes);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -321,7 +328,7 @@ function FileStep({
       }
       const bytes = await fetchBytes(doc.id, setBusy);
       const read = await readPdf(bytes, (done, total) => setBusy(`Reading page ${done} of ${total}…`));
-      onRead(doc.id, doc.fileName, read);
+      onRead(doc.id, doc.fileName, read, bytes);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not read the file");
     } finally {
@@ -435,6 +442,7 @@ export function SheetIndexTable({
   documentId,
   fileName,
   read,
+  bytes,
   existing,
   onDone,
 }: {
@@ -442,11 +450,15 @@ export function SheetIndexTable({
   documentId: string;
   fileName: string;
   read: ReadPdf;
+  /** The file itself, so a page can be drawn big enough to read (the loupe). */
+  bytes: Uint8Array;
   /** What this file was read into before, when it is being read again. */
   existing: IndexedSheet[];
   onDone: () => void;
 }) {
   const [pending, startTransition] = useTransition();
+  /** The page open in the loupe, 1-based; null when the table is on show. */
+  const [loupePage, setLoupePage] = useState<number | null>(null);
   const [rows, setRows] = useState<SheetDraft[]>(() =>
     read.pages.map((p) => {
       const prior = existing.find((e) => e.pageNumber === p.pageNumber);
@@ -480,6 +492,8 @@ export function SheetIndexTable({
     }
     return dupes;
   }, [rows]);
+  /** The row the loupe is editing. A page out of range simply closes it. */
+  const loupeRow = loupePage === null ? null : (rows.find((r) => r.pageNumber === loupePage) ?? null);
   const included = rows.filter((r) => r.include);
   const blank = included.filter((r) => normaliseSheetNumber(r.sheetNumber) === "");
   const ready = included.length > 0 && blank.length === 0 && duplicates.size === 0;
@@ -530,12 +544,29 @@ export function SheetIndexTable({
                     <div className="flex items-start gap-2">
                       <Checkbox checked={r.include} onCheckedChange={(v) => patch(r.pageNumber, { include: v === true })} aria-label={`Page ${r.pageNumber} is a sheet`} className="mt-0.5" />
                       <div>
-                        {r.thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={r.thumbnail} alt={`Page ${r.pageNumber}`} className="w-24 rounded border bg-white" />
-                        ) : (
-                          <span className="text-xs">p. {r.pageNumber}</span>
-                        )}
+                        {/**
+                          * **THE THUMBNAIL IS A BUTTON.** It is 168px wide, so
+                          * on a real set it shows that a page exists and
+                          * nothing about what it is. Clicking draws the page
+                          * at a size the title block can be read at, which is
+                          * the only answer when the reading came back empty.
+                          */}
+                        <button
+                          type="button"
+                          onClick={() => setLoupePage(r.pageNumber)}
+                          className="block rounded ring-offset-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          title={`Look at page ${r.pageNumber}`}
+                          aria-label={`Look at page ${r.pageNumber} to read its number`}
+                        >
+                          {r.thumbnail ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={r.thumbnail} alt="" className="w-24 rounded border bg-white transition-opacity hover:opacity-80" />
+                          ) : (
+                            <span className="flex h-16 w-24 items-center justify-center rounded border bg-muted text-xs hover:opacity-80">
+                              p. {r.pageNumber}
+                            </span>
+                          )}
+                        </button>
                         <p className="mt-0.5 text-[10px] text-muted-foreground">
                           p. {r.pageNumber} · {r.hint}
                         </p>
@@ -570,6 +601,20 @@ export function SheetIndexTable({
           {pending ? "Saving…" : `Save ${included.length} ${included.length === 1 ? "sheet" : "sheets"}`}
         </Button>
       </DialogFooter>
+
+      {loupeRow && (
+        <PageLoupe
+          bytes={bytes}
+          fileName={fileName}
+          page={loupeRow.pageNumber}
+          pageCount={read.pageCount}
+          row={loupeRow}
+          duplicate={duplicates.has(loupeRow.pageNumber)}
+          onPage={setLoupePage}
+          onPatch={(change) => patch(loupeRow.pageNumber, change)}
+          onClose={() => setLoupePage(null)}
+        />
+      )}
     </div>
   );
 }
@@ -595,7 +640,7 @@ export function EditDrawingSetDialog({
   const [issuedOn, setIssuedOn] = useState(existing.issuedOn);
   const [fromPartyId, setFromPartyId] = useState(existing.fromPartyId ?? NONE);
   const [notes, setNotes] = useState(existing.notes);
-  const [reading, setReading] = useState<{ documentId: string; fileName: string; read: ReadPdf; indexed: IndexedSheet[] } | null>(null);
+  const [reading, setReading] = useState<{ documentId: string; fileName: string; read: ReadPdf; bytes: Uint8Array; indexed: IndexedSheet[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
   // A read still in flight when the dialog closes must not reopen it into the table.
@@ -631,7 +676,7 @@ export function EditDrawingSetDialog({
       const bytes = await fetchBytes(f.documentId, setBusy);
       const read = await readPdf(bytes, (done, total) => setBusy(`Reading page ${done} of ${total}…`));
       if (!openRef.current) return;
-      setReading({ documentId: f.documentId, fileName: f.fileName, read, indexed: f.indexed });
+      setReading({ documentId: f.documentId, fileName: f.fileName, read, bytes, indexed: f.indexed });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not read the file");
     } finally {
@@ -691,6 +736,7 @@ export function EditDrawingSetDialog({
               documentId={reading.documentId}
               fileName={reading.fileName}
               read={reading.read}
+              bytes={reading.bytes}
               existing={reading.indexed}
               onDone={() => {
                 setReading(null);
@@ -735,7 +781,7 @@ export function EditDrawingSetDialog({
                     <Loader2 className="size-3.5 animate-spin" /> {busy}
                   </p>
                 ) : (
-                  <AddFileToSet setId={existing.id} tenantId={tenantId} onRead={(documentId, fileName, read) => setReading({ documentId, fileName, read, indexed: [] })} />
+                  <AddFileToSet setId={existing.id} tenantId={tenantId} onRead={(documentId, fileName, read, bytes) => setReading({ documentId, fileName, read, bytes, indexed: [] })} />
                 )}
               </div>
               <DialogFooter className="flex-row items-center justify-between sm:justify-between">
@@ -761,6 +807,6 @@ export function EditDrawingSetDialog({
 }
 
 /** The file step again, inside the set's row, for a set that came one file per sheet. */
-function AddFileToSet({ setId, tenantId, onRead }: { setId: string; tenantId: string; onRead: (documentId: string, fileName: string, read: ReadPdf) => void }) {
+function AddFileToSet({ setId, tenantId, onRead }: { setId: string; tenantId: string; onRead: (documentId: string, fileName: string, read: ReadPdf, bytes: Uint8Array) => void }) {
   return <FileStep setId={setId} tenantId={tenantId} onRead={onRead} />;
 }

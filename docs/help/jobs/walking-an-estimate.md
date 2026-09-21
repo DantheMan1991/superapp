@@ -195,7 +195,9 @@ The card that opens shows the phase, its cost code, where it stands and what
 it comes to. Under that is every question asked on it and what you said.
 
 - {button:Work on this|secondary} takes the walk to that phase and asks its
-  next question. It only appears on a phase you are not already on.
+  next question. It appears on a phase you are not already on **that still
+  has a question nobody has answered** — if everything on it is answered
+  there is nothing for it to ask, and *Ask again* is the way in instead.
 - {button:Ask again|ghost}, beside any answer, asks you that one question
   again. The walk goes there and puts the question back on the screen.
 - {button:Close|ghost} shuts the card. Clicking the same square again does
@@ -204,6 +206,12 @@ it comes to. Under that is every question asked on it and what you said.
 **Asking again does not erase what you said.** The old answer stops counting
 and stays in the record, so the transcript still shows what you said at the
 time and what you changed it to.
+
+**Both buttons work on a finished walk**, and the card says so. Using either
+one picks the walk back up on that phase; when the phase is answered, its
+lines are worked out and priced as usual, and the walk finishes again as soon
+as nothing anywhere is outstanding. You are never stuck reading a bid you
+cannot fix.
 
 ### Answering
 
@@ -302,6 +310,12 @@ Quantities work the same way. A figure you said is used as you said it. A figure
 
 {button:Put it on the estimate|primary} adds them as one item named after the phase, with the lines inside it — the same shape as anything you build by hand, so the proposal prints it normally. {button:Not yet|ghost} leaves it alone.
 
+**A phase you walk twice is still one item.** Go back into a phase, answer it
+again and price it, and the new lines replace the ones that phase put on
+before — in the same item, keeping the name if you renamed it, and leaving
+alone any line you added to it yourself. You never end up with the same phase
+on the bid twice.
+
 **Nothing is written until you press the button**, and answering anything else clears the working-out, because it was about the answers as they stood.
 
 ## The whole bid
@@ -365,11 +379,23 @@ price it is your number that counts.
 
 ## When it finishes
 
-When it has asked everything in the outline, the walk closes and says so — and
+**A walk closes when there is no phase left with a question nobody has
+answered** — not when it reaches the bottom of the list. Answer the last phase
+on your outline while an earlier one is still untouched and the walk goes back
+up to it rather than ending over it.
+
+When there really is nothing left to ask, the walk closes and says so — and
 **the screen stays where it is** so you can read what is left. Running out of
-questions is not the same as having a finished bid.
+questions is not the same as having a finished bid: a phase can be answered
+and unpriced, out for bid, or waiting on an allowance.
 
 {button:Back to the estimate|primary} takes you back whenever you are ready.
+
+**A finished walk is not a closed door.** Click a phase on the rail and work
+on it or ask a question again, and the walk starts up again on that phase —
+prices it, puts it on the estimate, and finishes again when nothing is
+outstanding. Walks finished before this worked that way may say *This walk
+stopped with N phases still to ask*; those phases are exactly where to start.
 
 If you leave and come back later, the estimate itself will tell you: the panel
 above the lines reads *The last walk left N phases unfinished*, with

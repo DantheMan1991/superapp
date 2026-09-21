@@ -457,3 +457,13 @@ of them.
   needs one waits, or ships without.
 - **Take the next ADR number as you write the file**, and re-check
   `docs/decisions/` immediately before pushing.
+- **The index row goes in the same commit as the ADR.** An ADR with no row in
+  [`docs/decisions/README.md`](decisions/README.md) is written, reviewed,
+  merged, rendered at `/admin/docs` — and unfindable by the one page whose job
+  is finding it. The index stopped at `0058` on 2026-09-14 and the folder
+  reached `0099` six days later — forty-one decisions that nothing listed,
+  because adding the row is a second step and a second step is the one that
+  gets skipped. Take the date and the standing from the ADR's own header;
+  the file is the record and the table is a listing of it, so when they
+  disagree the file wins. `tests/adr-index.test.ts` fails on an ADR with no
+  row, a row with no ADR, a duplicate, and a date or standing that has drifted.

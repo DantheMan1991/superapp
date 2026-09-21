@@ -151,3 +151,85 @@ export function perUnitFromTotal(totalCents: number, ask: PriceAsk): number {
 export function extendedCents(quantityThousandths: number, unitCostCents: number): number {
   return Math.round((quantityThousandths * unitCostCents) / 1_000);
 }
+
+/**
+ * **A PRICE QUESTION BELONGS TO A PHASE, AND IT IS NOT THE ONE THE WALK
+ * DERIVED.** The proposed line remembers which: `step_id`, and `step_title`
+ * and `step_section` AS THEY WERE when it was proposed.
+ */
+export interface PendingPrice {
+  /** The proposed line being asked about. */
+  lineId: string;
+  stepId: string | null;
+  stepTitle: string;
+  stepSection: string;
+}
+
+/** Enough of an outline step to name it. */
+interface PhaseLike {
+  id: string;
+  title: string;
+  section: string;
+  guidance: string;
+}
+
+/** A phase as the screen names it. */
+export interface PhaseOnScreen {
+  stepId: string | null;
+  title: string;
+  section: string;
+  guidance: string;
+  /** Its place in the outline as it stands; 0 when the outline has lost it. */
+  number: number;
+}
+
+/**
+ * **WHICH PHASE THE SCREEN IS ABOUT**, which is not always the one
+ * `currentStep` derived.
+ *
+ * X6's own note says why: coverage is how a phase is known to be finished,
+ * so **`currentStep` has already left the phase whose questions just
+ * settled** — and the money for that phase is asked afterwards. Everything
+ * hung off the derived step therefore named the NEXT phase while the prices
+ * were being asked, which on a real bid read
+ * *"04. STRUCTURAL / Rough carpentry · step 1 of 10"* over *"Wall board,
+ * 1/2", hang & finish, 1,216 sf — what are you getting per sf?"*.
+ *
+ * Nothing here is derived. A pending price names its phase, and the walk
+ * has not moved on — `moveToStep` runs after the last price is in — so this
+ * is the honest answer, not a nicer-looking one.
+ *
+ * **THE OUTLINE'S WORDS WIN WHERE IT STILL HAS THE STEP**, and the line's
+ * remembered ones are the fallback: the outline is read live (ADR 0098), so
+ * a phase renamed mid-walk should read by its new name on the screen, while
+ * a phase DELETED mid-walk can still say what it was called.
+ */
+export function phaseOnScreen(
+  steps: readonly PhaseLike[],
+  standing: PhaseLike | null,
+  pricing: PendingPrice | null,
+): PhaseOnScreen {
+  const at = (stepId: string | null) =>
+    stepId === null ? -1 : steps.findIndex((s) => s.id === stepId);
+
+  if (pricing) {
+    const i = at(pricing.stepId);
+    const step = i === -1 ? null : steps[i];
+    return {
+      stepId: pricing.stepId,
+      title: step?.title ?? pricing.stepTitle,
+      section: step?.section ?? pricing.stepSection,
+      guidance: step?.guidance ?? "",
+      number: i + 1,
+    };
+  }
+
+  return {
+    stepId: standing?.id ?? null,
+    title: standing?.title ?? "",
+    section: standing?.section ?? "",
+    guidance: standing?.guidance ?? "",
+    /** Nowhere to stand means the walk is past the end of the outline. */
+    number: standing ? at(standing.id) + 1 : steps.length,
+  };
+}

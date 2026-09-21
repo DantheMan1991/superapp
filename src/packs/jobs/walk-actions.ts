@@ -25,6 +25,7 @@ import {
   moveToStep,
   readAnswers,
   readInterview,
+  readPendingPrice,
   recordAnswers,
   savePendingTurn,
   startWalk,
@@ -443,6 +444,14 @@ async function oneTurn(
         const interview = await readInterview(tx, ctx.tenantId, interviewId);
         const answerRows = await readAnswers(tx, ctx.tenantId, interviewId);
         if (!interview) return null;
+        /**
+         * A price is not pending on this path — `answerPrice` takes those
+         * turns before this one runs — but the view is built from what the
+         * row SAYS rather than from that reasoning, so it cannot be one
+         * refactor away from naming the wrong phase. It costs no query when
+         * there is nothing pending, which here is always.
+         */
+        const pricing = await readPendingPrice(tx, ctx.tenantId, interview);
 
         /**
          * **THE STEP DOES NOT MOVE HERE ANY MORE.** It used to, the moment
@@ -469,7 +478,7 @@ async function oneTurn(
         const answers = asWalkAnswers(answerRows);
         const here = currentStep(steps, answers, step.id);
         const stepFinished = !here || here.id !== step.id;
-        return { steps, outlineName, interview, answerRows, stepFinished };
+        return { steps, outlineName, interview, answerRows, stepFinished, pricing };
       },
       { role: ctx.role },
     );
@@ -478,13 +487,20 @@ async function oneTurn(
       ok: true as const,
       /** The whole fresh view, so the screen needs no second round trip. */
       view: after
-        ? walkViewFrom(after.steps, after.outlineName, after.interview, after.answerRows, {
-            /** Act one's read; the building cannot have been re-measured mid-turn. */
-            projectId: gathered.walk.projectId,
-            declared: gathered.walk.declared,
-            measurements: gathered.walk.measurements,
-            rooms: gathered.walk.rooms,
-          })
+        ? walkViewFrom(
+            after.steps,
+            after.outlineName,
+            after.interview,
+            after.answerRows,
+            {
+              /** Act one's read; the building cannot have been re-measured mid-turn. */
+              projectId: gathered.walk.projectId,
+              declared: gathered.walk.declared,
+              measurements: gathered.walk.measurements,
+              rooms: gathered.walk.rooms,
+            },
+            after.pricing,
+          )
         : null,
       finished: after?.interview.status !== "running",
       /** The step this turn was ABOUT, so a caller can see it has moved on. */

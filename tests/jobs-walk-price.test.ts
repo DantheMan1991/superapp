@@ -3,8 +3,10 @@ import {
   extendedCents,
   needsPricing,
   nextToPrice,
+  phaseOnScreen,
   priceQuestionFor,
   readPriceReply,
+  type PendingPrice,
   type PriceableLine,
 } from "../src/packs/jobs/walk-price-math";
 
@@ -156,5 +158,85 @@ describe("extendedCents", () => {
   it("is nothing at nothing", () => {
     expect(extendedCents(0, 1_400)).toBe(0);
     expect(extendedCents(240_000, 0)).toBe(0);
+  });
+});
+
+/**
+ * **WHICH PHASE THE SCREEN SAYS IT IS ON.**
+ *
+ * The founder, driving walk EST-6: the header read *"04. STRUCTURAL /
+ * Rough carpentry - step 1 of 10"* while the question on the screen was
+ * *"Wall board, 1/2", hang & finish, 1,216 sf - what are you getting per
+ * sf?"*, which is a DRYWALL line. Every price in a phase was asked under
+ * the name of a different phase, because the header came off `currentStep`
+ * and `currentStep` has already left the phase whose questions settled.
+ *
+ * A price answered against the wrong mental phase is the mistake this whole
+ * layer exists to avoid, so it is held by a test rather than by a comment.
+ */
+describe("phaseOnScreen", () => {
+  const steps = [
+    { id: "s1", title: "Rough carpentry", section: "04. Structural", guidance: "frame it" },
+    { id: "s2", title: "Drywall", section: "09. Finishes", guidance: "hang and finish" },
+    { id: "s3", title: "Paint", section: "09. Finishes", guidance: "" },
+  ];
+  function price(over: Partial<PendingPrice> = {}): PendingPrice {
+    return {
+      lineId: "pl1",
+      stepId: "s2",
+      stepTitle: "Drywall",
+      stepSection: "09. Finishes",
+      ...over,
+    };
+  }
+
+  it("is where the walk is standing when nothing is being priced", () => {
+    expect(phaseOnScreen(steps, steps[0], null)).toEqual({
+      stepId: "s1",
+      title: "Rough carpentry",
+      section: "04. Structural",
+      guidance: "frame it",
+      number: 1,
+    });
+  });
+
+  /** The bug, in one assertion: the money belongs to the phase it came from. */
+  it("is the phase being PRICED, not the one the walk has derived", () => {
+    const on = phaseOnScreen(steps, steps[2], price());
+    expect(on.title).toBe("Drywall");
+    expect(on.section).toBe("09. Finishes");
+    expect(on.number).toBe(2);
+    expect(on.stepId).toBe("s2");
+  });
+
+  /**
+   * The outline is read live (ADR 0098), so a phase renamed mid-walk reads
+   * by its new name — the line's remembered words are the FALLBACK, not the
+   * answer.
+   */
+  it("prefers the outline's words while the outline still has the step", () => {
+    const renamed = [steps[0], { ...steps[1], title: "Wall board" }, steps[2]];
+    expect(phaseOnScreen(renamed, steps[2], price()).title).toBe("Wall board");
+  });
+
+  /** And a phase DELETED mid-walk can still say what it was called. */
+  it("falls back to the words the line remembers, and reports no number", () => {
+    const on = phaseOnScreen([steps[0], steps[2]], steps[2], price());
+    expect(on.title).toBe("Drywall");
+    expect(on.section).toBe("09. Finishes");
+    /** 0, never 2 of 2: the outline no longer has anywhere to point. */
+    expect(on.number).toBe(0);
+  });
+
+  /** A proposed line with no step at all is the same case. */
+  it("handles a price with no phase behind it", () => {
+    const on = phaseOnScreen(steps, steps[2], price({ stepId: null, stepTitle: "", stepSection: "" }));
+    expect(on).toEqual({ stepId: null, title: "", section: "", guidance: "", number: 0 });
+  });
+
+  /** Past the end of the outline: what the header has always said. */
+  it("counts the whole outline when there is nowhere to stand", () => {
+    expect(phaseOnScreen(steps, null, null).number).toBe(3);
+    expect(phaseOnScreen(steps, null, null).title).toBe("");
   });
 });

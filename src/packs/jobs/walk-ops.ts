@@ -19,6 +19,7 @@ import {
   type WalkStep,
 } from "./walk-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
+import { phaseOnScreen, type PendingPrice } from "./walk-price-math";
 import { asDeclared, asTaken, listMeasurements, listOutlineMeasures } from "./measure-ops";
 import { formatMeasurement, measureSlug } from "./measure-math";
 import { asRoomViews, listRooms, type RoomRow, type RoomView } from "./room-ops";
@@ -64,6 +65,12 @@ export interface LoadedWalk {
   measurements: JobMeasurement[];
   /** The rooms in it, with their floor areas (X8). */
   rooms: RoomRow[];
+  /**
+   * The price question on the screen and THE PHASE IT BELONGS TO (X6), null
+   * when the walk is asking an ordinary question. Read here rather than
+   * derived, because the derived step has already left that phase.
+   */
+  pricing: PendingPrice | null;
 }
 
 /**
@@ -131,6 +138,52 @@ async function answersOf(
     .orderBy(asc(schema.jobEstimateInterviewAnswers.sortOrder));
 }
 
+/**
+ * **THE PHASE A PENDING PRICE BELONGS TO, READ OFF THE LINE BEING ASKED
+ * ABOUT (X6).**
+ *
+ * `currentStep` has already left the phase whose questions just settled —
+ * that is how the code knows they are settled — and the money is asked
+ * afterwards, so everything derived from it names the NEXT phase while the
+ * prices are being asked. The proposed line knows better: it carries the
+ * step, and its title and section AS THEY WERE.
+ *
+ * **NO PENDING PRICE, NO QUERY.** This runs on every load of a walk and the
+ * ordinary case is an ordinary question, so the null is answered from the
+ * interview row that is already in hand.
+ */
+export async function readPendingPrice(
+  tx: Tx,
+  tenantId: string,
+  interview: Pick<JobEstimateInterview, "pendingPriceLineId">,
+): Promise<PendingPrice | null> {
+  const lineId = interview.pendingPriceLineId;
+  if (!lineId) return null;
+  const rows = await tx
+    .select({
+      id: schema.jobEstimateProposedLines.id,
+      stepId: schema.jobEstimateProposedLines.stepId,
+      stepTitle: schema.jobEstimateProposedLines.stepTitle,
+      stepSection: schema.jobEstimateProposedLines.stepSection,
+    })
+    .from(schema.jobEstimateProposedLines)
+    .where(
+      and(
+        eq(schema.jobEstimateProposedLines.tenantId, tenantId),
+        eq(schema.jobEstimateProposedLines.id, lineId),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    lineId: row.id,
+    stepId: row.stepId,
+    stepTitle: row.stepTitle,
+    stepSection: row.stepSection,
+  };
+}
+
 /** The walk on this estimate, running or most recently closed. */
 export async function loadWalk(
   tx: Tx,
@@ -158,7 +211,7 @@ export async function loadWalk(
    * already here — a turn is two and a half seconds of model, and the
    * founder has already had to complain about this screen's speed once.
    */
-  const [outline, answers, project, declared] = await Promise.all([
+  const [outline, answers, project, declared, pricing] = await Promise.all([
     stepsOfOutline(tx, tenantId, interview.outlineId),
     answersOf(tx, tenantId, interview.id),
     tx
@@ -172,6 +225,8 @@ export async function loadWalk(
       )
       .limit(1),
     listOutlineMeasures(tx, tenantId, interview.outlineId),
+    /** A price question's own phase, and nothing at all when there is none. */
+    readPendingPrice(tx, tenantId, interview),
   ]);
   const projectId = project[0]?.projectId ?? "";
   const [measurements, rooms] = projectId
@@ -207,6 +262,7 @@ export async function loadWalk(
     declared,
     measurements,
     rooms,
+    pricing,
   };
 }
 
@@ -629,12 +685,18 @@ export interface WalkView {
   interviewId: string;
   status: string;
   outlineName: string;
-  /** Which step the walk is standing on, so the rail can mark it. */
+  /**
+   * **THE PHASE THE SCREEN IS ABOUT, so the rail can mark it** — where the
+   * walk is standing, or, while a price is pending, the phase whose money is
+   * being asked. `phaseOnScreen` decides, and the five fields below are all
+   * that one phase: the header cannot name one and the panel another.
+   */
   stepId: string | null;
   stepTitle: string;
   /** The part of the bid it is in, when the outline says. */
   stepSection: string;
   stepGuidance: string;
+  /** 0 when the outline no longer holds the phase, so nothing prints "0 of 10". */
   stepNumber: number;
   stepCount: number;
   progress: WalkProgress;
@@ -654,6 +716,12 @@ export interface WalkView {
   outstanding: { id: string; prompt: string; alwaysAsk: boolean }[];
   /** The building's numbers, and whether the walk is still collecting them (X7). */
   measuring: WalkMeasuring;
+  /**
+   * **THE MONEY QUESTION ON THE SCREEN, WHEN IT IS ONE (X6).** Non-null
+   * means the phase named above is the one being PRICED — the one whose
+   * questions just settled, not the one the walk is about to start.
+   */
+  pricing: { lineId: string } | null;
 }
 
 /**
@@ -699,12 +767,19 @@ export interface WalkMeasuring {
 }
 
 export function walkView(walk: LoadedWalk): WalkView {
-  return walkViewFrom(walk.steps, walk.outlineName, walk.interview, walk.answers, {
-    projectId: walk.projectId,
-    declared: walk.declared,
-    measurements: walk.measurements,
-    rooms: walk.rooms,
-  });
+  return walkViewFrom(
+    walk.steps,
+    walk.outlineName,
+    walk.interview,
+    walk.answers,
+    {
+      projectId: walk.projectId,
+      declared: walk.declared,
+      measurements: walk.measurements,
+      rooms: walk.rooms,
+    },
+    walk.pricing,
+  );
 }
 
 /** Just the interview row. */
@@ -753,6 +828,13 @@ export function walkViewFrom(
     measurements: readonly JobMeasurement[];
     rooms: readonly RoomRow[];
   },
+  /**
+   * The pending price and its phase (X6). A caller that has the interview
+   * row has it from `readPendingPrice`, which costs nothing when there is
+   * no price pending — and passing null where there IS one would put the
+   * next phase's name over a money question, which is the whole bug.
+   */
+  pricing: PendingPrice | null,
 ): WalkView {
   const answers = asWalkAnswers(answerRows);
   const derived = currentStep(steps, answers, interview.currentStepId);
@@ -770,12 +852,22 @@ export function walkViewFrom(
     declared: [...building.declared],
     measurements: [...building.measurements],
     rooms: [...building.rooms],
+    pricing,
   };
   return viewOf(walk);
 }
 
 function viewOf(walk: LoadedWalk): WalkView {
-  const step = walk.step;
+  /**
+   * **ONE PHASE, AND EVERYTHING ON THE SCREEN IS ABOUT IT.** While a price
+   * is pending that is the phase being PRICED and not `walk.step`, which
+   * has already moved on — see `phaseOnScreen`. Resolving it once here is
+   * what stops the header, the rail, the answers panel and the proposal's
+   * heading each picking their own answer.
+   */
+  const on = phaseOnScreen(walk.steps, walk.step, walk.pricing);
+  /** The outline step itself, for the two lists that need its questions. */
+  const step = on.stepId ? (walk.steps.find((s) => s.id === on.stepId) ?? null) : null;
   const answers = asWalkAnswers(walk.answers);
   const settled = walk.answers
     .filter((a) => step && a.stepId === step.id && a.supersededAt === null)
@@ -791,11 +883,11 @@ function viewOf(walk: LoadedWalk): WalkView {
     interviewId: walk.interview.id,
     status: walk.interview.status,
     outlineName: walk.outlineName,
-    stepId: step?.id ?? null,
-    stepTitle: step?.title ?? "",
-    stepSection: step?.section ?? "",
-    stepGuidance: step?.guidance ?? "",
-    stepNumber: step ? walk.steps.findIndex((s) => s.id === step.id) + 1 : walk.steps.length,
+    stepId: on.stepId,
+    stepTitle: on.title,
+    stepSection: on.section,
+    stepGuidance: on.guidance,
+    stepNumber: on.number,
     stepCount: walk.steps.length,
     progress: walk.progress,
     say: walk.interview.pendingSay,
@@ -810,6 +902,7 @@ function viewOf(walk: LoadedWalk): WalkView {
         }))
       : [],
     measuring: measuringOf(walk),
+    pricing: walk.pricing ? { lineId: walk.pricing.lineId } : null,
   };
 }
 

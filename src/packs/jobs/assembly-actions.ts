@@ -75,6 +75,8 @@ const bodySchema = z.object({
   name: z.string().trim().min(1).max(200),
   /** One line covering its rooms, or a line per room (X11). */
   lineShape: z.enum(ASSEMBLY_LINE_SHAPES).optional(),
+  /** Every item this makes is an allowance (X12). */
+  isAllowance: z.boolean().optional(),
   clientNote: z.string().trim().max(500).default(""),
   notes: z.string().trim().max(2000).default(""),
   /** As it is typed: "320", "1", "24.5". Read the way every quantity is. */
@@ -87,6 +89,7 @@ function asInput(body: z.infer<typeof bodySchema>): SaveAssemblyInput {
   return {
     name: body.name,
     lineShape: body.lineShape,
+    isAllowance: body.isAllowance,
     clientNote: body.clientNote,
     notes: body.notes,
     drivingQuantityThousandths: quantityStringToThousandths(body.drivingQuantity) ?? 0,

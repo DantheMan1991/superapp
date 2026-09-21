@@ -91,6 +91,8 @@ export interface SaveAssemblyInput {
    * `one_line`, the only thing the walk ever did.
    */
   lineShape?: AssemblyLineShape;
+  /** Every item this makes is an allowance (X12). Left out it stays as it is. */
+  isAllowance?: boolean;
   lines: readonly AssemblyLine[];
 }
 
@@ -130,6 +132,7 @@ export async function saveItemAsAssembly(
         drivingQuantityThousandths: input.drivingQuantityThousandths,
         drivingUnit: input.drivingUnit.trim(),
         lineShape: input.lineShape,
+        isAllowance: input.isAllowance,
         createdByClerkUserId: ctx.userId,
       })
       .returning();
@@ -208,6 +211,7 @@ export async function updateAssembly(
         drivingQuantityThousandths: input.drivingQuantityThousandths,
         drivingUnit: input.drivingUnit.trim(),
         lineShape: input.lineShape,
+        isAllowance: input.isAllowance,
         version: input.version + 1,
         updatedAt: new Date(),
       })

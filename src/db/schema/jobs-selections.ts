@@ -56,6 +56,7 @@ import { parties } from "./parties";
 import { jobProjects, jobCostCodes } from "./jobs";
 import { jobContracts } from "./jobs-contracts";
 import { jobChangeOrders } from "./jobs-change-orders";
+import { jobEstimateGroups } from "./jobs-estimates";
 
 export const jobSelections = pgTable(
   "job_selections",
@@ -69,6 +70,18 @@ export const jobSelections = pgTable(
     contractId: uuid("contract_id"),
     /** The change order raised for the difference, once it has been. Null until then. */
     changeOrderId: uuid("change_order_id"),
+    /**
+     * **THE ITEM ON THE ACCEPTED ESTIMATE THAT MADE THIS** (X12), or null for
+     * every selection somebody wrote by hand — which is all of them before
+     * this existed and most of them after.
+     *
+     * Accepting an estimate turns each item marked as an allowance into one
+     * of these rows, and the link is what stops it happening twice: matching
+     * on the NAME would miss an allowance somebody renamed and would collide
+     * with a second job's *Plumbing fixtures*. The same call the walk makes
+     * for its own lines, and for the same reason — by id where there is one.
+     */
+    estimateGroupId: uuid("estimate_group_id"),
     /** Where the money lands in the budget, and the line a raised change order carries. */
     costCodeId: uuid("cost_code_id"),
     /** "Master bath tile", "Kitchen countertops", "Front door hardware". */
@@ -76,7 +89,16 @@ export const jobSelections = pgTable(
     /** The room or area, as the business says it: "Master bath", "Lot 14 kitchen". */
     location: text("location").notNull().default(""),
     description: text("description").notNull().default(""),
-    /** What the contract set aside, in cents. 0 for a standard included item or a selection with no allowance. */
+    /**
+     * What the contract set aside, in cents. 0 for a standard included item or
+     * a selection with no allowance.
+     *
+     * **IT IS A PRICE, NOT A COST**, when an accepted estimate wrote it: the
+     * founder's rule is *"the allowance is a cost we mark up like everything
+     * else"*, so the figure the client is held to is the marked-up one — and
+     * the difference a change order raises is then price against price, which
+     * is the only comparison that means anything on a signed contract.
+     */
     allowanceCents: bigint("allowance_cents", { mode: "number" }).notNull().default(0),
     /** When the choice is needed, for the schedule to hold. */
     neededBy: date("needed_by", { mode: "string" }),
@@ -125,6 +147,17 @@ export const jobSelections = pgTable(
       columns: [t.tenantId, t.costCodeId],
       foreignColumns: [jobCostCodes.tenantId, jobCostCodes.id],
     }),
+    // Hand-edited in the migration to the column-list form
+    // `ON DELETE SET NULL ("estimate_group_id")` — a bare SET NULL on a
+    // composite (tenant_id, x) key would try to null tenant_id as well and
+    // can never run. An item deleted off an estimate leaves the selection it
+    // created standing: the client agreed to that allowance, and the estimate
+    // is only where it came from.
+    foreignKey({
+      name: "job_selections_estimate_group_fk",
+      columns: [t.tenantId, t.estimateGroupId],
+      foreignColumns: [jobEstimateGroups.tenantId, jobEstimateGroups.id],
+    }).onDelete("set null"),
     check("job_selections_name_present", sql`length(btrim(${t.name})) > 0`),
     check(
       "job_selections_status_valid",

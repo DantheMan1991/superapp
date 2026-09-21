@@ -335,6 +335,12 @@ rooms* comes out as a single line. You set that once on the assembly
 always makes (*Always makes*, on the outline), which is how a phase comes out
 the same on every bid.
 
+**A phase built from an allowance is an allowance.** If the assembly a phase
+used is one you have marked as an allowance — plumbing fixtures, light
+fittings — the item it lands in is marked as one too, so it prints as an
+allowance and becomes a selection when the client accepts. Change your mind on
+any bid with the chip on the item.
+
 **A phase you walk twice is still one item.** Go back into a phase, answer it
 again and price it, and the new lines replace the ones that phase put on
 before — in the same item, keeping the name if you renamed it, and leaving

@@ -212,6 +212,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
           clientNote: g.clientNote,
           section: g.section,
           showLines: g.showLines,
+          isAllowance: g.isAllowance,
           priceMode: g.priceMode,
           fixedPriceCents: g.fixedPriceCents,
         })),

@@ -59,6 +59,7 @@ export function AssemblyEditor({
   initialPer,
   initialUnit,
   initialLineShape,
+  initialIsAllowance,
   initialLines,
   canWrite,
   symbol,
@@ -71,6 +72,7 @@ export function AssemblyEditor({
   initialPer: string;
   initialUnit: string;
   initialLineShape: AssemblyLineShape;
+  initialIsAllowance: boolean;
   initialLines: EditableLine[];
   canWrite: boolean;
   symbol: string | null;
@@ -83,6 +85,7 @@ export function AssemblyEditor({
   const [per, setPer] = useState(initialPer);
   const [unit, setUnit] = useState(initialUnit);
   const [lineShape, setLineShape] = useState<AssemblyLineShape>(initialLineShape);
+  const [isAllowance, setIsAllowance] = useState(initialIsAllowance);
   const [lines, setLines] = useState<EditableLine[]>(
     initialLines.length > 0 ? initialLines : [BLANK],
   );
@@ -116,6 +119,7 @@ export function AssemblyEditor({
           drivingQuantity: per,
           drivingUnit: unit,
           lineShape,
+          isAllowance,
           lines: real.map((l) => ({
             description: l.description,
             clientDescription: l.clientDescription,
@@ -255,6 +259,30 @@ export function AssemblyEditor({
               ? "A walk that finds this in four rooms writes four lines, each named after its room and sized by that room's floor area when this is priced by area."
               : "A walk that finds this in four rooms writes one line naming all four. Restructure any bid by hand afterwards — this only decides where the walk starts."}
           </p>
+
+          {/*
+            AN ALLOWANCE (X12) — the founder: *"we ususaly have some items
+            listed as an allowance. things like plumbing fixtures etc."*
+            Plumbing fixtures are an allowance on every bid this business
+            writes, so it belongs on the item rather than being remembered
+            per job.
+          */}
+          <label className="mt-4 flex items-start gap-2 border-t pt-4 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={isAllowance}
+              disabled={!canWrite}
+              onCheckedChange={(v) => setIsAllowance(v === true)}
+            />
+            <span>
+              This is an allowance
+              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                The client agrees the figure now and chooses against it later. Accepting an
+                estimate turns every allowance item into a selection they owe you, at the
+                price they signed for.
+              </span>
+            </span>
+          </label>
         </div>
       </Panel>
 

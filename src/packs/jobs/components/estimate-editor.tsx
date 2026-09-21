@@ -52,6 +52,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -262,6 +263,8 @@ interface GroupDraft {
   section: string;
   /** Whether the client sees what is in it. */
   showLines: boolean;
+  /** A figure the client agrees now and chooses against later (X12). */
+  isAllowance: boolean;
   priceMode: GroupPriceMode;
   fixedPrice: string;
 }
@@ -274,6 +277,7 @@ const emptyGroup = (): GroupDraft => ({
   clientNote: "",
   section: "",
   showLines: true,
+  isAllowance: false,
   priceMode: "rollup",
   fixedPrice: "",
 });
@@ -360,6 +364,7 @@ export interface EditableEstimate {
     clientNote: string;
     section: string;
     showLines: boolean;
+    isAllowance: boolean;
     priceMode: string;
     fixedPriceCents: number | null;
   }>;
@@ -606,6 +611,7 @@ export function EstimateEditor({
       clientNote: g.clientNote,
       section: g.section,
       showLines: g.showLines,
+      isAllowance: g.isAllowance,
       priceMode: g.priceMode === "fixed" ? "fixed" : "rollup",
       fixedPrice: g.fixedPriceCents === null ? "" : (g.fixedPriceCents / 100).toFixed(2),
     })),
@@ -954,6 +960,8 @@ export function EstimateEditor({
           clientNote: res.clientNote,
           section: "",
           showLines: true,
+          /** An assembly the business bids as an allowance makes one (X12). */
+          isAllowance: res.isAllowance === true,
           priceMode: "rollup",
           fixedPrice: "",
         },
@@ -1204,6 +1212,7 @@ export function EstimateEditor({
                 clientNote: g.clientNote.trim(),
                 section: g.section,
                 showLines: g.showLines,
+                isAllowance: g.isAllowance,
                 priceMode: g.priceMode,
                 fixedPriceCents: g.priceMode === "fixed" ? g.fixedPrice : "",
               })),
@@ -2389,6 +2398,35 @@ export function EstimateEditor({
                                 </button>
                               );
                             })()}
+                            {/**
+                              * **AN ALLOWANCE** (X12) — the founder: *"we
+                              * ususaly have some items listed as an
+                              * allowance. things like plumbing fixtures
+                              * etc."* It prints as one on the proposal, and
+                              * accepting the estimate turns it into a
+                              * selection the client owes, at the price they
+                              * signed for.
+                              */}
+                            <button
+                              type="button"
+                              disabled={!editable}
+                              onClick={() => setGroup(g.key, { isAllowance: !g.isAllowance })}
+                              title={
+                                g.isAllowance
+                                  ? "An allowance: the client agrees this figure and chooses against it later. Press to make it a firm price."
+                                  : "A firm price. Press to make it an allowance the client chooses against later."
+                              }
+                              aria-label={`Whether item ${gi + 1} is an allowance`}
+                              className={cn(
+                                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs transition-colors disabled:opacity-60",
+                                g.isAllowance
+                                  ? "bg-muted text-foreground"
+                                  : "border border-border text-muted-foreground hover:bg-muted",
+                              )}
+                            >
+                              <Wallet className="size-3" />
+                              {g.isAllowance ? "Allowance" : "Firm price"}
+                            </button>
                             {/* The two modes are a binary; a chip switches faster than a select. */}
                             <button
                               type="button"

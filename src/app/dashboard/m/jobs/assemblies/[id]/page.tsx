@@ -54,6 +54,7 @@ export default async function AssemblyPage({
         initialPer={thousandthsToQuantityString(found.assembly.drivingQuantityThousandths)}
         initialUnit={found.assembly.drivingUnit}
         initialLineShape={asLineShape(found.assembly.lineShape)}
+        initialIsAllowance={found.assembly.isAllowance}
         initialLines={found.lines.map(toEditable)}
         canWrite={allowsWrite(ctx.role, "member")}
         symbol={ctx.tenant.currencySymbol ?? null}

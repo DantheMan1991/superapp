@@ -94,6 +94,8 @@ export interface PricedLine {
   quantityBasis: QuantityBasis;
   /** The working, when it was derived. Blank when it was quoted. */
   quantityNote: string;
+  /** Its assembly is one the business bids as an allowance (X12). */
+  isAllowance?: boolean;
 }
 
 /**

@@ -126,6 +126,68 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — The allowance (`claude/the-allowance`, X12, [ADR 0104](../decisions/0104-an-item-can-be-an-allowance-and-accepting-the-estimate-makes-it-a-selection-at-the-price-the-client-signed-for.md))
+
+> *"one more thing, we ususaly have some items listed as an allowance. things
+> like plumbing fixtures etc."*
+
+**The machinery was already here and had no way of starting.** `job_selections`
+has held allowances since slice 8 ([ADR 0067](../decisions/0067-a-selection-is-a-decision-with-an-allowance-and-priced-choices-and-its-difference-moves-by-change-order.md))
+— what the contract set aside, what the client chose, the difference raised as
+a change order. An estimate simply could not SAY an item was one, so every
+allowance had to be read off a signed proposal and typed into Selections
+again, and any that was not typed in was never reconciled.
+
+**Migration `0415`:**
+
+| Column | On | Means |
+| --- | --- | --- |
+| `is_allowance` | `job_estimate_groups` | This item is a figure the client chooses against later. |
+| `is_allowance` | `job_assemblies` | Every item this assembly makes is one. |
+| `is_allowance` | `job_estimate_proposed_lines` | The phase this line is in lands in an allowance item. |
+| `estimate_group_id` | `job_selections` | The item on the accepted estimate that made this. |
+
+### The one question that decided the design
+
+> *"the allowance is a cost we mark up like everything else."*
+
+So the figure written onto the selection is the item's **scheduled price** —
+its lines marked up, carrying their share of overhead and profit, the same
+number printed on the proposal the client signed. $10,000 of cost at ten and
+ten and ten is **$13,310**, and the db test asserts that figure by hand rather
+than by running the code it is about.
+
+Taking the COST would have given away the margin on every allowance in the job
+and left the later change order comparing a price against a cost — which is
+the one comparison that means nothing on a signed contract.
+
+### It is an ITEM, not a line
+
+An item is what the client buys (ADR 0079); an allowance is a promise about a
+price; a promise needs a name and one number, and a line has neither on its
+own.
+
+### What driving it found, and what only the test could
+
+Driven on dev: the chip on the item (`Firm price` / `Allowance`), the checkbox
+on the assembly, and the proposal — EST-6 printed `Gutters (allowance)` over
+its lines with every other item untouched. The dev estimate was put back
+afterwards.
+
+The acceptance path is proved by `tests/jobs-allowance.test.ts` rather than by
+driving, because accepting a real estimate rewrites a contract's value: it
+asserts the $13,310, the link by id, the client paragraph carried across, and
+that an estimate with no allowance on it makes nothing at all.
+
+### The trap it walked into, again
+
+`isAllowance` had to be added to `applyProposal`'s whole-form group map. That
+map's own comment already says a column left out of it is a column RESET on
+every apply — `section` and `show_lines` were nearly lost that way the day they
+were added, `isAllowance` is the third, and an item somebody marked by hand
+would have silently gone back to a firm price the next time its phase was
+priced.
+
 ### 2026-09-21 — A step names its assembly (`claude/a-step-names-its-assembly`, X11, [ADR 0103](../decisions/0103-a-step-names-the-item-it-always-makes-and-the-item-says-whether-it-is-one-line-or-a-line-per-room.md))
 
 The other half of X10. X10 gave the library a screen, so thirty assemblies

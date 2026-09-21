@@ -220,6 +220,29 @@ export const jobEstimateGroups = pgTable(
     priceMode: text("price_mode").notNull().default("rollup"),
     /** The price the client pays, on a fixed group; null on a rollup, by CHECK. */
     fixedPriceCents: bigint("fixed_price_cents", { mode: "number" }),
+    /**
+     * **THIS ITEM IS AN ALLOWANCE** (X12): a figure the client agrees to now
+     * and chooses against later.
+     *
+     * The founder: *"we ususaly have some items listed as an allowance.
+     * things like plumbing fixtures etc."* — an ITEM, which is why this is
+     * here and not on the line. An item is what the client buys (ADR 0079),
+     * an allowance is a promise about a price, and a promise needs a name and
+     * one number.
+     *
+     * **AND THE NUMBER IS THE PRICE, NOT THE COST**, because he said so:
+     * *"the allowance is a cost we mark up like everything else."* So the
+     * build-up under it is marked up exactly as any other item's, and what
+     * the client is told they have to spend is what they would have paid —
+     * which is also what makes a change order later compare price with price
+     * rather than price with cost.
+     *
+     * Accepting the estimate turns each of these into a `job_selection`
+     * (ADR 0067), which is where an allowance is reconciled and has been
+     * since slice 8. Nothing here duplicates that machinery; this is the
+     * sentence that was missing at the front of it.
+     */
+    isAllowance: boolean("is_allowance").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -548,6 +571,13 @@ export const jobAssemblies = pgTable(
      * walk did anyway.
      */
     lineShape: text("line_shape").notNull().default("one_line"),
+    /**
+     * **EVERY ITEM THIS MAKES IS AN ALLOWANCE** (X12). Plumbing fixtures are
+     * an allowance on every bid this business writes, so it is a property of
+     * the item rather than something to remember per job — the same argument
+     * `line_shape` makes one field up.
+     */
+    isAllowance: boolean("is_allowance").notNull().default(false),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

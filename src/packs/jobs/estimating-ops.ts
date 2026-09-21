@@ -25,6 +25,7 @@ import {
 } from "./ops";
 import { customerForParty } from "@/modules/accounting/invoicing/customers";
 import { isProposalFormat } from "./proposal-sections";
+import { createSelection } from "./selections-ops";
 import {
   RATE_PPM_MAX,
   isEstimateStatus,
@@ -101,6 +102,12 @@ export interface EstimateGroupInput {
   priceMode?: string;
   /** Required by `fixed`, refused by `rollup`. */
   fixedPriceCents?: number | null;
+  /**
+   * **THIS ITEM IS AN ALLOWANCE** (X12): a figure the client agrees to now
+   * and chooses against later. Absent means no, so every caller that does
+   * not know about allowances leaves one off rather than setting one.
+   */
+  isAllowance?: boolean;
 }
 
 export interface EstimateInput {
@@ -282,6 +289,7 @@ async function saveGroups(
       showLines: g.showLines ?? true,
       priceMode: mode,
       fixedPriceCents: mode === "fixed" ? (g.fixedPriceCents ?? null) : null,
+      isAllowance: g.isAllowance === true,
       sortOrder: (i + 1) * 10,
     };
     if (g.id) {
@@ -847,6 +855,97 @@ async function assertContractOnProject(tx: Tx, tenantId: string, contractId: str
  * Any other estimate on the job still `sent` is left as it is: two bids may
  * both be out, and only the business knows which the other one was for.
  */
+
+/* ------------------------------------------------------------------------
+ * AN ALLOWANCE ITEM BECOMES A SELECTION (X12).
+ *
+ * The founder: *"we ususaly have some items listed as an allowance. things
+ * like plumbing fixtures etc."*
+ *
+ * The machinery for an allowance has been in the pack since slice 8 —
+ * `job_selections` holds what the contract set aside, what the client chose,
+ * and raises the difference as a change order ([ADR 0067](../../../docs/decisions/0067-a-selection-is-a-decision-the-client-owes-and-an-allowance-is-the-money-the-contract-holds-for-it.md)).
+ * What was missing was the sentence at the FRONT of it: an estimate could not
+ * say an item was an allowance, so every one had to be typed into Selections
+ * again by hand after the client signed.
+ *
+ * ── THE FIGURE IS THE PRICE, BECAUSE HE SAID SO ─────────────────────────────
+ *
+ * *"the allowance is a cost we mark up like everything else."* So what the
+ * client is held to is the item's own scheduled figure — its lines marked up
+ * with their share of overhead and profit, the same number printed on the
+ * proposal they signed. Taking the COST instead would understate every
+ * allowance by the margin and make the change order compare a price against
+ * a cost, which is a comparison that means nothing on a signed contract.
+ *
+ * ── AND IT HAPPENS ONCE ─────────────────────────────────────────────────────
+ *
+ * `acceptEstimate` already refuses a second acceptance, and this skips any
+ * item that already has a selection pointing AT IT — by id, never by name,
+ * because a builder renames an allowance and two jobs both have *Plumbing
+ * fixtures*.
+ * ---------------------------------------------------------------------- */
+
+async function allowancesBecomeSelections(
+  tx: Tx,
+  ctx: JobsCtx,
+  estimate: JobEstimate,
+  lines: readonly JobEstimateLine[],
+  groups: readonly JobEstimateGroup[],
+  contractId: string,
+): Promise<number> {
+  const allowances = groups.filter((g) => g.isAllowance);
+  if (allowances.length === 0) return 0;
+
+  /** What the client reads against each item — the figure on the proposal. */
+  const rows = scheduleRows(
+    lines.map((l) => ({
+      ...l,
+      description: l.description,
+      clientDescription: l.clientDescription,
+      unit: l.unit,
+      costCodeId: l.costCodeId,
+    })),
+    estimate,
+    groups,
+    "group",
+  );
+  const byGroup = new Map(rows.filter((r) => r.groupId).map((r) => [r.groupId as string, r]));
+
+  const already = await tx
+    .select({ estimateGroupId: schema.jobSelections.estimateGroupId })
+    .from(schema.jobSelections)
+    .where(
+      and(
+        eq(schema.jobSelections.tenantId, ctx.tenantId),
+        inArray(
+          schema.jobSelections.estimateGroupId,
+          allowances.map((g) => g.id),
+        ),
+      ),
+    );
+  const done = new Set(already.map((r) => r.estimateGroupId));
+
+  let made = 0;
+  for (const group of allowances) {
+    if (done.has(group.id)) continue;
+    const row = byGroup.get(group.id);
+    await createSelection(tx, ctx, {
+      projectId: estimate.projectId,
+      contractId,
+      estimateGroupId: group.id,
+      /** The item's own code when its lines agree on one; none when they do not. */
+      costCodeId: row?.costCodeId ?? null,
+      name: group.name,
+      description: group.clientNote,
+      allowanceCents: row?.scheduledCents ?? 0,
+      notes: `From ${estimate.number}.`,
+    });
+    made += 1;
+  }
+  return made;
+}
+
 export async function acceptEstimate(
   tx: Tx,
   ctx: JobsCtx,
@@ -862,11 +961,9 @@ export async function acceptEstimate(
     throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${existing.number} was already accepted`);
   }
   await assertContractOnProject(tx, ctx.tenantId, input.contractId, existing.projectId);
-  const totals = estimateTotals(
-    await linesOf(tx, ctx.tenantId, id),
-    existing,
-    await groupsOf(tx, ctx.tenantId, id),
-  );
+  const lines = await linesOf(tx, ctx.tenantId, id);
+  const groups = await groupsOf(tx, ctx.tenantId, id);
+  const totals = estimateTotals(lines, existing, groups);
   const contract = await tx
     .select({ valueCents: schema.jobContracts.valueCents })
     .from(schema.jobContracts)
@@ -886,6 +983,12 @@ export async function acceptEstimate(
     })
     .where(and(eq(schema.jobEstimates.tenantId, ctx.tenantId), eq(schema.jobEstimates.id, id)))
     .returning();
+  /**
+   * **EVERY ALLOWANCE THE CLIENT JUST AGREED TO IS NOW A DECISION THEY OWE.**
+   * Last, so a failure here cannot leave an estimate half accepted — it is one
+   * transaction either way, and this is the order that reads correctly.
+   */
+  await allowancesBecomeSelections(tx, ctx, rows[0], lines, groups, input.contractId);
   return rows[0];
 }
 

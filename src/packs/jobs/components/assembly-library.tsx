@@ -38,6 +38,8 @@ export interface AssemblyListRow {
   notes: string;
   /** A line for each room it is in, rather than one naming them all (X11). */
   perRoom: boolean;
+  /** Every item it makes is an allowance (X12). */
+  isAllowance: boolean;
 }
 
 export function AssemblyLibrary({
@@ -221,6 +223,7 @@ function Row({
       <span className="text-xs text-muted-foreground">
         per {row.per} · {row.lineCount} {row.lineCount === 1 ? "line" : "lines"}
         {row.perRoom ? " · a line per room" : ""}
+        {row.isAllowance ? " · allowance" : ""}
       </span>
       <span className="text-sm">{formatMoney(row.costCents, symbol)}</span>
       {row.notes && <span className="w-full text-xs text-muted-foreground">{row.notes}</span>}

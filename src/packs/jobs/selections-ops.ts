@@ -55,6 +55,8 @@ export interface SelectionInput {
   projectId: string;
   contractId?: string | null;
   costCodeId?: string | null;
+  /** The accepted estimate's item this came from (X12); absent for a hand-written one. */
+  estimateGroupId?: string | null;
   name: string;
   location?: string;
   description?: string;
@@ -262,6 +264,7 @@ export async function createSelection(
       projectId: project.id,
       contractId,
       costCodeId: input.costCodeId ?? null,
+      estimateGroupId: input.estimateGroupId ?? null,
       name: input.name.trim(),
       location: input.location?.trim() ?? "",
       description: input.description?.trim() ?? "",

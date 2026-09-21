@@ -126,6 +126,70 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — A phase the standards covered is still a phase (`claude/a-phase-the-standards-covered`, X13a)
+
+**Found by walking a whole bid**, which nobody had done since X1. X13 shipped
+green and inert-in-the-worst-place: the walk went **1 → 3 → 5** and the
+estimate had two items on it.
+
+X6's rule is that a phase ends in money, and until X13 every phase ended
+because somebody answered its last question — so *"price the phase that just
+finished"* lived in `runTurn`, where the answering happens, and that was
+enough. **Standards broke the assumption.** A phase whose every question the
+outline answers for itself is finished the moment it opens, with no answer and
+no turn at all.
+
+And **four paths open a phase without going through `runTurn`**: the end of
+measuring, the rooms, agreeing the usual, and the last price of a phase. Every
+one of them called `oneTurn` directly.
+
+The fix is one function, `openPhase`, that every path now calls: it opens the
+phase, and prices any phase that comes back already finished before moving on.
+Pricing that needs to ASK returns straight away, so the loop only ever runs on
+phases the pack could price by itself. `oneTurn` stops and reports
+`stepFinished` the moment settling covers a step, which costs no model call —
+the point of a phase that needed no conversation.
+
+**The worst possible shape, and worth remembering:** the standards cover the
+80%, so the 80% was exactly what stopped producing money.
+
+### What the whole bid looked like
+
+Ten phases, twelve questions, on a building already measured from an earlier
+estimate. **About fifteen answers** produced a complete priced bid:
+
+| | |
+| --- | --- |
+| Measure-up | skipped entirely — the building was measured on EST-2 |
+| Rooms | one tap (*"11 rooms on this one already"*) |
+| The usual | **one tap for 9 questions across 9 phases** |
+| Conversation | 3 questions — the ones that actually vary |
+| Money | one question per unpriced line, each carrying its measurement |
+
+Seven items, `$112,089.77` of cost. Questions arrived as *"Roofing, in-house,
+59.026 sf — what are you getting per sf?"* and *"Rough-in plumbing — Kitchen,
+Powder room, Master bath, Hall bath — what are you getting for that?"* — the
+measurement and the rooms in the question, which is the answer to the
+founder's original *"who is doing this one — it doesn't give any context."*
+
+### What it also showed, and did NOT fix
+
+**Three phases came out `answered, nothing priced`** — Cast-in-place concrete
+(skipped before the fix went in), Drywall and Painting. The last two proposed
+no lines at all: their only input was *"in-house"* and the model declined to
+invent scope from it, which is the doctrine working. Roofing and Gutters, with
+the same single input, DID propose — off the roof area and the perimeter.
+
+So a phase with a standard and no measurement to hang anything on can still
+come out empty. **The reckoning names all three**, which is ADR 0099 doing its
+job, and the estimator picks them up. Whether such a phase should instead be
+made to ask something is a design question, not a defect, and it is the
+founder's to answer.
+
+**A separate wrinkle seen once:** after a phase was priced, a dead price
+question stayed on screen while the header had already moved to the next
+phase. Not reproduced on the clean run, and not chased.
+
 ### 2026-09-21 — Don't ask what never varies (`claude/dont-ask-what-never-varies`, X13, [ADR 0105](../decisions/0105-a-question-can-carry-the-answer-this-business-always-gives-and-the-walk-states-them-all-before-it-takes-any.md))
 
 > *"i'd say 80/20 standard vs custom."*

@@ -60,7 +60,14 @@ import {
   recordWalkMeasurement,
   setMeasureAsk,
 } from "./walk-measure-ops";
-import { currentStep, live, onwardStep, type WalkAnswer, type WalkStep } from "./walk-math";
+import {
+  currentStep,
+  live,
+  onwardStep,
+  outstanding,
+  type WalkAnswer,
+  type WalkStep,
+} from "./walk-math";
 import {
   groupStandards,
   refusesTheUsual,
@@ -312,7 +319,33 @@ async function oneTurn(
           : 0;
         const after = settled > 0 ? await getWalk(tx, ctx.tenantId, interviewId) : walk;
 
+        /**
+         * **AND A PHASE THE STANDARDS JUST FINISHED STILL ENDS IN MONEY.**
+         *
+         * Driving a whole bid is what found this. Step 2's only question had
+         * a standard, so settling covered it, `currentStep` moved to step 3,
+         * and the turn was ABOUT step 3 — which meant nothing ever priced
+         * step 2. The walk went 1 → 3 and the estimate had one item on it.
+         *
+         * The worst possible shape: the standards cover the 80%, so the 80%
+         * was exactly what stopped producing money. X6's rule is that a
+         * phase ends in money, and a phase nobody had to talk about is still
+         * a phase.
+         *
+         * So the turn STOPS here and says the step is finished. `runTurn`
+         * already knows what to do with that — price it, ask for what it
+         * cannot find, put the item on — and the walk carries on from there.
+         * It also costs no model call at all, which is the point of a phase
+         * that needed no conversation.
+         */
+        const coveredByStandards =
+          settled > 0 && walk.step && after
+            ? outstanding(walk.step, asWalkAnswers(after.answers)).length === 0
+            : false;
+
         return {
+          settledStep: coveredByStandards ? walk.step : null,
+          settledView: coveredByStandards && after ? walkView(after) : null,
           walk: after ?? walk,
           labels: pack.labels,
           estimateNumber: estimate?.number ?? "",
@@ -322,6 +355,22 @@ async function oneTurn(
       },
       { role: ctx.role },
     );
+
+    /**
+     * A phase the standards just completed is priced before anything else
+     * happens — see the gather. No model call, and `runTurn` takes it from
+     * `stepFinished` exactly as it takes a phase somebody talked through.
+     */
+    if (gathered.settledStep) {
+      return {
+        ok: true as const,
+        view: gathered.settledView,
+        finished: false as const,
+        ranOn: gathered.settledStep.id,
+        stepFinished: true as const,
+        step: gathered.settledStep,
+      };
+    }
 
     /**
      * **COVERAGE IS NOT THE END OF THE WALK**, and driving it is what found
@@ -824,7 +873,7 @@ async function answerTheUsual(
   );
 
   try {
-    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    const opened = await openPhase(ctx, interviewId);
     if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
   } catch {
     /** A failed opening turn is not a failed agreement: the gate is stamped. */
@@ -882,7 +931,7 @@ async function answerRooms(
   }
 
   try {
-    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    const opened = await openPhase(ctx, interviewId);
     if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
   } catch {
     /** A failed opening turn is not a failed room list: the rooms are in. */
@@ -1006,7 +1055,7 @@ async function afterMeasuring(
 
   /** Open the first phase. */
   try {
-    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    const opened = await openPhase(ctx, interviewId);
     if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
   } catch {
     /** A failed opening turn is not a failed measure-up: the numbers are in. */
@@ -1342,7 +1391,7 @@ async function answerPrice(
   }
 
   /** Open the phase the walk has just arrived at. */
-  const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+  const opened = await openPhase(ctx, interviewId);
   if (opened.ok) {
     return {
       ok: true,
@@ -1388,6 +1437,57 @@ async function priceTheStep(
  * view while the walk had already moved — the exact fault the founder hit.
  * Both are wrapped, and a failure returns the first turn's view.
  */
+
+/**
+ * A stop, not a rule: one turn may carry the walk through several phases the
+ * standards covered, and it may not carry it through more phases than any
+ * outline plausibly has. The pilot's longest is thirty-three.
+ */
+const PHASES_AT_MOST = 60;
+
+/**
+ * **OPEN THE PHASE THE WALK HAS ARRIVED AT — AND PRICE ANY THAT NEEDED NO
+ * CONVERSATION ON THE WAY** (X13).
+ *
+ * X6's rule is that a phase ends in money, and until X13 every phase ended
+ * because somebody answered its last question — so "price the phase that just
+ * finished" lived in `runTurn`, where the answering happens, and that was
+ * enough.
+ *
+ * Standards broke that. A phase whose every question the outline answers for
+ * itself is finished the moment it opens, with no answer and no turn, and
+ * **four different paths open a phase without going through `runTurn`** — the
+ * end of measuring, the rooms, agreeing the usual, and the last price of a
+ * phase. Driving a whole bid is what showed it: the walk went 1 → 3 → 5 and
+ * the estimate had two items on it, because the standards cover the 80% and
+ * the 80% was exactly what stopped producing money.
+ *
+ * So opening a phase is one function, and every path calls it. Pricing that
+ * needs to ASK returns straight away, so the loop only ever runs on phases
+ * the pack could price by itself.
+ */
+async function openPhase(ctx: WalkCtx, interviewId: string) {
+  let out = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+  for (let pass = 0; pass < PHASES_AT_MOST; pass += 1) {
+    if (!out.ok || !out.stepFinished || !out.step) break;
+    const step = out.step;
+    try {
+      const pricing = await priceTheStep(ctx, interviewId, step);
+      if (pricing) return { ...out, view: pricing };
+      await applyAndMoveOn(ctx, interviewId, step.id);
+    } catch {
+      /** Pricing never blocks: move on and let the reckoning show the hole. */
+      try {
+        await applyAndMoveOn(ctx, interviewId, step.id);
+      } catch {
+        return out;
+      }
+    }
+    out = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+  }
+  return out;
+}
+
 async function runTurn(
   ctx: WalkCtx,
   interviewId: string,
@@ -1466,8 +1566,8 @@ async function runTurn(
      *  step; that is not a transition and needs no second turn. */
     if (stillHere === first.ranOn || stillHere === null) return first;
 
-    const second = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
-    return second.ok ? second : first;
+    const out = await openPhase(ctx, interviewId);
+    return out.ok ? out : first;
   } catch {
     return first;
   }

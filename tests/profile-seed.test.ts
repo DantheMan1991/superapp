@@ -32,6 +32,11 @@ const STEP_COUNT = CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
   (n, o) => n + o.steps.length,
   0,
 );
+/** What the outlines ask to be measured before they start asking (X7). */
+const MEASURE_COUNT = CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
+  (n, o) => n + (o.measures?.length ?? 0),
+  0,
+);
 
 d("profile seed", () => {
   beforeAll(async () => {
@@ -195,7 +200,8 @@ d("a pack seed (construction → jobs)", () => {
 
   it("says what the pack seed would bring, in the pack's words", () => {
     expect(seedSummary(construction).packs).toEqual([
-      `2 cost code lists (${CODE_COUNT} codes), ${OUTLINE_COUNT} estimate outlines (${STEP_COUNT} steps)`,
+      `2 cost code lists (${CODE_COUNT} codes), ${OUTLINE_COUNT} estimate outlines ` +
+        `(${STEP_COUNT} steps, ${MEASURE_COUNT} measurements)`,
     ]);
   });
 
@@ -221,7 +227,8 @@ d("a pack seed (construction → jobs)", () => {
         created: 2 + OUTLINE_COUNT,
         description:
           `2 cost code lists with ${CODE_COUNT} codes and ` +
-          `${OUTLINE_COUNT} estimate outlines with ${STEP_COUNT} steps`,
+          `${OUTLINE_COUNT} estimate outlines with ${STEP_COUNT} steps ` +
+          `and ${MEASURE_COUNT} measurements`,
       },
     ]);
     expect(first.waitingOn).not.toContain("jobs");
@@ -297,7 +304,7 @@ d("a pack seed (construction → jobs)", () => {
    * actually write.
    */
   it("lands both outlines whole, new build the default, questions and all", async () => {
-    const { outlines, steps, questions } = await withSystem(async (tx) => ({
+    const { outlines, steps, questions, measures } = await withSystem(async (tx) => ({
       outlines: await tx
         .select()
         .from(schema.jobEstimateOutlines)
@@ -310,6 +317,10 @@ d("a pack seed (construction → jobs)", () => {
         .select()
         .from(schema.jobEstimateOutlineQuestions)
         .where(eq(schema.jobEstimateOutlineQuestions.tenantId, coTenant)),
+      measures: await tx
+        .select()
+        .from(schema.jobEstimateOutlineMeasures)
+        .where(eq(schema.jobEstimateOutlineMeasures.tenantId, coTenant)),
     }));
 
     expect(outlines.map((o) => o.name).sort()).toEqual(
@@ -318,6 +329,17 @@ d("a pack seed (construction → jobs)", () => {
     // New build is first in the manifest, so it is the default; one default only.
     expect(outlines.filter((o) => o.isDefault).map((o) => o.name)).toEqual(["New build"]);
     expect(steps).toHaveLength(STEP_COUNT);
+    /**
+     * **THE MEASURE-UP LIST LANDS TOO** (X7). It is written after the outline
+     * rather than inside `createOutline`, which is exactly the kind of extra
+     * step that gets counted in a sentence and never actually written.
+     */
+    expect(measures).toHaveLength(MEASURE_COUNT);
+    expect(measures.filter((m) => m.required).length).toBeGreaterThan(0);
+    for (const m of measures) {
+      expect(["length", "area", "count"]).toContain(m.kind);
+      expect(m.name.trim()).not.toBe("");
+    }
     expect(questions).toHaveLength(
       CONSTRUCTION_ESTIMATE_OUTLINES.reduce(
         (n, o) => n + o.steps.reduce((m, st) => m + (st.questions?.length ?? 0), 0),

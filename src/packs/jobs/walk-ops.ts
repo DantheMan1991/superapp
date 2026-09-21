@@ -1,7 +1,12 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobEstimateInterview, JobEstimateInterviewAnswer } from "@/db/schema";
+import type {
+  JobEstimateInterview,
+  JobEstimateInterviewAnswer,
+  JobEstimateOutlineMeasure,
+  JobMeasurement,
+} from "@/db/schema";
 import { violatedUniqueIndex } from "@/lib/db-errors";
 import { choicesOf, loadOutline } from "./outline-ops";
 import {
@@ -14,6 +19,9 @@ import {
   type WalkStep,
 } from "./walk-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
+import { asDeclared, asTaken, listMeasurements, listOutlineMeasures } from "./measure-ops";
+import { formatMeasurement, measureSlug } from "./measure-math";
+import type { MeasureKind } from "./vocabulary";
 
 /**
  * THE WALK (X2a, ADR 0098) — starting one, reading it, and banking what it
@@ -47,6 +55,12 @@ export interface LoadedWalk {
   progress: WalkProgress;
   /** Where the walk is, derived — the stored id is only a bookmark. */
   step: WalkStep | null;
+  /** Whose building is being measured. The estimate's project. */
+  projectId: string;
+  /** What this outline wants measured before it starts asking (X7). */
+  declared: JobEstimateOutlineMeasure[];
+  /** What is already known about the building — the PROJECT's, not the walk's. */
+  measurements: JobMeasurement[];
 }
 
 /**
@@ -133,8 +147,32 @@ export async function loadWalk(
   const interview = rows[0];
   if (!interview) return null;
 
-  const outline = await stepsOfOutline(tx, tenantId, interview.outlineId);
-  const answers = await answersOf(tx, tenantId, interview.id);
+  /**
+   * **THE BUILDING'S NUMBERS COME WITH THE WALK (X7).** Read here and
+   * nowhere else, so nothing downstream can render a measurement the turn
+   * did not see. Three indexed reads, in parallel with the two that were
+   * already here — a turn is two and a half seconds of model, and the
+   * founder has already had to complain about this screen's speed once.
+   */
+  const [outline, answers, project, declared] = await Promise.all([
+    stepsOfOutline(tx, tenantId, interview.outlineId),
+    answersOf(tx, tenantId, interview.id),
+    tx
+      .select({ projectId: schema.jobEstimates.projectId })
+      .from(schema.jobEstimates)
+      .where(
+        and(
+          eq(schema.jobEstimates.tenantId, tenantId),
+          eq(schema.jobEstimates.id, interview.estimateId),
+        ),
+      )
+      .limit(1),
+    listOutlineMeasures(tx, tenantId, interview.outlineId),
+  ]);
+  const projectId = project[0]?.projectId ?? "";
+  const measurements = projectId
+    ? await listMeasurements(tx, tenantId, projectId)
+    : [];
   const steps = outline?.steps ?? [];
   const asWalk = asWalkAnswers(answers);
   /**
@@ -158,6 +196,9 @@ export async function loadWalk(
     answers,
     progress: walkProgress(steps, asWalk),
     step,
+    projectId,
+    declared,
+    measurements,
   };
 }
 
@@ -550,10 +591,52 @@ export interface WalkView {
   }[];
   /** What this step still needs, so a person can see what is coming. */
   outstanding: { id: string; prompt: string; alwaysAsk: boolean }[];
+  /** The building's numbers, and whether the walk is still collecting them (X7). */
+  measuring: WalkMeasuring;
+}
+
+/**
+ * WHAT THE SCREEN NEEDS TO KNOW ABOUT MEASURING (X7).
+ *
+ * `ask` non-null means the walk is asking for a number about the BUILDING
+ * rather than about the work, so the answer box takes a figure and the
+ * *Measure it* door to the drawings is offered. `taken` is on the screen the
+ * whole time either way, because the point of the slice is that these
+ * numbers stay in front of everybody.
+ */
+export interface WalkMeasuring {
+  ask: {
+    measureId: string;
+    name: string;
+    unit: string;
+    kind: MeasureKind;
+    guidance: string;
+  } | null;
+  /** Everything known about the building, in the order it was taken. */
+  taken: {
+    slug: string;
+    name: string;
+    unit: string;
+    /** Formatted for reading: "248 lf". */
+    value: string;
+    source: string;
+    note: string;
+    passed: boolean;
+    /** Traced on a drawing, so the screen can offer to open it. */
+    sheetId: string | null;
+  }[];
+  /** How many of the outline's list are still to come. */
+  left: number;
+  /** The walk has finished measuring and is on the questions. */
+  done: boolean;
 }
 
 export function walkView(walk: LoadedWalk): WalkView {
-  return walkViewFrom(walk.steps, walk.outlineName, walk.interview, walk.answers);
+  return walkViewFrom(walk.steps, walk.outlineName, walk.interview, walk.answers, {
+    projectId: walk.projectId,
+    declared: walk.declared,
+    measurements: walk.measurements,
+  });
 }
 
 /** Just the interview row. */
@@ -591,6 +674,16 @@ export function walkViewFrom(
   outlineName: string,
   interview: JobEstimateInterview,
   answerRows: readonly JobEstimateInterviewAnswer[],
+  /**
+   * The building's numbers, which a turn read in act one and which cannot
+   * have moved since. Passed rather than re-read for the reason the whole
+   * function exists: the founder felt this screen's round trips.
+   */
+  building: {
+    projectId: string;
+    declared: readonly JobEstimateOutlineMeasure[];
+    measurements: readonly JobMeasurement[];
+  },
 ): WalkView {
   const answers = asWalkAnswers(answerRows);
   const derived = currentStep(steps, answers, interview.currentStepId);
@@ -604,6 +697,9 @@ export function walkViewFrom(
     answers: [...answerRows],
     progress: walkProgress(steps, answers),
     step,
+    projectId: building.projectId,
+    declared: [...building.declared],
+    measurements: [...building.measurements],
   };
   return viewOf(walk);
 }
@@ -643,6 +739,48 @@ function viewOf(walk: LoadedWalk): WalkView {
           alwaysAsk: q.alwaysAsk,
         }))
       : [],
+    measuring: measuringOf(walk),
+  };
+}
+
+/** The measuring half of the view, off what `loadWalk` already read. */
+function measuringOf(walk: LoadedWalk): WalkMeasuring {
+  const declared = asDeclared(walk.declared);
+  const taken = asTaken(walk.measurements);
+  const asking = walk.interview.pendingMeasureId
+    ? declared.find((d) => d.id === walk.interview.pendingMeasureId)
+    : undefined;
+  return {
+    ask: asking
+      ? {
+          measureId: asking.id,
+          name: asking.name,
+          unit: asking.unit,
+          kind: asking.kind,
+          guidance: asking.guidance,
+        }
+      : null,
+    taken: walk.measurements.map((m) => ({
+      slug: m.slug,
+      name: m.name,
+      unit: m.unit,
+      value: formatMeasurement({
+        slug: m.slug,
+        name: m.name,
+        unit: m.unit,
+        valueThousandths: m.valueThousandths,
+        passed: m.passedAt !== null,
+        note: m.note,
+      }),
+      source: m.source,
+      note: m.note,
+      passed: m.passedAt !== null,
+      sheetId: m.sheetId,
+    })),
+    left: declared.filter(
+      (d) => !taken.some((t) => t.slug === measureSlug(d.name)),
+    ).length,
+    done: walk.interview.measuredAt !== null,
   };
 }
 

@@ -42,6 +42,17 @@ import {
   setPriceAsk,
 } from "./walk-price-ops";
 import { reckoningFor } from "./walk-reckoning-ops";
+import { measureLines, measureQuestionFor, readMeasureReply } from "./measure-math";
+import { asTaken, recordMeasurement } from "./measure-ops";
+import {
+  askNextMeasure,
+  clearMeasureAsk,
+  finishMeasuring,
+  passWalkMeasurement,
+  pendingMeasure,
+  recordWalkMeasurement,
+  setMeasureAsk,
+} from "./walk-measure-ops";
 import { currentStep, live, nextStep, type WalkAnswer, type WalkStep } from "./walk-math";
 import { PACK } from "./vocabulary";
 
@@ -179,12 +190,17 @@ export async function startWalkAction(input: unknown) {
       { role: ctx.role },
     );
     /**
-     * THE OPENING QUESTION, asked here so the screen arrives with something on
-     * it. A failure is not fatal to the start: the walk exists either way, and
-     * the screen can ask again.
+     * **MEASURE THE BUILDING FIRST, WHEN THE OUTLINE ASKS FOR NUMBERS (X7).**
+     * The conversation starts once they are in, because every question
+     * after this one can then use them instead of asking again.
+     *
+     * THE OPENING QUESTION, otherwise, asked here so the screen arrives with
+     * something on it. A failure of either is not fatal to the start: the
+     * walk exists either way, and the screen can ask again.
      */
     try {
-      await runTurn(ctx, walk.id, undefined);
+      const measuring = await startMeasuring(ctx, walk.id);
+      if (!measuring) await runTurn(ctx, walk.id, undefined);
     } catch {
       // The walk stands; its first question can be asked from the screen.
     }
@@ -335,6 +351,12 @@ async function oneTurn(
       settledHere,
       earlier,
       projectWord: labelFor(gathered.labels, "project", "Project"),
+      /**
+       * **THE BUILDING'S NUMBERS, IN EVERY TURN (X7).** Read in act one with
+       * the rest of the walk, so they cost nothing extra here. This is what
+       * stops a walk asking for a square footage it was given at step two.
+       */
+      measurements: measureLines(asTaken(gathered.walk.measurements)),
     });
 
     /* ── Act two: the model, with NO transaction open ─────────────────────── */
@@ -447,7 +469,12 @@ async function oneTurn(
       ok: true as const,
       /** The whole fresh view, so the screen needs no second round trip. */
       view: after
-        ? walkViewFrom(after.steps, after.outlineName, after.interview, after.answerRows)
+        ? walkViewFrom(after.steps, after.outlineName, after.interview, after.answerRows, {
+            /** Act one's read; the building cannot have been re-measured mid-turn. */
+            projectId: gathered.walk.projectId,
+            declared: gathered.walk.declared,
+            measurements: gathered.walk.measurements,
+          })
         : null,
       finished: after?.interview.status !== "running",
       /** The step this turn was ABOUT, so a caller can see it has moved on. */
@@ -473,6 +500,207 @@ async function oneTurn(
  * One logical turn, two calls; the cooldown is waived for the second because
  * nobody is hammering anything.
  */
+
+/* ------------------------------------------------------------------------
+ * MEASURING THE BUILDING, BEFORE ANYTHING IS PRICED (X7).
+ *
+ * The founder, while X6 was waiting to merge: *"What if before the questions
+ * it prompts you to grab measurements. Full exterior elevation square
+ * footage, wall square footage, wall perimeter etc. Then the questions can
+ * use this information as it goes."*
+ *
+ * Two problems, one answer. Measuring is a different MODE from talking —
+ * open the sheet, set the scale, trace the polygon — and doing it fifteen
+ * times mid-conversation breaks the rhythm every time; and a number given
+ * as an ANSWER falls out of the prompt after thirty of them, so a walk told
+ * 2,400 square feet at framing had forgotten it by drywall. A measurement
+ * is a fact about the BUILDING, there are a handful of them, and they go
+ * into every turn from the first phase to the last.
+ *
+ * ── THE MODEL IS NOT IN THIS PATH ───────────────────────────────────────────
+ *
+ * The rule X6 set for prices, unchanged and for a harder reason: a wrong
+ * price is wrong once, and a wrong measurement multiplies through every
+ * line that reads it.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * **WHAT EVERY DOOR THAT ENDS A TURN HANDS BACK**, in one declaration.
+ *
+ * The screen narrows on `"put" in result`, and a second return shape that
+ * merely LACKED the field collapsed it to `{}` — the type error that caught
+ * this. One interface, so the pricing door and the measuring door cannot
+ * drift apart in a way only the caller notices.
+ */
+interface TurnOutcome {
+  ok: true;
+  view: WalkView | null;
+  finished: boolean;
+  /** The phase that just went on the estimate, and what it came to. */
+  put?: { name: string; cents: number } | null;
+}
+
+/** Where a walk's measuring stands: whose building, and what the list is. */
+async function measuringContext(ctx: WalkCtx, interviewId: string) {
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      if (!walk || walk.projectId === "") return null;
+      return {
+        projectId: walk.projectId,
+        outlineId: walk.interview.outlineId,
+        measuredAt: walk.interview.measuredAt,
+        pendingMeasureId: walk.interview.pendingMeasureId,
+        declared: walk.declared.length,
+      };
+    },
+    { role: ctx.role },
+  );
+}
+
+/**
+ * Open the measure-up, or say there is nothing to measure.
+ *
+ * Returns true when the walk is now asking for a number, which is the
+ * signal to NOT take an opening turn — the conversation starts once the
+ * building is measured.
+ */
+async function startMeasuring(ctx: WalkCtx, interviewId: string): Promise<boolean> {
+  const where = await measuringContext(ctx, interviewId);
+  if (!where) return false;
+  if (where.measuredAt !== null) return false;
+  /**
+   * **AN OUTLINE THAT ASKS FOR NOTHING IS DONE MEASURING.** Stamped rather
+   * than left null, so a measurement added to the outline next week does
+   * not drop this walk back into measuring halfway through.
+   */
+  if (where.declared === 0) {
+    await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
+      role: ctx.role,
+    });
+    return false;
+  }
+  const ask = await withTenant(
+    ctx.tenantId,
+    (tx) => askNextMeasure(tx, ctx, interviewId, where.outlineId, where.projectId),
+    { role: ctx.role },
+  );
+  return ask !== null;
+}
+
+/** The fresh view, read once, for the several places below that end with one. */
+async function freshView(ctx: WalkCtx, interviewId: string): Promise<WalkView | null> {
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      return walk ? walkView(walk) : null;
+    },
+    { role: ctx.role },
+  );
+}
+
+/**
+ * A MEASUREMENT ANSWER — deterministic, and never near the model.
+ *
+ * Returns the fresh view, or null when nothing was being measured and the
+ * turn should be handled as an ordinary one.
+ */
+async function answerMeasure(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+): Promise<TurnOutcome | null> {
+  const where = await measuringContext(ctx, interviewId);
+  if (!where?.pendingMeasureId) return null;
+
+  const measure = await withTenant(
+    ctx.tenantId,
+    (tx) => pendingMeasure(tx, ctx.tenantId, where.outlineId, where.pendingMeasureId!),
+    { role: ctx.role },
+  );
+  /**
+   * The measurement was deleted from the outline while it was on screen.
+   * Not an error: the walk stops asking for it and carries on.
+   */
+  if (!measure) {
+    await withTenant(ctx.tenantId, (tx) => clearMeasureAsk(tx, ctx, interviewId), {
+      role: ctx.role,
+    });
+    return null;
+  }
+
+  const reply = readMeasureReply(said ?? "");
+
+  /** Unreadable is not an error: it asks again, in the same words. */
+  if (reply.kind === "unclear") {
+    const ask = measureQuestionFor(measure);
+    const view = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await savePendingTurn(tx, ctx, interviewId, {
+          say: `${ask.prompt} — one figure, please.`,
+          questionId: null,
+          quickReplies: ["Skip this one"],
+        });
+        await setMeasureAsk(tx, ctx, interviewId, measure.id);
+        const walk = await getWalk(tx, ctx.tenantId, interviewId);
+        return walk ? walkView(walk) : null;
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, view, finished: false };
+  }
+
+  await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      if (reply.kind === "value") {
+        await recordWalkMeasurement(tx, ctx, {
+          projectId: where.projectId,
+          measure,
+          valueThousandths: reply.valueThousandths,
+        });
+      } else {
+        await passWalkMeasurement(tx, ctx, { projectId: where.projectId, measure });
+      }
+    },
+    { role: ctx.role },
+  );
+
+  return afterMeasuring(ctx, interviewId, where.outlineId, where.projectId);
+}
+
+/**
+ * The next number, or the end of measuring and the first real question.
+ *
+ * **THE OPENING TURN IS TAKEN HERE**, not by the screen, for the reason the
+ * walk has never bootstrapped itself: a screen that fires a turn on mount
+ * shows an empty panel for as long as the model takes.
+ */
+async function afterMeasuring(
+  ctx: WalkCtx,
+  interviewId: string,
+  outlineId: string,
+  projectId: string,
+): Promise<TurnOutcome> {
+  const next = await withTenant(
+    ctx.tenantId,
+    (tx) => askNextMeasure(tx, ctx, interviewId, outlineId, projectId),
+    { role: ctx.role },
+  );
+  if (next) return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+
+  /** Measuring is over. Open the first phase. */
+  try {
+    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
+  } catch {
+    /** A failed opening turn is not a failed measure-up: the numbers are in. */
+  }
+  return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+}
 
 /* ------------------------------------------------------------------------
  * THE MONEY, AS PART OF THE WALK (X6).
@@ -654,13 +882,7 @@ async function answerPrice(
   ctx: WalkCtx,
   interviewId: string,
   said: string | undefined,
-): Promise<{
-  ok: true;
-  view: WalkView | null;
-  finished: boolean;
-  /** The phase that just went on the estimate, and what it came to. */
-  put?: { name: string; cents: number } | null;
-} | null> {
+): Promise<TurnOutcome | null> {
   const state = await withTenant(
     ctx.tenantId,
     async (tx) => {
@@ -851,6 +1073,15 @@ export async function takeWalkTurnAction(input: unknown) {
      * nothing attributes it, and the walk's own rule 2 — gather, never
      * price — stays true of the model all the way through.
      */
+    /**
+     * **A MEASUREMENT ANSWER NEVER REACHES THE MODEL EITHER (X7).** Same
+     * shape as the price below it, and a harder reason: a wrong price is
+     * wrong once, and a wrong measurement multiplies through every line
+     * that reads it.
+     */
+    const measured = await answerMeasure(ctx, parsed.data.interviewId, parsed.data.said);
+    if (measured) return measured;
+
     const priced = await answerPrice(ctx, parsed.data.interviewId, parsed.data.said);
     if (priced) return priced;
 
@@ -1254,5 +1485,88 @@ export async function askAgainAction(input: unknown) {
     return { ok: true as const, view: out.view, prompt: where.prompt };
   } catch (err) {
     return toResult(err);
+  }
+}
+
+const fromSheetSchema = z.object({
+  interviewId: z.string().uuid(),
+  /** Thousandths, already read through the sheet's scale by the viewer. */
+  valueThousandths: z.number().int().positive().max(1_000_000_000_000),
+  sheetId: z.string().uuid(),
+  /** The trace it came from, so the number can be shown where it was taken. */
+  markupId: z.string().uuid().optional(),
+  note: z.string().trim().max(200).optional(),
+});
+
+/**
+ * **THE NUMBER CAME OFF A DRAWING (X7).**
+ *
+ * The founder's ask: *"I don't see where it allows you to open the takeoff
+ * inline... I need the takeoff tool to get that a lot of the time."* The
+ * viewer measures through the sheet's own scale — that arithmetic is ADR
+ * 0074's and is not repeated here — and hands back the total in
+ * thousandths. This writes it to the measurement the walk was asking for,
+ * with the sheet and the trace beside it, and carries on.
+ *
+ * The sheet and markup are PROVENANCE, not the value: re-scaling a sheet
+ * does not silently change a measurement already taken, because a bid that
+ * quietly moved underneath somebody is worse than one that is out of date
+ * where they can see it.
+ */
+export async function measureFromSheetAction(
+  input: unknown,
+): Promise<TurnOutcome | { error: string; view: WalkView | null }> {
+  const parsed = fromSheetSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the form and try again.", view: null };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const where = await measuringContext(ctx, parsed.data.interviewId);
+    /**
+     * **AN ERROR NEVER GOES BACK WITHOUT THE TRUTH WITH IT** — the rule the
+     * wrong-answer bug bought. A refusal that left the screen holding a
+     * stale question is how the next answer landed somewhere nobody saw.
+     */
+    if (!where?.pendingMeasureId) {
+      return {
+        error: "The walk is not asking for a measurement just now.",
+        view: await freshView(ctx, parsed.data.interviewId),
+      };
+    }
+    const measure = await withTenant(
+      ctx.tenantId,
+      (tx) => pendingMeasure(tx, ctx.tenantId, where.outlineId, where.pendingMeasureId!),
+      { role: ctx.role },
+    );
+    if (!measure) {
+      return {
+        error: "That measurement is no longer on the outline.",
+        view: await freshView(ctx, parsed.data.interviewId),
+      };
+    }
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        recordMeasurement(tx, ctx, {
+          projectId: where.projectId,
+          name: measure.name,
+          unit: measure.unit,
+          valueThousandths: parsed.data.valueThousandths,
+          source: "measured",
+          note: parsed.data.note ?? "",
+          sheetId: parsed.data.sheetId,
+          markupId: parsed.data.markupId ?? null,
+        }),
+      { role: ctx.role },
+    );
+    return await afterMeasuring(ctx, parsed.data.interviewId, where.outlineId, where.projectId);
+  } catch (err) {
+    let view: WalkView | null = null;
+    try {
+      view = await freshView(await gate(), parsed.data.interviewId);
+    } catch {
+      /* The message below is still worth sending. */
+    }
+    return { ...toResult(err), view };
   }
 }

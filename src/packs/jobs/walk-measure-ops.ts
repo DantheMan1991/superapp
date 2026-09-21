@@ -66,10 +66,18 @@ export async function askNextMeasure(
     listMeasurements(tx, ctx.tenantId, projectId).then(asTaken),
   ]);
   const next = nextToMeasure(declared, taken);
-  if (!next) {
-    await finishMeasuring(tx, ctx, interviewId);
-    return null;
-  }
+  /**
+   * **NULL MEANS "NOTHING LEFT TO MEASURE", NOT "MEASURING IS OVER."**
+   *
+   * This used to stamp `measured_at` here, and it cost the rooms question:
+   * on a building that was already measured — a second estimate on the same
+   * job — the declared list came back empty, measuring was declared
+   * finished on the spot, and the walk went straight to its first phase
+   * without ever asking what rooms were in the house. Deciding the
+   * measure-up is DONE belongs to the caller, which knows the rooms still
+   * have to be asked for.
+   */
+  if (!next) return null;
   const ask = measureQuestionFor(next);
   await tx
     .update(schema.jobEstimateInterviews)
@@ -149,6 +157,31 @@ export async function finishMeasuring(
   await tx
     .update(schema.jobEstimateInterviews)
     .set({ pendingMeasureId: null, measuredAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateInterviews.id, interviewId),
+      ),
+    );
+}
+
+/**
+ * **THE ROOMS QUESTION HAS BEEN PUT** (X8).
+ *
+ * Stamped when the question goes on the screen rather than when it is
+ * answered, because "asked and waiting" and "not asked yet" are otherwise
+ * indistinguishable — both are `measured_at` null with nothing pending —
+ * and the walk would ask twice or never depending on which it guessed.
+ */
+export async function markRoomsAsked(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+): Promise<void> {
+  requireWrite(ctx, "member");
+  await tx
+    .update(schema.jobEstimateInterviews)
+    .set({ roomsAskedAt: new Date(), pendingMeasureId: null, updatedAt: new Date() })
     .where(
       and(
         eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),

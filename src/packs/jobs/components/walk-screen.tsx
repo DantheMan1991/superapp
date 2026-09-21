@@ -17,6 +17,7 @@ import {
   askAgainAction,
   closeWalkAction,
   goToStepAction,
+  measureFromSheetAction,
   proposeStepAction,
   reckonWalkAction,
   skipQuestionAction,
@@ -25,6 +26,7 @@ import {
 import type { Reckoning } from "../walk-reckoning";
 import { StepCard, WalkRail, WalkReckoning } from "./walk-reckoning-panel";
 import { MeasureOnADrawing } from "./measure-on-a-drawing";
+import { RoomsDialog } from "./rooms-dialog";
 
 /** A line the walk has worked out but nobody has accepted yet. */
 interface ProposedRow {
@@ -264,6 +266,13 @@ export function WalkScreen({
    * away, and the phase rail is beside the point until this is done.
    */
   const measuring = view.measuring.ask !== null;
+  /** Either half of the measure-up: the phase rail is beside the point. */
+  const settingUp = measuring || view.measuring.askingRooms;
+  /** What the rooms come to, for the one line that says so. */
+  const roomsMeasured = view.measuring.rooms.reduce(
+    (n, r) => n + (r.areaThousandths ?? 0),
+    0,
+  );
 
   return (
     <div className="space-y-4">
@@ -276,18 +285,22 @@ export function WalkScreen({
               * *04. Structural* over "Wall perimeter — how many lf?" says the
               * screen is somewhere it is not.
               */}
-            {!measuring && view.stepSection && (
+            {!settingUp && view.stepSection && (
               <p className="text-xs uppercase tracking-wide text-subtle-foreground">
                 {view.stepSection}
               </p>
             )}
             <p className="text-sm font-medium">
-              {measuring ? "Measuring the building" : view.stepTitle || "Finished"}
+              {measuring
+                ? "Measuring the building"
+                : view.measuring.askingRooms
+                  ? "The rooms"
+                  : view.stepTitle || "Finished"}
               {measuring ? (
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
                   {view.measuring.left} to go
                 </span>
-              ) : (
+              ) : view.measuring.askingRooms ? null : (
                 view.stepCount > 0 && (
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
                     step {view.stepNumber} of {view.stepCount}
@@ -426,21 +439,60 @@ export function WalkScreen({
                 * that a lot of the time."* The number it hands back goes on
                 * the JOB, so every question after this one can read it.
                 */}
+              {/**
+                * **THE ROOM LIST, PASTED RATHER THAN TYPED** (X8). The
+                * founder wanted the rooms gathered with the measurements:
+                * *"identify the rooms on every floor... then the estimate
+                * questions can start asking questions like what type of
+                * flooring in Master bedroom."* Fifteen forms is why a
+                * feature like this goes unused, so the whole list arrives
+                * at once and the areas come after.
+                */}
+              {(view.measuring.askingRooms || view.measuring.rooms.length > 0) && (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <RoomsDialog
+                    projectId={projectId}
+                    rooms={view.measuring.rooms}
+                    onChanged={(rooms) =>
+                      setView((was) => ({ ...was, measuring: { ...was.measuring, rooms } }))
+                    }
+                  />
+                  {view.measuring.askingRooms && (
+                    <span className="text-xs text-muted-foreground">
+                      or paste them straight into the box above — one a line.
+                    </span>
+                  )}
+                </div>
+              )}
+
               {view.measuring.ask && (
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <MeasureOnADrawing
-                    interviewId={view.interviewId}
                     projectId={projectId}
                     measure={{
                       name: view.measuring.ask.name,
                       unit: view.measuring.ask.unit,
                       kind: view.measuring.ask.kind,
                     }}
-                    onMeasured={(next, isFinished) => {
-                      if (next) setView(next);
+                    onUse={async (valueThousandths, markupId, note, sheetId) => {
+                      const result = await measureFromSheetAction({
+                        interviewId: view.interviewId,
+                        valueThousandths,
+                        sheetId,
+                        markupId: markupId ?? undefined,
+                        note,
+                      });
+                      if ("error" in result) {
+                        toast.error(result.error);
+                        /** The view comes back even on a failure, so the
+                         *  screen stays true — and the dialog stays open. */
+                        if (result.view) setView(result.view);
+                        throw new Error(result.error);
+                      }
+                      if (result.view) setView(result.view);
                       setEchoed(null);
                       refreshReckoning();
-                      if (isFinished) {
+                      if (result.finished) {
                         toast.success("That is every question. See what is left below.");
                       }
                       router.refresh();
@@ -628,6 +680,51 @@ export function WalkScreen({
               <p className="mt-2 text-xs text-subtle-foreground">
                 Every question from here on can use these.
               </p>
+            </>
+          )}
+
+          {/**
+            * **THE ROOMS STAY ON THE SCREEN TOO** (X8), for the reason the
+            * measurements do: when the walk says *"LVP in the great room,
+            * kitchen and dining — 1,010 sf"*, the estimator has to be able
+            * to see which rooms that was and what each one measures without
+            * scrolling back through forty answers.
+            */}
+          {view.measuring.rooms.length > 0 && (
+            <>
+              <div className="mt-5 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">The rooms</p>
+                <span className="text-xs text-muted-foreground">
+                  {view.measuring.rooms.length}
+                  {roomsMeasured > 0 ? ` · ${formatQuantity(roomsMeasured)} sf` : ""}
+                </span>
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                {view.measuring.rooms.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs"
+                  >
+                    <span className="text-muted-foreground">
+                      {r.name}
+                      {r.level ? (
+                        <span className="text-subtle-foreground"> · {r.level}</span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={
+                        r.areaThousandths === null
+                          ? "italic text-subtle-foreground"
+                          : "font-medium"
+                      }
+                    >
+                      {r.areaThousandths === null
+                        ? "no area"
+                        : `${formatQuantity(r.areaThousandths)} ${r.areaUnit}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </>
           )}
         </Panel>

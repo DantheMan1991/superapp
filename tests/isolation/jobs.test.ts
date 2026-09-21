@@ -3959,4 +3959,166 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, second));
     });
   }, 120_000);
+
+  it("cannot read or change another tenant's ROOMS; a room is unique per FLOOR not per building; a room's area is a measurement scoped to it; and the area goes when the room does", async () => {
+    const mine = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobRooms)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Master bath",
+          slug: "master-bath",
+          level: "Upstairs",
+        })
+        .returning();
+      return rows[0].id;
+    });
+
+    // Tenant B sees none of it and changes none of it.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobRooms).where(eq(schema.jobRooms.id, mine)),
+      changed: await tx
+        .update(schema.jobRooms)
+        .set({ name: "theirs" })
+        .where(eq(schema.jobRooms.id, mine))
+        .returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+
+    /**
+     * **THE SAME NAME ON TWO FLOORS IS TWO ROOMS**, which is what a house
+     * is. Keying a room on (tenant, project, slug) refused the second one.
+     */
+    const downstairs = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobRooms)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Master bath",
+          slug: "master-bath",
+          level: "Main floor",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    expect(downstairs).toBeTruthy();
+    // But twice on ONE floor is refused.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobRooms).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Master bath",
+          slug: "master-bath",
+          level: "Upstairs",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobRooms).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "   ",
+          slug: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    // Tenant B's job under tenant A's room: unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobRooms).values({
+          tenantId: tenantA,
+          projectId: projectB,
+          name: "Theirs",
+          slug: "theirs",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    /**
+     * **A ROOM'S AREA IS AN ORDINARY MEASUREMENT SCOPED TO IT** (X8), which
+     * is what lets it be parsed, traced and passed by the machinery X7
+     * already has. The unique index is PARTIAL — one per room, one per
+     * building — because a plain unique over a nullable `room_id` would
+     * treat every building-level NULL as distinct and let them duplicate.
+     */
+    const area = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobMeasurements)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          roomId: mine,
+          name: "Floor area",
+          slug: "floor-area",
+          unit: "sf",
+          valueThousandths: 62_000,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    // The same measurement twice on ONE room is refused...
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          roomId: mine,
+          name: "Floor area",
+          slug: "floor-area",
+          valueThousandths: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+    // ...and so is the same one twice on the BUILDING, which is the half a
+    // plain unique index over a nullable column would have let through.
+    await withSystem((tx) =>
+      tx.insert(schema.jobMeasurements).values({
+        tenantId: tenantA,
+        projectId: projectA,
+        name: "Floor area",
+        slug: "floor-area",
+        valueThousandths: 2_400_000,
+      }),
+    );
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Floor area",
+          slug: "floor-area",
+          valueThousandths: 9,
+        }),
+      ),
+    ).rejects.toThrow();
+    // But the same name on ANOTHER room is a different fact.
+    await withSystem((tx) =>
+      tx.insert(schema.jobMeasurements).values({
+        tenantId: tenantA,
+        projectId: projectA,
+        roomId: downstairs,
+        name: "Floor area",
+        slug: "floor-area",
+        valueThousandths: 24_000,
+      }),
+    );
+
+    // The area belonged to the room: it goes when the room does.
+    await withSystem((tx) => tx.delete(schema.jobRooms).where(eq(schema.jobRooms.id, mine)));
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobMeasurements).where(eq(schema.jobMeasurements.id, area)),
+      ),
+    ).toEqual([]);
+
+    // And the rooms go with the job.
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobRooms).where(eq(schema.jobRooms.id, downstairs));
+      await tx.delete(schema.jobMeasurements).where(eq(schema.jobMeasurements.projectId, projectA));
+    });
+  }, 120_000);
 });

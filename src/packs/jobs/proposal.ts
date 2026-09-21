@@ -70,6 +70,8 @@ export function proposalInputFrom(data: ProposalData, brand: CertificateBrand & 
       showLines: g.showLines,
       priceMode: g.priceMode,
       fixedPriceCents: g.fixedPriceCents,
+      /** Without this the client reads a firm price where a choice is owed. */
+      isAllowance: g.isAllowance,
     })),
   };
 }

@@ -126,6 +126,142 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — Don't ask what never varies (`claude/dont-ask-what-never-varies`, X13, [ADR 0105](../decisions/0105-a-question-can-carry-the-answer-this-business-always-gives-and-the-walk-states-them-all-before-it-takes-any.md))
+
+> *"i'd say 80/20 standard vs custom."*
+
+and, with a screenshot of the walk asking it for the ninth time:
+
+> *"I'm getting questions like this one: who is doing this one. it doesn't
+> give any context."*
+
+Thirty-three phases asking who is doing each one is thirty-three questions
+with a single answer, against a target of a bid in forty-five minutes.
+
+**Migration `0416`:** `standard_answer` on
+`job_estimate_outline_questions`, `from_standard` on
+`job_estimate_interview_answers`, and `usual_asked_at` + `usual_accepted` on
+`job_estimate_interviews`.
+
+### Per QUESTION, which is the whole safety of it
+
+The same prompt on the roofing step stays blank, so the walk still asks the
+phases that really are decided job by job. **The difference between skipping
+what never varies and assuming what does is exactly which boxes a business
+chose to fill**, which is why this is not a business-wide default.
+
+`always_ask` refuses a standard at both ends — `writeSteps` will not store one
+and `standardsIn` will not read one — because *"is there asbestos?"* is the
+reason that flag exists and a default answer is the quiet judgement it was
+written to refuse.
+
+### Stated before anything is taken
+
+Before the first phase: *"here is what I will take as read — 3 questions
+across 3 phases"*, with **That's right** and **Ask me everything**. Grouped by
+what they SAY (`- Who is doing this one? In-house — every phase`), because
+thirty-three identical lines is a rubber stamp and a rubber stamp is worse
+than no confirmation at all.
+
+Each standard is then settled **as its phase opens**, and only while still
+outstanding — so a phase somebody has been through is not re-answered
+underneath them, and `Ask again` gets the standard back, which is where the
+walk was before. Everything settled that way carries `from_standard` and reads
+*your usual* on the screen and in the reckoning.
+
+### Three states, two columns
+
+`usual_asked_at` (null = not stated) and `usual_accepted` (null = on screen,
+true = agreed, false = ask me everything). **A `false` has to be as durable as
+a `true`**, or a walk that asked to be asked everything meets the same offer
+on its next turn.
+
+### THE BUG DRIVING FOUND: three ways out of measuring, one gate
+
+`startMeasuring` when there is nothing to measure, `afterMeasuring` when the
+last number lands, and **the rooms answer — which is the way every walk with a
+measuring outline actually leaves.** The first two had the gate; `answerRooms`
+has its own `finishMeasuring` and went straight to the opening turn.
+
+It read `usual_asked: false` on a walk that had finished measuring, so
+**nothing would ever have been taken as read on any real walk** — the feature
+would have shipped inert, with every test passing. The same shape as X7's
+measurements reaching one prompt and not the other.
+
+Two smaller things the same drive found: the walk's own line breaks were being
+collapsed (nothing had ever put a LIST on that screen, so every `say` was one
+line), and `WalkAnswer` had to carry `from_standard` as well as the view, or
+the reckoning — the place somebody checks what is going out — would have shown
+an assumed answer as if somebody had typed it.
+
+### The walk that was already running
+
+A walk past measuring when this shipped never sees the gate and takes no
+standards. Deliberate: the alternative is a walk in progress suddenly
+answering its own questions.
+
+### 2026-09-21 — The allowance (`claude/the-allowance`, X12, [ADR 0104](../decisions/0104-an-item-can-be-an-allowance-and-accepting-the-estimate-makes-it-a-selection-at-the-price-the-client-signed-for.md))
+
+> *"one more thing, we ususaly have some items listed as an allowance. things
+> like plumbing fixtures etc."*
+
+**The machinery was already here and had no way of starting.** `job_selections`
+has held allowances since slice 8 ([ADR 0067](../decisions/0067-a-selection-is-a-decision-with-an-allowance-and-priced-choices-and-its-difference-moves-by-change-order.md))
+— what the contract set aside, what the client chose, the difference raised as
+a change order. An estimate simply could not SAY an item was one, so every
+allowance had to be read off a signed proposal and typed into Selections
+again, and any that was not typed in was never reconciled.
+
+**Migration `0415`:**
+
+| Column | On | Means |
+| --- | --- | --- |
+| `is_allowance` | `job_estimate_groups` | This item is a figure the client chooses against later. |
+| `is_allowance` | `job_assemblies` | Every item this assembly makes is one. |
+| `is_allowance` | `job_estimate_proposed_lines` | The phase this line is in lands in an allowance item. |
+| `estimate_group_id` | `job_selections` | The item on the accepted estimate that made this. |
+
+### The one question that decided the design
+
+> *"the allowance is a cost we mark up like everything else."*
+
+So the figure written onto the selection is the item's **scheduled price** —
+its lines marked up, carrying their share of overhead and profit, the same
+number printed on the proposal the client signed. $10,000 of cost at ten and
+ten and ten is **$13,310**, and the db test asserts that figure by hand rather
+than by running the code it is about.
+
+Taking the COST would have given away the margin on every allowance in the job
+and left the later change order comparing a price against a cost — which is
+the one comparison that means nothing on a signed contract.
+
+### It is an ITEM, not a line
+
+An item is what the client buys (ADR 0079); an allowance is a promise about a
+price; a promise needs a name and one number, and a line has neither on its
+own.
+
+### What driving it found, and what only the test could
+
+Driven on dev: the chip on the item (`Firm price` / `Allowance`), the checkbox
+on the assembly, and the proposal — EST-6 printed `Gutters (allowance)` over
+its lines with every other item untouched. The dev estimate was put back
+afterwards.
+
+The acceptance path is proved by `tests/jobs-allowance.test.ts` rather than by
+driving, because accepting a real estimate rewrites a contract's value: it
+asserts the $13,310, the link by id, the client paragraph carried across, and
+that an estimate with no allowance on it makes nothing at all.
+
+### The trap it walked into, again
+
+`isAllowance` had to be added to `applyProposal`'s whole-form group map. That
+map's own comment already says a column left out of it is a column RESET on
+every apply — `section` and `show_lines` were nearly lost that way the day they
+were added, `isAllowance` is the third, and an item somebody marked by hand
+would have silently gone back to a firm price the next time its phase was
+priced.
+
 ### 2026-09-21 — A step names its assembly (`claude/a-step-names-its-assembly`, X11, [ADR 0103](../decisions/0103-a-step-names-the-item-it-always-makes-and-the-item-says-whether-it-is-one-line-or-a-line-per-room.md))
 
 The other half of X10. X10 gave the library a screen, so thirty assemblies

@@ -47,6 +47,8 @@ export interface ProposalLineInput extends EstimateLineFigures {
 export interface ProposalGroupInput extends EstimateGroupFigures {
   name: string;
   clientNote: string;
+  /** A figure the client agrees now and chooses against later (X12). */
+  isAllowance?: boolean;
   /**
    * The heading it prints under, on a format that has headings. Absent on
    * every estimate written before sections existed, which then prints as
@@ -194,13 +196,25 @@ export function buildProposalModel(input: ProposalInput): ProposalModel {
       input.presentation === "groups" ? "group" : "detail",
     );
     const noteOf = new Map(groups.map((g) => [g.id, g.clientNote.trim()]));
+    /**
+     * **AN ALLOWANCE SAYS SO WHERE THE CLIENT READS IT** (X12), in the words
+     * rather than as a flag a format could forget to render. Every format
+     * prints the description, so marking it here means the letter, the
+     * brochure and the price sheet all say the same thing — and it is how a
+     * builder writes it on paper anyway.
+     */
+    const allowances = new Set(groups.filter((g) => g.isAllowance).map((g) => g.id));
+    const describe = (r: (typeof scheduled)[number]): string =>
+      r.groupId !== null && allowances.has(r.groupId)
+        ? `${r.description} (allowance)`
+        : r.description;
     rows = scheduled.map((r) => {
       const quantity = r.heading ? "" : quantityOf(r.lineQuantityThousandths, r.unit);
       const unitPrice = r.unitPriceCents === null ? "" : money(r.unitPriceCents);
       if (quantity) columns.quantity = true;
       if (unitPrice) columns.unitPrice = true;
       return {
-        description: r.description,
+        description: describe(r),
         quantity,
         unitPrice,
         amount: r.heading ? "" : money(r.scheduledCents),

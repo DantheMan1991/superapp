@@ -288,6 +288,7 @@ Two things worth knowing. Anything you type *while* a save is in flight is not i
 | `Item name` | What the client reads — `Tile flooring, master and hall baths`. Required: **an item with no name is ignored when you save**, the way a line with no description is, and its lines are saved as ordinary loose lines. |
 | `Section` | The heading this item is printed under — `Infrastructure`, `Structural`, `Finishes`, `Labour`, whatever you head your own price sheet with. Optional; leave it blank and the item has no heading. As you type it offers the sections already on this estimate so they stay spelled the same. An item a walk puts on arrives with the section its outline step carried. |
 | The visibility chip | {chip:Shows its lines|outline} or {chip:One price|outline}. **Click it to swap.** See below. |
+| The allowance chip | {chip:Firm price|outline} or {chip:Allowance|outline}. **Click it to swap.** See below. |
 | The price chip | {chip:Lines add up|outline} or {chip:Priced by hand|good}. **Click it to swap.** See below. |
 | The margin | `10.7% margin` — what this item leaves you. **Red if it is negative.** This is the number that tells you whether a round price was a safe one, and it is here because here is where you decide to move it. |
 | The price | What the client is asked for this item. A box you can type in when it is priced by hand; otherwise the sum of its lines. |
@@ -305,6 +306,17 @@ With **Client wording** on, a second line appears under the bar for the sentence
 
 - **{chip:Shows its lines|outline}** — the client reads the material, the labour and whatever else is in it, each on its own row, under the item's name. The ordinary case, and what every item did before this chip existed.
 - **{chip:One price|outline}** — the client reads the item and its total, and nothing about how it was built.
+
+**{chip:Firm price|outline} or {chip:Allowance|outline}** — whether this item is a price you are holding to, or a figure the client agrees now and chooses against later. Plumbing fixtures, tile, light fittings: the things where you know roughly what they will spend but not what they will pick.
+
+An allowance is an ordinary item in every other way. It is in the total, in the budget and in the margin, and it prints its build-up if you have it set to. Two things differ:
+
+- **The client sees it.** It prints as *Plumbing fixtures (allowance)*, on the letter, the brochure and the price sheet alike, so nobody reads a choice as a fixed price.
+- **Accepting the estimate turns it into a selection.** One per allowance item, on the contract you accepted onto, with the item's name, its client paragraph and its cost code — waiting on the **Selections** tab for the client to choose. You do not type it in twice.
+
+**The number they are held to is the PRICE, not your cost.** The allowance written onto the selection is the figure on the proposal they signed — your cost marked up, with its share of overhead and profit — because that is what they agreed to spend. It is also what makes the change order later compare like with like: what they chose against what they were allowed.
+
+**Marking it after the estimate is accepted does nothing.** An accepted estimate's money is the agreement and will not take an edit. Mark your allowances before you send it.
 
 Most price sheets want both, row by row. *Drywall, including labour* is one
 price; *Siding, material only* and *Labour on metal siding* are two items
@@ -433,6 +445,7 @@ what one of it costs. Open one to change it:
 | The sentence the client reads | Carried onto the item this makes. |
 | Your own note | Never printed. |
 | **When it covers several rooms** | *One line, naming the rooms* or *A line for each room*. See below. |
+| **This is an allowance** | Every item this assembly makes is an allowance. For the things that are one on every job you bid — plumbing fixtures, light fittings, appliances. |
 | The lines | Description, quantity, unit, unit cost and cost code, plus whether each line stays off the proposal. Add lines, remove them, reword them. |
 
 **One line, or a line for each room.** Some items you list once and name the
@@ -1132,6 +1145,8 @@ One line under the order's title: `Certificate of insurance expired 2026-09-01 �
 ## Selections and allowances
 
 Anybody on the job may draw up the list and record a choice; raising the money is owners only. On the {{project|lower}}'s page under **Selections**, and on its own page — {button:All selections|outline}.
+
+**Most of them arrive on their own.** Mark an item on the estimate as an allowance and accepting that estimate creates the selection for you, at the price the client signed for, on the contract you accepted onto. Everything below is how you then run it — and how you add one by hand for anything that never went through an estimate.
 
 A selection is a decision the client still owes: the tile, the countertops, the front door hardware. Each carries what the contract **set aside** for it (the allowance), the date it is **needed by** so the schedule holds, and the **choices** on offer — the standard and the upgrades, or whatever came back from the showroom — each with a price. When the client picks one, the difference against the allowance is worked out for you, and once you have approved the pick it is raised as an ordinary change order on the contract.
 

@@ -166,6 +166,30 @@ They belong to the job, not to this walk: start a second estimate on the same
 job and they are already there — it will still ask whether any rooms are
 missing, but nothing has to be measured twice.
 
+## Then it agrees the usual
+
+The last thing before the first phase, and only when your outline has
+standards on it (*Usually*, on a question — see
+[Estimate outlines](estimate-outlines.md)).
+
+It lists what it is about to take as read, grouped so it is short enough to
+actually read:
+
+> Before we start, here is what I will take as read — 3 questions across 3 phases:
+>
+> - Who is doing this one? In-house — Cast-in-place concrete, Site work and excavation, Drywall
+>
+> Right for this one? Anything you say no to, I will ask you about as we go.
+
+{button:That's right|outline} takes them, phase by phase, as the walk reaches
+each one. {button:Ask me everything|outline} takes none of them on this bid
+and asks every question as usual.
+
+**It never takes one quietly.** Each answer it settles this way is marked
+{badge:your usual} where you can see it — in *What you have said* and in the
+phase's panel on the rail — and {button:Ask again|ghost|rotate-ccw} re-opens
+it exactly like an answer you typed.
+
 ## The screen
 
 Across the top: the phase you are on, what number it is out of how many, and
@@ -334,6 +358,12 @@ rooms* comes out as a single line. You set that once on the assembly
 (*Assemblies* on the projects page), and a step can name the assembly it
 always makes (*Always makes*, on the outline), which is how a phase comes out
 the same on every bid.
+
+**A phase built from an allowance is an allowance.** If the assembly a phase
+used is one you have marked as an allowance — plumbing fixtures, light
+fittings — the item it lands in is marked as one too, so it prints as an
+allowance and becomes a selection when the client accepts. Change your mind on
+any bid with the chip on the item.
 
 **A phase you walk twice is still one item.** Go back into a phase, answer it
 again and price it, and the new lines replace the ones that phase put on

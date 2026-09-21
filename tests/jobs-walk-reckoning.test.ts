@@ -23,6 +23,7 @@ function q(over: Partial<WalkQuestion> & { id: string }): WalkQuestion {
     unit: "",
     notes: "",
     alwaysAsk: false,
+    standardAnswer: "",
     ...over,
   };
 }
@@ -48,11 +49,13 @@ function said(stepId: string, questionId: string | null, answer: string): WalkAn
     skipped: false,
     skipReason: "",
     superseded: false,
+    fromStandard: false,
   };
 }
 
 function skipped(stepId: string, questionId: string): WalkAnswer {
   return {
+    fromStandard: false,
     questionId,
     stepId,
     prompt: "?",

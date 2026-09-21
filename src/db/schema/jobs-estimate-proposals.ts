@@ -86,6 +86,13 @@ export const jobEstimateProposedLines = pgTable(
     quantityBasis: text("quantity_basis").notNull().default("none"),
     /** The arithmetic, when it was derived: "2 baths at 3 fixtures each". */
     quantityNote: text("quantity_note").notNull().default(""),
+    /**
+     * This line came out of an assembly the business marks as an allowance
+     * (X12), so the item the phase lands in is one. Carried on the row rather
+     * than re-read at apply time, because by then the library may have moved
+     * on, and what was proposed is what somebody reviewed.
+     */
+    isAllowance: boolean("is_allowance").notNull().default(false),
 
     /**
      * WHEN SOMEBODY WAS ASKED FOR THIS PRICE AND SAID NOT NOW (X6). Without

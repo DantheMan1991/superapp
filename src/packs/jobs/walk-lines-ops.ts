@@ -231,6 +231,8 @@ export async function proposeLines(
             costCode: line.costCode || (shape.costCode ?? ""),
             basis: "assembly",
             basisDetail: `from your "${loaded.assembly.name}"`,
+            /** The item this phase lands in is an allowance (X12). */
+            isAllowance: loaded.assembly.isAllowance,
             quantityBasis: decided.quantityBasis,
             quantityNote: decided.quantityNote,
           });
@@ -260,6 +262,7 @@ export async function proposeLines(
       basisDetail: l.basisDetail,
       quantityBasis: l.quantityBasis,
       quantityNote: l.quantityNote,
+      isAllowance: l.isAllowance === true,
       sortOrder: (i + 1) * 10,
     })),
   );
@@ -360,6 +363,13 @@ export async function applyProposal(
   const key = `walk-${input.stepId ?? "loose"}`;
   /** Where the new lines go: back into the phase's own item, or a new one. */
   const landing = priorGroup ? priorGroup.id : key;
+  /**
+   * **AN ITEM IS AN ALLOWANCE WHEN WHAT FILLED IT IS** (X12) — the assembly
+   * the phase used says so, and the proposed row remembered it. Any is
+   * enough: a phase whose whole point is the plumbing fixtures is an
+   * allowance even when a line or two beside them is not.
+   */
+  const allowance = proposed.some((p) => p.isAllowance);
 
   /**
    * THE WHOLE FORM, as the editor posts it: every group and line that is
@@ -383,9 +393,22 @@ export async function applyProposal(
         showLines: g.showLines,
         priceMode: g.priceMode,
         fixedPriceCents: g.fixedPriceCents,
+        /**
+         * Added the day allowances shipped, and the comment above is why:
+         * a column left out of this map is a column RESET on every apply.
+         * An item somebody marked as an allowance by hand would have lost it
+         * the next time its phase was priced.
+         */
+        isAllowance: g.isAllowance,
       })),
-      /** Only when the phase has no item yet; otherwise it keeps the one it has. */
-      ...(priorGroup ? [] : [{ key, name: groupName, section: groupSection }]),
+      /**
+       * Only when the phase has no item yet; otherwise it keeps the one it
+       * has — including whether it is an allowance, which is then the
+       * person's to change and not this phase's to keep re-deciding.
+       */
+      ...(priorGroup
+        ? []
+        : [{ key, name: groupName, section: groupSection, isAllowance: allowance }]),
     ],
     lines: [
       /**

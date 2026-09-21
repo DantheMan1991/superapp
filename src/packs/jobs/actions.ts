@@ -2621,6 +2621,8 @@ const estimateGroupSchema = z.object({
   section: z.string().trim().max(120).optional(),
   /** Whether the client sees what is in it. Absent means yes. */
   showLines: z.boolean().optional(),
+  /** This item is an allowance the client chooses against later (X12). */
+  isAllowance: z.boolean().optional(),
   priceMode: z.enum(GROUP_PRICE_MODES).optional(),
   /** The price the client pays, on a group that is priced by hand. */
   fixedPriceCents: moneyToCents,
@@ -2695,6 +2697,7 @@ function estimateGroups(
         clientNote: g.clientNote,
         section: g.section,
         showLines: g.showLines,
+        isAllowance: g.isAllowance,
         priceMode,
         fixedPriceCents: priceMode === "fixed" ? (g.fixedPriceCents ?? 0) : null,
       };
@@ -4595,6 +4598,8 @@ export async function dropAssemblyAction(input: unknown) {
       ok: true as const,
       name: made.assembly.name,
       clientNote: made.assembly.clientNote,
+      /** The item it makes is an allowance when the assembly is one (X12). */
+      isAllowance: made.assembly.isAllowance,
       lines: made.lines.map((l) => ({
         description: l.description,
         clientDescription: l.clientDescription,

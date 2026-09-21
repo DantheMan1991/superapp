@@ -19,6 +19,7 @@ function q(id: string, prompt: string, over: Partial<WalkQuestion> = {}): WalkQu
     unit: "",
     notes: "",
     alwaysAsk: false,
+    standardAnswer: "",
     ...over,
   };
 }
@@ -41,7 +42,16 @@ const STEP: WalkStep = {
 };
 
 function said(questionId: string | null, prompt: string, answer: string): WalkAnswer {
-  return { questionId, stepId: "s1", prompt, answer, skipped: false, skipReason: "", superseded: false };
+  return {
+    questionId,
+    stepId: "s1",
+    prompt,
+    answer,
+    skipped: false,
+    skipReason: "",
+    superseded: false,
+    fromStandard: false,
+  };
 }
 
 describe("outlineTurn", () => {

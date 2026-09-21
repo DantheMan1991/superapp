@@ -398,7 +398,15 @@ export function WalkScreen({
             </div>
           ) : (
             <>
-              <p className="min-h-12 text-[15px] leading-relaxed">
+              {/**
+                * **THE LINE BREAKS ARE THE WALK'S, AND THEY MATTER NOW.**
+                * Every question the model asks is one line, so nothing here
+                * needed them until X13 put a LIST on this screen — the
+                * standards it is about to take as read. Collapsed, they are a
+                * paragraph nobody scans, which is a rubber stamp rather than
+                * a check. Driving it is what showed that.
+                */}
+              <p className="min-h-12 whitespace-pre-line text-[15px] leading-relaxed">
                 {pending ? (
                   <span className="text-muted-foreground">Thinking…</span>
                 ) : (
@@ -636,6 +644,11 @@ export function WalkScreen({
                     {s.volunteered && (
                       <Badge variant="secondary" className="ml-2 text-[10px]">
                         it asked
+                      </Badge>
+                    )}
+                    {s.fromStandard && (
+                      <Badge variant="secondary" className="ml-2 text-[10px]">
+                        your usual
                       </Badge>
                     )}
                   </p>

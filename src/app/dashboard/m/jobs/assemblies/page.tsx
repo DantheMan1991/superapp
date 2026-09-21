@@ -36,6 +36,7 @@ export default async function AssembliesPage() {
         costCents: a.costCents,
         notes: a.assembly.notes,
         perRoom: a.assembly.lineShape === "per_room",
+        isAllowance: a.assembly.isAllowance,
       })),
     { role: ctx.role },
   );

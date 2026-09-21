@@ -76,6 +76,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
           ? await reckoningFor(tx, ctx.tenant.id, {
               interviewId: latest.interview.id,
               projectId: id,
+              estimateId,
               steps: latest.steps,
               answers: asWalkAnswers(latest.answers),
             })

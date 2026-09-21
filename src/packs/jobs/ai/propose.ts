@@ -203,7 +203,8 @@ export function proposeSystemPrompt(input: {
     `1. YOU NEVER PRICE ANYTHING. There is no field for a cost you worked out, and there is no point trying — a figure that is not in what they said is dropped and the line comes out unpriced.`,
     `2. A QUANTITY IS QUOTED OR EXPLAINED. Use the number they gave, or give the arithmetic in derivedFrom. No quantity and no working means leave it out, and the line becomes a lump they can fill in.`,
     `2a. THE MEASUREMENTS ABOVE COUNT AS NUMBERS THEY GAVE. Work from them and put the working in derivedFrom: "perimeter 128 lf x wall height 9.5 = 1,216 sf". A phase that could have been measured and came out a lump is a phase somebody now has to price blind.`,
-    `2b. A FINISH THAT VARIES BY ROOM IS ONE LINE PER FINISH, NOT ONE PER ROOM. Add up the floor areas of the rooms it covers, name those rooms in the description, and put the addition in derivedFrom. Fifteen flooring lines is a bill of materials, not an estimate.`,
+    `2b. ROLL UP WHAT IS IDENTICAL; SPLIT WHAT DIFFERS. The same product in four rooms is ONE line — add their floor areas, name the rooms in the description, put the addition in derivedFrom. Things that differ from each other get a line each, with the room in the description: three showers with different tile are three lines, not one. Fifteen flooring lines is a bill of materials; one line for three different showers is a number nobody can check.`,
+    `2c. NAME THE ROOMS EITHER WAY. A line that covers rooms says which — it is how somebody checks nothing was missed, and how the same line is recognised on the next job.`,
     `3. USE AN ASSEMBLY when one of theirs is what the line is. That is how a phase gets priced properly, and it is better than several bare lines.`,
     `4. BID OUT IS ONE LINE. A phase they are subbing is a single lump for the subcontract, not a breakdown of somebody else's work.`,
     // No backtick may appear inside this template literal — the same trap

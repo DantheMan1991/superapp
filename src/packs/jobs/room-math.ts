@@ -1,5 +1,6 @@
 import { formatQuantity } from "./billing-math";
 import { measureSlug, readMeasureReply } from "./measure-math";
+import { stemWord } from "./outline-merge";
 
 /**
  * THE ARITHMETIC OF THE ROOMS IN A BUILDING (X8).
@@ -162,3 +163,57 @@ export function roomsWithoutArea(rooms: readonly RoomFacts[]): RoomFacts[] {
   return rooms.filter((r) => r.areaThousandths === null);
 }
 
+
+/* ---------------------------------------------- what the bid never mentions */
+
+/**
+ * **A ROOM NOBODY PRICED ANYTHING AGAINST.**
+ *
+ * The thing a template structurally cannot do. A 291-row sheet fails by
+ * SILENCE — the row you did not fill in looks exactly like the row that does
+ * not apply, and the forgotten one is the error that eats the margin. With a
+ * room list and lines that name their rooms, "the powder room has nothing on
+ * this bid" is a fact this code can work out.
+ *
+ * ── IT IS A NUDGE, AND IT IS DELIBERATELY EAGER ─────────────────────────────
+ *
+ * The match is on words, so it can be wrong in both directions. Being wrong
+ * by WARNING costs a glance; being wrong by staying quiet costs the omission
+ * this exists to catch. So a room counts as covered only when EVERY
+ * significant word of its name appears in a line — the reading that errs
+ * toward telling you. It never blocks anything and never touches money.
+ */
+function roomWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(" ")
+      .filter((w) => w !== "")
+      /**
+       * A number survives where a short word would not: `2` is the entire
+       * difference between `Bedroom 2` and `Bedroom 3`, and the pack's own
+       * `significantWords` drops anything under three characters — which is
+       * why this does not reuse it.
+       */
+      .filter((w) => w.length > 2 || /^\d+$/.test(w))
+      .map(stemWord),
+  );
+}
+
+export function roomIsNamedIn(roomName: string, text: string): boolean {
+  const want = roomWords(roomName);
+  if (want.size === 0) return false;
+  const have = roomWords(text);
+  for (const w of want) if (!have.has(w)) return false;
+  return true;
+}
+
+/** Every room that no line on the bid mentions, in the order they are listed. */
+export function roomsWithNothingPriced(
+  rooms: readonly RoomFacts[],
+  lineDescriptions: readonly string[],
+): RoomFacts[] {
+  return rooms.filter((r) => !lineDescriptions.some((d) => roomIsNamedIn(r.name, d)));
+}

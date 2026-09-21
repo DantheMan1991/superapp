@@ -50,6 +50,7 @@ export default async function WalkPage({
         reckoning: await reckoningFor(tx, ctx.tenant.id, {
           interviewId: walk.interview.id,
           projectId: id,
+          estimateId: walk.interview.estimateId,
           steps: walk.steps,
           answers: asWalkAnswers(walk.answers),
         }),

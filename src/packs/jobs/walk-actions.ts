@@ -1610,6 +1610,7 @@ export async function reckonWalkAction(input: unknown) {
         return reckoningFor(tx, ctx.tenantId, {
           interviewId: parsed.data.interviewId,
           projectId: parsed.data.projectId,
+          estimateId: walk.interview.estimateId,
           steps: walk.steps,
           answers: asWalkAnswers(walk.answers),
         });

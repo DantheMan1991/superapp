@@ -5,6 +5,8 @@ import { lineCostCents } from "./estimate-math";
 import { listBidPackages } from "./bids-ops";
 import type { WalkAnswer, WalkStep } from "./walk-math";
 import { reckonWalk, type Reckoning, type StepBidFacts, type StepFacts } from "./walk-reckoning";
+import { roomsWithNothingPriced } from "./room-math";
+import { asRoomFacts, listRooms } from "./room-ops";
 
 /**
  * THE READS BEHIND THE RECKONING (X4, ADR 0098).
@@ -166,14 +168,31 @@ export async function reckoningFor(
   input: {
     interviewId: string;
     projectId: string;
+    /** Whose lines are read for the room check (X8b). */
+    estimateId: string;
     steps: readonly WalkStep[];
     answers: readonly WalkAnswer[];
   },
   now: Date = new Date(),
 ): Promise<Reckoning> {
-  const [applied, bids] = await Promise.all([
+  const [applied, bids, rooms, descriptions] = await Promise.all([
     appliedByStep(tx, tenantId, input.interviewId),
     bidsByCode(tx, tenantId, input.projectId, now),
+    listRooms(tx, tenantId, input.projectId),
+    /**
+     * **EVERY line on the estimate, not just the ones the walk wrote.** A
+     * room covered by a line somebody typed by hand is covered, and a check
+     * that only read the walk's own output would nag about it forever.
+     */
+    tx
+      .select({ description: schema.jobEstimateLines.description })
+      .from(schema.jobEstimateLines)
+      .where(
+        and(
+          eq(schema.jobEstimateLines.tenantId, tenantId),
+          eq(schema.jobEstimateLines.estimateId, input.estimateId),
+        ),
+      ),
   ]);
 
   const facts = new Map<string, StepFacts>();
@@ -189,5 +208,10 @@ export async function reckoningFor(
     });
   }
 
-  return reckonWalk(input.steps, input.answers, facts);
+  const unpriced = roomsWithNothingPriced(
+    asRoomFacts(rooms),
+    descriptions.map((d) => d.description),
+  ).map((r) => ({ id: r.id, name: r.name, level: r.level }));
+
+  return reckonWalk(input.steps, input.answers, facts, unpriced);
 }

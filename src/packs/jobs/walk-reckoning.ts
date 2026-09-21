@@ -139,6 +139,17 @@ export interface Reckoning {
   byOthers: number;
   open: number;
   unpriced: number;
+  /**
+   * **ROOMS NOTHING ON THE BID MENTIONS** (X8b). Worked out from the room
+   * list and the lines' own words, not from the conversation — so it is
+   * true of lines somebody typed by hand as well as lines the walk wrote.
+   *
+   * Not counted in `ready`: a room with nothing against it is very often
+   * correct (a garage with no finishes), so it is something to LOOK at
+   * rather than something in the way. Blocking on it would teach somebody
+   * to ignore the panel that matters.
+   */
+  roomsUnpriced: { id: string; name: string; level: string }[];
   /** Nothing is in the way. */
   ready: boolean;
 }
@@ -320,6 +331,8 @@ export function reckonWalk(
   steps: readonly WalkStep[],
   answers: readonly WalkAnswer[],
   factsByStep: ReadonlyMap<string, StepFacts> = new Map(),
+  /** Worked out by the caller, which is the half that can read the lines. */
+  roomsUnpriced: readonly { id: string; name: string; level: string }[] = [],
 ): Reckoning {
   const reckoned = steps.map((s) => reckonStep(s, answers, factsByStep.get(s.id) ?? NO_FACTS));
 
@@ -344,6 +357,7 @@ export function reckonWalk(
     byOthers: count("by_others"),
     open: count("open"),
     unpriced: count("unpriced"),
+    roomsUnpriced: [...roomsUnpriced],
     ready: blocking.length === 0,
   };
 }

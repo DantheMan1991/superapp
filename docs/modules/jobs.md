@@ -180,17 +180,57 @@ the far edge of a 1× page and the canvas then grew underneath it. Nothing
 errored; the button simply did nothing. The scroll is consumed by the render
 effect once the canvas has its size.
 
-### What is NOT fixed here, and why
+### And then the file arrived, and it read 37 of 37
 
-**The reading.** `guessSheet` is a heuristic over a real title block, and
-**every test it has is synthetic** — hand-built `PageText` runs in
-`tests/jobs-drawings.test.ts`. A stand-in set built for this slice (landscape
-ARCH-D, right-edge title block, a cover with an index) reads **7 of 7**, and
-his real set reads about one in ten. So the tests pass, a clean file passes,
-and the thing that fails is whatever real sets do that neither does — which
-no amount of reasoning about the regex will name. Changing the heuristic
-against another synthetic file is the mistake [[synthetic-page-confirmed-a-wrong-fix]]
-already paid for.
+**It was 19%, not 10%, and the 19% was worse than the 81%.** Of the seven
+pages the old reader "read", five were detail callouts picked off the middle
+of the paper — `FW3`, `W9`, `FN14`, `W3` — and the titles were the PROJECT
+name, `Wright - new`. A number it invents is worse than one it admits it
+cannot find.
+
+**Three faults, all visible the moment the real title block was printed out.**
+Every run in that set reports **width 0** — pdf.js gives no advance width for
+this producer's text — which is the root of the first:
+
+1. **The number cell is joined to the cell beside it.** With no widths,
+   `linesFrom` merges runs within `1.5 × height`, and at 37.5pt type that is
+   56pt of tolerance — so the index cell and the number cell arrive as one
+   line, **`"2 A1.1"`**, and an anchored pattern rejects it. `sheetNumberIn`
+   now looks for a number-shaped WORD, and refuses a line holding two.
+2. **Nearest-the-corner handed the answer to a callout.** A title block's
+   number cell is inset from the paper edge; a callout bubble can sit lower
+   and further right. The number is set in 37.5pt where nothing else in that
+   corner is over 25 — **size is the signal and the corner is the filter**,
+   so the sort is by height first.
+3. **A sheet name is set on two or three lines.** `FOUNDATION` over `PLAN`,
+   and the old rule took the single biggest line: half a title. `stackedTitle`
+   joins same-size lines running up from it and **stops where the leading
+   opens out** — 28pt within the name, 43pt to the project name under it,
+   which is the name of the job and the title of nothing.
+
+Measured on the founder's own 37-page set, before and after: **7 of 37 (19%)
+→ 37 of 37 (100%)**, numbers `A1.1`–`A1.7`, `A2.0`–`A2.4`, `A3.0`–`A3.4`,
+`A4.0`–`A4.2`, `S1.0`, `S2.0`–`S2.5`, `S3.0`–`S3.3`, `E1.0`–`E1.5`, every one
+unique, with titles like `Main floor wall framing plan - east`.
+
+**The tests are the real geometry now.** `tests/jobs-drawings.test.ts` gained
+a block built from that title block's measured coordinates — 2592×1728, the
+number at y=111 in 37.5pt, the sheet name at 265/293 in 24.9pt and the
+project name at 336/364/392 in the same 24.9pt. Four of them fail against the
+old reader. The nineteen synthetic ones still pass, which is exactly the
+problem with them: they passed all along.
+
+### What was NOT fixed before the file arrived, and why
+
+**The reading, until the founder sent the PDF.** `guessSheet` is a heuristic
+over a real title block and **every test it had was synthetic**. A stand-in
+set built for this slice (landscape ARCH-D, right-edge title block, a cover
+with an index) read **7 of 7** while his read one in five — so the tests
+passed, a clean file passed, and what failed was whatever real sets do that
+neither did. Guessing at the regex against another made-up file would have
+been the same mistake a print fix already paid for here. **The right move was
+to ask for the file and build the instrument**, and the diagnosis took two
+minutes once it was in hand.
 
 **Nothing of his upload survived to look at.** Neither database has a drawing
 set beyond the seeded two, and the largest PDF in the dev cabinet is 0.1MB —

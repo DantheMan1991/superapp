@@ -1299,7 +1299,26 @@ The sentence again at the top and {button:Add a set|primary}. Then three panels.
 
 The line above the table counts the pages, the ticked rows and any ticked without a number. {button:Save 38 sheets|primary} stores what you confirmed — `38 sheets on the job` — and the page shows them. A page you leave unticked (the cover, a legend) is simply not a sheet.
 
-The reading is a rule, not a guess at meaning: the sheet number is the number-shaped text nearest the bottom-right corner of the page, where every title block puts it, and the title is the biggest other text in that corner that is not a label, a date or a scale. A set laid out unusually gets its numbers typed, and the page below is how you read them.
+The reading is a rule, not a guess at meaning:
+
+- **The sheet number is the biggest number-shaped text in the bottom-right
+  corner**, where every title block puts it. Biggest, not nearest — a number
+  cell is set in large type and inset from the paper edge, while a detail
+  callout can sit anywhere, including closer to the corner.
+- **It is looked for word by word.** Title block cells sit close together and
+  a PDF often hands them over joined, so the number cell arrives as
+  `22 S1.0` with the index cell beside it; the number in that is `S1.0`. A
+  line with **two** number-shaped words is left alone rather than guessed at.
+- **The title is the sheet name, read as a stack.** A name is usually set on
+  two or three lines — `FOUNDATION` over `PLAN` — so lines of the same size
+  running up from it are joined into `Foundation plan`. The stack stops where
+  the spacing opens out, which is where the project name begins: that is the
+  name of the job, not of the sheet, and it is not used.
+- A cover sheet's index lists forty numbers down the middle of the page. The
+  corner rule ignores every one of them.
+
+A set laid out unusually still gets its numbers typed, and the page below is
+how you read them.
 
 #### Looking at a page
 

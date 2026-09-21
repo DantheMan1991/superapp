@@ -164,6 +164,17 @@ export function walkSystemPrompt(input: {
   earlier: readonly WalkAnswer[];
   /** What the business calls a job, so the words are theirs. */
   projectWord: string;
+  /**
+   * THE BUILDING'S OWN NUMBERS (X7), one line each, in EVERY turn.
+   *
+   * This is the half of the slice the model sees, and the reason the
+   * founder asked for it: *"then the questions can use this information as
+   * it goes."* An answer drops out of `earlier` after thirty of them, so a
+   * walk told 2,400 square feet at framing had forgotten it by drywall.
+   * These do not drop out — there are a handful of them and they are facts
+   * about the building rather than about a phase.
+   */
+  measurements: readonly string[];
 }): string {
   const outstanding = input.step.questions.filter(
     (q) => !input.settledHere.some((a) => a.questionId === q.id),
@@ -175,6 +186,13 @@ export function walkSystemPrompt(input: {
     `THE ESTIMATE: ${input.estimateNumber}`,
     `THE WALK: ${input.outlineName}, step ${input.stepNumber} of ${input.stepCount}.`,
     ``,
+    input.measurements.length > 0
+      ? [
+          `MEASURED ON THIS BUILDING — these are facts, use them:`,
+          ...input.measurements,
+          ``,
+        ].join("\n")
+      : ``,
     `THIS STEP: ${input.step.title}${input.step.costCode ? ` (cost code ${input.step.costCode})` : ""}`,
     input.step.guidance.trim()
       ? `What the business says about it: ${input.step.guidance.trim()}`
@@ -203,6 +221,7 @@ export function walkSystemPrompt(input: {
     ``,
     `1. ASK ONE THING AT A TIME. Two questions in a message gets one answer and a lost question.`,
     `2. GATHER, NEVER PRICE. You do not put numbers on anything. No prices, no rates, no quantities you were not told. If somebody asks what something costs, say the estimate does that next and move on.`,
+    `2a. THE MEASUREMENTS ABOVE ARE YOURS TO USE. Never ask for a number that is already up there. Work from them out loud instead — "wall area is 2,232, so that is about 70 sheets, right?" — and let them correct you. Arithmetic on a number you were GIVEN is not pricing; inventing the number would be.`,
     `3. THE LIST IS THE FLOOR, NOT THE CEILING. When an answer opens a door, go through it — a walkout basement means a retaining wall, egress, a door down there. Ask those with no questionId. This is the most useful thing you do.`,
     `4. SKIP WHAT THE ANSWERS MADE POINTLESS, and say why in a clause. Asking about rebar after they said block is how somebody learns to stop reading you.`,
     `5. NEVER SKIP A QUESTION MARKED ALWAYS ASK. It will be refused, and you will have wasted their turn.`,

@@ -12,7 +12,8 @@ import {
   type WalkQuestion,
   type WalkStep,
 } from "../src/packs/jobs/walk-math";
-import { validateWalkTurn } from "../src/packs/jobs/ai/walk";
+import { validateWalkTurn, walkSystemPrompt } from "../src/packs/jobs/ai/walk";
+import { proposeSystemPrompt } from "../src/packs/jobs/ai/propose";
 
 /**
  * THE WALK (X2a, ADR 0098) — the pure half.
@@ -499,5 +500,113 @@ describe("validateWalkTurn: nothing the model says is taken on trust", () => {
       here,
     );
     expect(out?.stepDone).toBe(true);
+  });
+});
+
+/**
+ * WHAT THE MODEL IS ACTUALLY TOLD ABOUT THE BUILDING (X7).
+ *
+ * The half of the measure-up nobody can see by watching the screen, and the
+ * half the founder asked for: *"then the questions can use this information
+ * as it goes."* If the lines are not in the prompt, the measure-up is a
+ * data-entry chore that changes nothing.
+ */
+describe("the building's numbers in the prompt", () => {
+  const base = {
+    jobName: "24-109 Barn",
+    estimateNumber: "EST-3",
+    outlineName: "New build",
+    step: step(),
+    stepNumber: 1,
+    stepCount: 10,
+    settledHere: [],
+    earlier: [],
+    projectWord: "Project",
+  };
+
+  it("puts them in, and tells it they are facts", () => {
+    const prompt = walkSystemPrompt({
+      ...base,
+      measurements: ["- Wall perimeter: 128 lf", "- Roof area: 2,840 sf (4:12)"],
+    });
+    expect(prompt).toContain("MEASURED ON THIS BUILDING");
+    expect(prompt).toContain("- Wall perimeter: 128 lf");
+    expect(prompt).toContain("- Roof area: 2,840 sf (4:12)");
+  });
+
+  /**
+   * **THE RULE THAT MAKES THEM WORTH CARRYING.** Without it the walk has the
+   * numbers and asks for them anyway, which is the complaint this slice
+   * exists to answer.
+   */
+  it("tells it not to ask again for a number it already has", () => {
+    const prompt = walkSystemPrompt({ ...base, measurements: ["- Wall perimeter: 128 lf"] });
+    expect(prompt).toContain("Never ask for a number that is already up there");
+  });
+
+  /**
+   * Arithmetic on a number somebody GAVE is not pricing, and the prompt has
+   * to say so — rule 2 forbids quantities it was not told, and a walk that
+   * read that as "no arithmetic" would be useless.
+   */
+  it("keeps rule 2 and still allows the arithmetic", () => {
+    const prompt = walkSystemPrompt({ ...base, measurements: ["- Wall area: 2,232 sf"] });
+    expect(prompt).toContain("GATHER, NEVER PRICE");
+    expect(prompt).toContain("Arithmetic on a number you were GIVEN is not pricing");
+  });
+
+  it("says nothing at all when the building has not been measured", () => {
+    expect(walkSystemPrompt({ ...base, measurements: [] })).not.toContain("MEASURED ON THIS");
+  });
+});
+
+/**
+ * AND THE SAME NUMBERS MUST REACH THE PROPOSAL (X7).
+ *
+ * The one that nearly got away. Feeding the measurements to the CONVERSATION
+ * and not to the thing that writes the lines would have left every phase a
+ * lump — *"Framing labor — what are you getting for that?"* over a building
+ * whose wall area is sitting right there. The measure-up would have been a
+ * data-entry chore that changed nothing on the estimate.
+ */
+describe("the building's numbers in the proposal prompt", () => {
+  const base = {
+    projectWord: "Project",
+    jobName: "24-109 Barn",
+    step: step(),
+    answers: [],
+    assemblies: [],
+    costCodes: [],
+  };
+
+  it("puts them in as quoted numbers", () => {
+    const prompt = proposeSystemPrompt({
+      ...base,
+      measurements: ["- Wall perimeter: 128 lf", "- Wall height: 9.5 lf"],
+    });
+    expect(prompt).toContain("MEASURED ON THIS BUILDING");
+    expect(prompt).toContain("- Wall perimeter: 128 lf");
+  });
+
+  /**
+   * Rule 2 says a quantity is quoted or explained. Without 2a the model has
+   * the numbers and no permission to multiply them, which is the whole
+   * difference between a measured line and a lump.
+   */
+  it("says the measurements count as numbers they gave, with the working shown", () => {
+    const prompt = proposeSystemPrompt({ ...base, measurements: ["- Wall perimeter: 128 lf"] });
+    expect(prompt).toContain("A QUANTITY IS QUOTED OR EXPLAINED");
+    expect(prompt).toContain("COUNT AS NUMBERS THEY GAVE");
+    expect(prompt).toContain("derivedFrom");
+  });
+
+  /** It still may not price anything. That rule is not what this relaxes. */
+  it("leaves the no-pricing rule exactly where it was", () => {
+    const prompt = proposeSystemPrompt({ ...base, measurements: ["- Roof area: 2,840 sf"] });
+    expect(prompt).toContain("YOU NEVER PRICE ANYTHING");
+  });
+
+  it("says nothing at all when the building has not been measured", () => {
+    expect(proposeSystemPrompt({ ...base, measurements: [] })).not.toContain("MEASURED ON THIS");
   });
 });

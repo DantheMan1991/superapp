@@ -13,6 +13,9 @@ import { BringQuestionsButton } from "@/packs/jobs/components/bring-questions-di
 import { interviewGateFrom } from "@/packs/jobs/interview-gate";
 import { PACK } from "@/packs/jobs/vocabulary";
 import { OutlineEditor } from "@/packs/jobs/components/outline-editor";
+import { OutlineMeasures } from "@/packs/jobs/components/outline-measures";
+import { listOutlineMeasures } from "@/packs/jobs/measure-ops";
+import { isMeasureKind } from "@/packs/jobs/vocabulary";
 
 /**
  * One outline, open for editing (X1, ADR 0098).
@@ -38,7 +41,8 @@ export default async function EstimateOutlinePage({
     async (tx) => {
       const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
       const gate = interviewGateFrom(pack.config);
-      if (!gate.available) return { gate, loaded: null, books: [], others: [] };
+      if (!gate.available)
+        return { gate, loaded: null, books: [], others: [], measures: [] };
       /**
        * EVERY LIST, NOT JUST THE DEFAULT. A step's code is checked against all
        * of them, because "2000 is in Residential phases but not in CSI
@@ -66,7 +70,15 @@ export default async function EstimateOutlinePage({
           steps: o.summary.steps,
           questions: o.summary.questions,
         }));
-      return { gate, loaded: await loadOutline(tx, ctx.tenant.id, id), books, others };
+      /** What this outline wants measured before it starts asking (X7). */
+      const measures = await listOutlineMeasures(tx, ctx.tenant.id, id);
+      return {
+        gate,
+        loaded: await loadOutline(tx, ctx.tenant.id, id),
+        books,
+        others,
+        measures,
+      };
     },
     { role: ctx.role },
   );
@@ -91,6 +103,21 @@ export default async function EstimateOutlinePage({
             <BringQuestionsButton outlineId={outline.id} others={data.others} />
           ) : null
         }
+      />
+
+      <OutlineMeasures
+        outlineId={outline.id}
+        canWrite={canWrite}
+        measures={data.measures.map((m) => ({
+          id: m.id,
+          version: m.version,
+          name: m.name,
+          unit: m.unit,
+          /** A kind the database allows and this build does not reads as a length. */
+          kind: isMeasureKind(m.kind) ? m.kind : ("length" as const),
+          guidance: m.guidance,
+          required: m.required,
+        }))}
       />
 
       <OutlineEditor

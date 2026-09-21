@@ -75,6 +75,7 @@ export * from "./jobs-bids";
 export * from "./jobs-schedule";
 export * from "./jobs-drawings";
 export * from "./jobs-markups";
+export * from "./jobs-measurements";
 export * from "./jobs-warranty";
 export * from "./jobs-back-charges";
 export * from "./jobs-bonding";

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, CornerDownLeft, Receipt, SkipForward } from "lucide-react";
+import { Check, CornerDownLeft, Receipt, Ruler, SkipForward } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import {
 } from "../walk-actions";
 import type { Reckoning } from "../walk-reckoning";
 import { StepCard, WalkRail, WalkReckoning } from "./walk-reckoning-panel";
+import { MeasureOnADrawing } from "./measure-on-a-drawing";
 
 /** A line the walk has worked out but nobody has accepted yet. */
 interface ProposedRow {
@@ -257,23 +258,41 @@ export function WalkScreen({
   }
 
   const done = view.status !== "running";
+  /**
+   * **THE WALK IS ASKING WHAT THE BUILDING MEASURES (X7)**, not what the
+   * work is. The answer box takes a figure, the drawings are one click
+   * away, and the phase rail is beside the point until this is done.
+   */
+  const measuring = view.measuring.ask !== null;
 
   return (
     <div className="space-y-4">
       <Panel className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            {view.stepSection && (
+            {/**
+              * **THE PHASE'S SECTION IS NOT TRUE WHILE MEASURING.** The step
+              * underneath is only where the walk WILL start; printing
+              * *04. Structural* over "Wall perimeter — how many lf?" says the
+              * screen is somewhere it is not.
+              */}
+            {!measuring && view.stepSection && (
               <p className="text-xs uppercase tracking-wide text-subtle-foreground">
                 {view.stepSection}
               </p>
             )}
             <p className="text-sm font-medium">
-              {view.stepTitle || "Finished"}
-              {view.stepCount > 0 && (
+              {measuring ? "Measuring the building" : view.stepTitle || "Finished"}
+              {measuring ? (
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  step {view.stepNumber} of {view.stepCount}
+                  {view.measuring.left} to go
                 </span>
+              ) : (
+                view.stepCount > 0 && (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    step {view.stepNumber} of {view.stepCount}
+                  </span>
+                )
               )}
             </p>
             {view.stepGuidance && (
@@ -399,6 +418,39 @@ export function WalkScreen({
                   <CornerDownLeft className="size-4" />
                 </Button>
               </form>
+
+              {/**
+                * **THE TAKEOFF, WITHOUT LEAVING THE WALK (X7).** The
+                * founder's ask, in his words: *"there are numerous times it
+                * asks for a square footage. I need the takeoff tool to get
+                * that a lot of the time."* The number it hands back goes on
+                * the JOB, so every question after this one can read it.
+                */}
+              {view.measuring.ask && (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <MeasureOnADrawing
+                    interviewId={view.interviewId}
+                    projectId={projectId}
+                    measure={{
+                      name: view.measuring.ask.name,
+                      unit: view.measuring.ask.unit,
+                      kind: view.measuring.ask.kind,
+                    }}
+                    onMeasured={(next, isFinished) => {
+                      if (next) setView(next);
+                      setEchoed(null);
+                      refreshReckoning();
+                      if (isFinished) {
+                        toast.success("That is every question. See what is left below.");
+                      }
+                      router.refresh();
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    or type it — 248, 24 x 40 and 38&apos;-6&quot; all read.
+                  </span>
+                </div>
+              )}
 
               {view.settled.length > 0 && !proposal && (
                 <div className="mt-4 border-t pt-3">
@@ -539,6 +591,43 @@ export function WalkScreen({
                   </li>
                 ))}
               </ul>
+            </>
+          )}
+
+          {/**
+            * **THE BUILDING'S NUMBERS STAY ON THE SCREEN (X7).** Not because
+            * a panel is nice, but because they are the thing every later
+            * question reads: if the walk quotes 2,232 sf of wall at drywall,
+            * the estimator has to be able to see where that came from
+            * without scrolling back through forty answers.
+            */}
+          {view.measuring.taken.length > 0 && (
+            <>
+              <p className="mt-5 text-sm font-medium">The building</p>
+              <ul className="mt-2 space-y-1.5">
+                {view.measuring.taken.map((m) => (
+                  <li
+                    key={m.slug}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs"
+                  >
+                    <span className="text-muted-foreground">{m.name}</span>
+                    <span className="flex items-baseline gap-2">
+                      <span className={m.passed ? "italic text-muted-foreground" : "font-medium"}>
+                        {m.value}
+                      </span>
+                      {m.source === "measured" && (
+                        <Ruler
+                          className="size-3 shrink-0 self-center text-muted-foreground"
+                          aria-label="off a drawing"
+                        />
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-subtle-foreground">
+                Every question from here on can use these.
+              </p>
             </>
           )}
         </Panel>

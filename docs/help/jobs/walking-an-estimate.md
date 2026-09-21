@@ -24,7 +24,11 @@ point and carry on typing.
 
 On any estimate that is not yet accepted you will see a panel above the lines:
 *Walk it instead of typing it*. Pick which outline to use and press
-{button:Start the walk|primary}. It asks its first question straight away.
+{button:Start the walk|primary}.
+
+If your outline has a [measure-first list](estimate-outlines.md#measure-first),
+that is what it opens with — see below. Otherwise it asks its first question
+straight away.
 
 **If the panel says there is no outline to walk yet**, that is all that is
 missing. {button:Set one up|outline} takes you to
@@ -34,6 +38,71 @@ list gives you a step per phase in a couple of clicks.
 If you leave and come back, that panel says **A walk is part way through** and
 how far you got. {button:Pick it up|primary} carries on exactly where you were,
 down to the question you were on — nothing is lost by closing the laptop.
+
+## It measures the building first
+
+**Before a single question**, the walk asks for the numbers your outline says
+it needs: the perimeter, the wall height, the roof area — whatever your
+business put on its
+[Measure first](estimate-outlines.md#measure-first) list. The header reads
+**Measuring the building** and counts down how many are left.
+
+There are two reasons it does this up front rather than asking as it goes.
+Measuring is a different job from talking — you want the drawings open and
+your head in them, not fifteen interruptions. And **every question after this
+point can use these numbers**: give it the wall area once and it works from
+it at insulation, at drywall and at paint instead of asking you three times.
+
+### Answering one
+
+Type the figure. It reads what you would actually write:
+
+| You type | It reads |
+| --- | --- |
+| `2400` or `2,400 sf` | 2,400 |
+| `38'-6"` | 38.5 |
+| `24 x 40` (or `24 by 40`) | 960 |
+| `40 + 24 + 40 + 24` | 128 |
+| `40x9 + 24x9` | 576 |
+
+**It will not choose between two figures.** *"240 to 260"* gets asked again
+rather than averaged, because a measurement you did not mean multiplies
+through every line that reads it. One number, and it takes it.
+
+{button:Skip this one|ghost} is a real answer and it sticks — the walk will
+not ask again. Use it for what is not on this job and for what you will go
+and find out later.
+
+### Measuring it on a drawing
+
+{button:Measure it on a drawing|outline} opens your sheets without leaving the
+walk. Pick the sheet, and the full drawing viewer opens over the
+conversation — the same one the **Drawings** tab uses, with the same tools and
+the same scale.
+
+- Draw the length, area or count, and press {button:Use this|primary} beside
+  it in the list.
+- **Anything already drawn on that sheet is offered too**, so a takeoff
+  somebody did last week is one click.
+- If there are several of the right kind — a roof in three planes — there is a
+  **Use the total** button that adds them up and says how many it added.
+- Only traces of the kind being asked for are offered. Asked for an area, you
+  will not be handed a length.
+
+A number taken this way carries a small ruler beside it afterwards, and
+remembers the sheet it came from. **Re-scaling that sheet later does not
+change it** — the number was right when you took it, and a bid that moved
+underneath you is worse than one that is out of date where you can see it.
+
+If the job has no drawings, the picker says so. Type the number instead;
+nothing about the walk depends on there being a PDF.
+
+### Seeing them afterwards
+
+Once measuring is done the walk starts its questions, and the numbers stay on
+the right under **The building** for the rest of the walk. They belong to the
+job, not to this walk: start a second estimate on the same job and they are
+already there.
 
 ## The screen
 

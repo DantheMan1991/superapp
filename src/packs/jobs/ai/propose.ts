@@ -144,12 +144,30 @@ export function proposeSystemPrompt(input: {
   assemblies: { name: string; per: string }[];
   /** The codes on THIS job's list, so a line lands somewhere real. */
   costCodes: { code: string; name: string }[];
+  /**
+   * **THE BUILDING'S OWN NUMBERS** (X7, ADR 0100), one line each.
+   *
+   * This is where the measure-up pays for itself. Rule 2 below already says
+   * a quantity is quoted or explained — these are quoted, by the estimator,
+   * before the walk even started. Without them here the measurements would
+   * inform the CONVERSATION and not the ESTIMATE, and every line would come
+   * out a lump: *"Framing labor — what are you getting for that?"* instead
+   * of *"Framing labor, 1,216 sf of wall"*.
+   */
+  measurements: readonly string[];
 }): string {
   return [
     `You are turning one phase of a ${input.projectWord.toLowerCase()} estimate into lines, from what the estimator just told you. You do not price anything: you say what the lines ARE, and the software puts the money on.`,
     ``,
     `THE ${input.projectWord.toUpperCase()}: ${input.jobName}`,
     `THIS PHASE: ${input.step.title}${input.step.costCode ? ` (cost code ${input.step.costCode})` : ""}`,
+    input.measurements.length > 0
+      ? [
+          ``,
+          `MEASURED ON THIS BUILDING — these are quoted numbers, use them:`,
+          ...input.measurements,
+        ].join("\n")
+      : ``,
     input.step.guidance.trim() ? `What the business says about it: ${input.step.guidance.trim()}` : ``,
     ``,
     `WHAT THEY SAID`,
@@ -175,6 +193,7 @@ export function proposeSystemPrompt(input: {
     ``,
     `1. YOU NEVER PRICE ANYTHING. There is no field for a cost you worked out, and there is no point trying — a figure that is not in what they said is dropped and the line comes out unpriced.`,
     `2. A QUANTITY IS QUOTED OR EXPLAINED. Use the number they gave, or give the arithmetic in derivedFrom. No quantity and no working means leave it out, and the line becomes a lump they can fill in.`,
+    `2a. THE MEASUREMENTS ABOVE COUNT AS NUMBERS THEY GAVE. Work from them and put the working in derivedFrom: "perimeter 128 lf x wall height 9.5 = 1,216 sf". A phase that could have been measured and came out a lump is a phase somebody now has to price blind.`,
     `3. USE AN ASSEMBLY when one of theirs is what the line is. That is how a phase gets priced properly, and it is better than several bare lines.`,
     `4. BID OUT IS ONE LINE. A phase they are subbing is a single lump for the subcontract, not a breakdown of somebody else's work.`,
     // No backtick may appear inside this template literal — the same trap

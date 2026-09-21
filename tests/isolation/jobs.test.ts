@@ -3749,4 +3749,214 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.jobCostCodes).where(eq(schema.jobCostCodes.id, codeB));
     });
   }, 120_000);
+
+  it("cannot read or change another tenant's MEASUREMENTS or another outline's MEASURE LIST; one number per name per building; a row carries a value or a pass; and a deleted sheet does not take the number with it", async () => {
+    // ── the outline's list ────────────────────────────────────────────────
+    const outline = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantA, name: `Measured ${STAMP}` })
+        .returning();
+      return rows[0].id;
+    });
+    const declared = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobEstimateOutlineMeasures)
+        .values({ tenantId: tenantA, outlineId: outline, name: "Perimeter", unit: "lf", kind: "length" })
+        .returning();
+      return rows[0].id;
+    });
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.jobEstimateOutlineMeasures).where(eq(schema.jobEstimateOutlineMeasures.id, declared)),
+      ),
+    ).toEqual([]);
+
+    // A kind the pack does not have, and a nameless one: both refused.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateOutlineMeasures).values({ tenantId: tenantA, outlineId: outline, name: "Volume", kind: "volume" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateOutlineMeasures).values({ tenantId: tenantA, outlineId: outline, name: "   " }),
+      ),
+    ).rejects.toThrow();
+    // Tenant B's outline under tenant A's measure: unrepresentable.
+    const theirOutline = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobEstimateOutlines)
+        .values({ tenantId: tenantB, name: `Theirs ${STAMP}` })
+        .returning();
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobEstimateOutlineMeasures).values({ tenantId: tenantA, outlineId: theirOutline, name: "Perimeter" }),
+      ),
+    ).rejects.toThrow();
+
+    // ── the building's numbers ────────────────────────────────────────────
+    const taken = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobMeasurements)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Perimeter",
+          slug: "perimeter",
+          unit: "lf",
+          valueThousandths: 248_000,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobMeasurements).where(eq(schema.jobMeasurements.id, taken)),
+      changed: await tx
+        .update(schema.jobMeasurements)
+        .set({ valueThousandths: 1 })
+        .where(eq(schema.jobMeasurements.id, taken))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    expect(
+      await withSystem((tx) => tx.select().from(schema.jobMeasurements).where(eq(schema.jobMeasurements.id, taken))),
+    ).toHaveLength(1);
+
+    // ONE NUMBER PER NAME PER BUILDING, refused by the database.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Perimeter",
+          slug: "perimeter",
+          valueThousandths: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+    // The same name on ANOTHER building is a different fact and is allowed.
+    const second = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobProjects)
+        .values({ tenantId: tenantA, entityId: entityA, number: `${STAMP}-M2`, name: "Second house" })
+        .returning();
+      return rows[0].id;
+    });
+    const elsewhere = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobMeasurements)
+        .values({ tenantId: tenantA, projectId: second, name: "Perimeter", slug: "perimeter", valueThousandths: 2 })
+        .returning();
+      return rows[0].id;
+    });
+    expect(elsewhere).toBeTruthy();
+    // Tenant B's job under tenant A's measurement: unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({
+          tenantId: tenantA,
+          projectId: projectB,
+          name: "Perimeter",
+          slug: "perimeter",
+          valueThousandths: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // A VALUE OR A PASS, NEVER NEITHER: a row that answers nothing is a question.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({ tenantId: tenantA, projectId: projectA, name: "Roof", slug: "roof" }),
+      ),
+    ).rejects.toThrow();
+    const passed = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.jobMeasurements)
+        .values({ tenantId: tenantA, projectId: projectA, name: "Roof", slug: "roof", passedAt: new Date() })
+        .returning();
+      return rows[0];
+    });
+    expect([passed.valueThousandths, passed.passedAt === null]).toEqual([null, false]);
+    // An unknown source is refused.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobMeasurements).values({
+          tenantId: tenantA,
+          projectId: projectA,
+          name: "Deck",
+          slug: "deck",
+          valueThousandths: 1,
+          source: "guessed",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // ── the trace can go; the number cannot ───────────────────────────────
+    const sheet = await withSystem(async (tx) => {
+      const doc = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId: tenantA,
+          origin: "dms",
+          blobPathname: `docs/${tenantA}/files/${STAMP}-measured.pdf`,
+          fileName: "measured.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-measured`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      const set = await tx
+        .insert(schema.jobDrawingSets)
+        .values({ tenantId: tenantA, projectId: projectA, name: `Measured ${STAMP}`, issuedOn: "2026-06-01" })
+        .returning();
+      const rows = await tx
+        .insert(schema.jobSheets)
+        .values({
+          tenantId: tenantA,
+          projectId: projectA,
+          setId: set[0].id,
+          documentId: doc[0].id,
+          pageNumber: 1,
+          sheetNumber: `M-${STAMP}`,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await withSystem((tx) =>
+      tx.update(schema.jobMeasurements).set({ sheetId: sheet, source: "measured" }).where(eq(schema.jobMeasurements.id, taken)),
+    );
+    await withSystem((tx) => tx.delete(schema.jobSheets).where(eq(schema.jobSheets.id, sheet)));
+    const after = await withSystem((tx) =>
+      tx.select().from(schema.jobMeasurements).where(eq(schema.jobMeasurements.id, taken)),
+    );
+    /**
+     * **SET NULL ON A COMPOSITE FK IS THE COLUMN-LIST FORM OR IT NEVER
+     * RUNS.** A bare one would try to null `tenant_id` too and the delete
+     * above would have thrown. The number was true when it was taken;
+     * losing the trace loses the provenance, not the fact.
+     */
+    expect([after[0].sheetId, after[0].valueThousandths, after[0].tenantId]).toEqual([
+      null,
+      248_000,
+      tenantA,
+    ]);
+
+    // The numbers go with the job, and the list goes with the outline.
+    await withSystem((tx) => tx.delete(schema.jobEstimateOutlines).where(eq(schema.jobEstimateOutlines.id, outline)));
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobEstimateOutlineMeasures).where(eq(schema.jobEstimateOutlineMeasures.id, declared)),
+      ),
+    ).toEqual([]);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobEstimateOutlines).where(eq(schema.jobEstimateOutlines.id, theirOutline));
+      await tx.delete(schema.jobMeasurements).where(eq(schema.jobMeasurements.projectId, projectA));
+      await tx.delete(schema.jobProjects).where(eq(schema.jobProjects.id, second));
+    });
+  }, 120_000);
 });

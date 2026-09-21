@@ -2,6 +2,7 @@ import "server-only";
 import type { Tx } from "@/db";
 import { createCostCode, createCostCodeSet, listCostCodeSets, type JobsCtx } from "./ops";
 import { createOutline, listOutlines } from "./outline-ops";
+import { createOutlineMeasure } from "./measure-ops";
 import { costCodeSetsFrom, estimateOutlinesFrom } from "./seed-shape";
 
 export { costCodeSetsFrom, estimateOutlinesFrom, summarizeJobsSeed } from "./seed-shape";
@@ -83,9 +84,10 @@ export async function applyJobsSeed(
   );
   let outlinesCreated = 0;
   let stepsCreated = 0;
+  let measuresCreated = 0;
   for (const outline of wantedOutlines) {
     if (existingOutlines.has(outline.name.toLowerCase())) continue;
-    await createOutline(tx, ctx, {
+    const created = await createOutline(tx, ctx, {
       name: outline.name,
       notes: outline.notes,
       isDefault: undefined,
@@ -103,6 +105,22 @@ export async function applyJobsSeed(
         })),
       })),
     });
+    /**
+     * **WHAT TO MEASURE, IF THE PROFILE SAYS (X7).** Written after the
+     * outline rather than inside `createOutline`, because a measurement is
+     * not a step and the outline's own validation has nothing to say about
+     * it. Same discipline as the rest: a starter, the tenant's from here.
+     */
+    for (const measure of outline.measures ?? []) {
+      await createOutlineMeasure(tx, ctx, created.id, {
+        name: measure.name,
+        unit: measure.unit ?? "",
+        kind: measure.kind ?? "length",
+        guidance: measure.guidance ?? "",
+        required: measure.required ?? false,
+      });
+      measuresCreated += 1;
+    }
     outlinesCreated += 1;
     stepsCreated += outline.steps.length;
     existingOutlines.add(outline.name.toLowerCase());
@@ -116,7 +134,9 @@ export async function applyJobsSeed(
   }
   if (outlinesCreated > 0) {
     parts.push(
-      `${outlinesCreated} estimate ${outlinesCreated === 1 ? "outline" : "outlines"} with ${stepsCreated} steps`,
+      `${outlinesCreated} estimate ${outlinesCreated === 1 ? "outline" : "outlines"} with ${stepsCreated} steps${
+        measuresCreated > 0 ? ` and ${measuresCreated} measurements` : ""
+      }`,
     );
   }
   return {

@@ -42,7 +42,7 @@ import {
 } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
 import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
-import { STANDARD_SCALES, formatMeasure, matchingStandard, measure, takeoffUnitFor, toThousandths, type Measurement, type SheetScale } from "../takeoff-math";
+import { STANDARD_SCALES, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, type Measurement, type SheetScale } from "../takeoff-math";
 import {
   MARKUP_COLORS,
   MARKUP_COLOR_HEX,
@@ -88,6 +88,16 @@ export interface EstimateOption {
   title: string;
   status: string;
   lines: Array<{ id: string; description: string; unit: string; quantityThousandths: number }>;
+}
+
+/** What a walk is waiting for, when the viewer was opened from one (X7). */
+export interface MeasuringFor {
+  name: string;
+  unit: string;
+  kind: MeasureKind;
+  busy: boolean;
+  /** The total in thousandths, and the trace it came from when it is one. */
+  onUse: (valueThousandths: number, markupId: string | null, note: string) => void;
 }
 
 type Tool = "select" | MarkupKind | "calibrate";
@@ -140,6 +150,7 @@ export function SheetViewer({
   scale,
   estimates,
   codes,
+  measuringFor = null,
 }: {
   url: string;
   page: number;
@@ -151,6 +162,17 @@ export function SheetViewer({
   scale: SheetScale | null;
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
+  /**
+   * **THE WALK IS WAITING FOR THIS NUMBER (X7).** Set when the viewer was
+   * opened from a walk that is asking what the building measures, and null
+   * everywhere else — the drawings page passes nothing and behaves exactly
+   * as it did.
+   *
+   * Only traces of the SAME KIND are offered: a length handed back for an
+   * area is a number that means nothing, and it would multiply through
+   * every line that read it.
+   */
+  measuringFor?: MeasuringFor | null;
 }) {
   const router = useRouter();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -485,6 +507,33 @@ export function SheetViewer({
 
   const cursor = !canEdit || tool === "select" ? "grab" : "crosshair";
   const selected = markups.find((m) => m.id === selectedId) ?? null;
+  /**
+   * The traces this walk could use, and what they come to together (X7).
+   * A roof is three planes and a perimeter is one run; summing them here
+   * saves a calculator, and `sumMeasurements` already refuses to add a
+   * length to an area.
+   */
+  const forTheWalk = useMemo(
+    () =>
+      measuringFor
+        ? markups.filter((m) => m.kind === measuringFor.kind && measurements.get(m.id))
+        : [],
+    [markups, measurements, measuringFor],
+  );
+  const forTheWalkTotal = useMemo(() => {
+    if (!measuringFor || forTheWalk.length < 2) return null;
+    try {
+      return sumMeasurements(
+        forTheWalk.map((m) => ({
+          kind: measuringFor.kind,
+          measurement: measurements.get(m.id) ?? null,
+        })),
+      ).total;
+    } catch {
+      /** Different units on one sheet: no total worth offering. */
+      return null;
+    }
+  }, [forTheWalk, measurements, measuringFor]);
   const draftMeasure =
     pointsDraft && pointsDraft.kind !== "calibrate" && pointsDraft.points.length >= MIN_POINTS[pointsDraft.kind]
       ? measure(pointsDraft.kind, { points: pointsDraft.points }, scale)
@@ -641,6 +690,40 @@ export function SheetViewer({
           <h3 className="text-sm font-medium">Markups</h3>
           <span className="text-xs text-muted-foreground">{markupSentence(summary)}</span>
         </div>
+        {measuringFor && (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-[3px] border border-primary/30 bg-primary/5 px-3 py-2">
+            <p className="text-xs">
+              <span className="font-medium">{measuringFor.name}</span>
+              <span className="text-muted-foreground">
+                {" "}
+                — draw {measuringFor.kind === "count" ? "a count" : measuringFor.kind === "area" ? "an area" : "a length"} and use it
+                {forTheWalk.length > 0
+                  ? `, or use what is already drawn`
+                  : scale
+                    ? ""
+                    : ". Set the scale first"}
+                .
+              </span>
+            </p>
+            {forTheWalk.length > 1 && forTheWalkTotal !== null && (
+              <Button
+                type="button"
+                size="sm"
+                className="h-7"
+                disabled={measuringFor.busy}
+                onClick={() =>
+                  measuringFor.onUse(
+                    toThousandths(forTheWalkTotal.quantity),
+                    null,
+                    `${forTheWalk.length} traces on ${label}`,
+                  )
+                }
+              >
+                Use the total of {forTheWalk.length} · {formatMeasure(forTheWalkTotal)}
+              </Button>
+            )}
+          </div>
+        )}
         {markups.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {canEdit
@@ -667,6 +750,9 @@ export function SheetViewer({
                 }}
                 onEdit={() => setEditing(m)}
                 onTakeoff={() => setTakeoffFor(m)}
+                measuringFor={
+                  measuringFor && m.kind === measuringFor.kind ? measuringFor : null
+                }
               />
             ))}
           </ul>
@@ -925,6 +1011,7 @@ function MarkupRowView({
   onSelect,
   onEdit,
   onTakeoff,
+  measuringFor,
 }: {
   markup: MarkupView;
   number?: number;
@@ -938,6 +1025,8 @@ function MarkupRowView({
   onSelect: () => void;
   onEdit: () => void;
   onTakeoff: () => void;
+  /** Non-null only when a walk is waiting for exactly this kind of number. */
+  measuringFor: MeasuringFor | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1039,6 +1128,24 @@ function MarkupRowView({
         ) : m.pushedQuantityThousandths !== null ? (
           <StatusBadge tone="quiet">Line gone</StatusBadge>
         ) : null)}
+      {measuringFor && measurement && (
+        <Button
+          type="button"
+          size="sm"
+          className="h-7"
+          disabled={pending || busy || measuringFor.busy}
+          onClick={() =>
+            measuringFor.onUse(
+              toThousandths(measurement.quantity),
+              m.id,
+              `${m.kind} on this sheet`,
+            )
+          }
+          title={`Use ${formatMeasure(measurement)} as ${measuringFor.name}`}
+        >
+          Use this
+        </Button>
+      )}
       {canEdit && (
         <span className="flex items-center gap-1">
           {measuring && (

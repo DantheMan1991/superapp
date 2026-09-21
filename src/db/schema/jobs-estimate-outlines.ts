@@ -283,3 +283,81 @@ export const jobEstimateOutlineQuestions = pgTable(
 export type JobEstimateOutline = typeof jobEstimateOutlines.$inferSelect;
 export type JobEstimateOutlineStep = typeof jobEstimateOutlineSteps.$inferSelect;
 export type JobEstimateOutlineQuestion = typeof jobEstimateOutlineQuestions.$inferSelect;
+
+/**
+ * WHAT TO MEASURE BEFORE THE QUESTIONS START (X7).
+ *
+ * The founder's idea, in his words: *"What if before the questions it
+ * prompts you to grab measurements. Full exterior elevation square footage,
+ * wall square footage, wall perimeter etc. Then the questions can use this
+ * information as it goes."*
+ *
+ * It lives on the outline rather than in code because measuring is not one
+ * list. A remodel wants the room count and the existing wall height; a
+ * commercial shell wants the bay spacing and the slab area; a new build
+ * wants the perimeter. The same reason the steps and the questions are the
+ * tenant's, and the same reason nothing in this file names a measurement.
+ *
+ * `kind` is which takeoff tool gets offered when somebody reaches for the
+ * drawings — a length, an area, a count — and `unit` is what the number is
+ * in once it lands. They are not the same thing: an area measured in feet
+ * is stated in `sf`.
+ *
+ * **NOT ASKING IS ALSO AN ANSWER.** A measurement that is not `required` is
+ * offered and can be waved past without a word; a required one has to be
+ * given or explicitly passed before the first phase opens, because the
+ * questions after it are the reason it is being asked for at all.
+ */
+export const jobEstimateOutlineMeasures = pgTable(
+  "job_estimate_outline_measures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    outlineId: uuid("outline_id").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** "Wall perimeter", "Roof area", "Exterior elevation". */
+    name: text("name").notNull(),
+    /** What the number is in once it lands: "lf", "sf", "ea". */
+    unit: text("unit").notNull().default(""),
+    /** Which takeoff tool to offer: length, area or count. */
+    kind: text("kind").notNull().default("length"),
+    /** What to include and what to leave out, in the builder's words. */
+    guidance: text("guidance").notNull().default(""),
+    /** Ask for it before the first phase, rather than merely offering it. */
+    required: boolean("required").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_estimate_outline_measures_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("job_estimate_outline_measures_tenant_outline_name_idx").on(
+      t.tenantId,
+      t.outlineId,
+      t.name,
+    ),
+    index("job_estimate_outline_measures_tenant_outline_sort_idx").on(
+      t.tenantId,
+      t.outlineId,
+      t.sortOrder,
+    ),
+    /** A measure is part of its outline. */
+    foreignKey({
+      name: "job_estimate_outline_measures_outline_fk",
+      columns: [t.tenantId, t.outlineId],
+      foreignColumns: [jobEstimateOutlines.tenantId, jobEstimateOutlines.id],
+    }).onDelete("cascade"),
+    check(
+      "job_estimate_outline_measures_name_present",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+    check(
+      "job_estimate_outline_measures_kind_valid",
+      sql`${t.kind} in ('length', 'area', 'count')`,
+    ),
+  ],
+);
+
+export type JobEstimateOutlineMeasure = typeof jobEstimateOutlineMeasures.$inferSelect;

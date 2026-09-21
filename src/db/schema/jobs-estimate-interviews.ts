@@ -110,6 +110,28 @@ export const jobEstimateInterviews = pgTable(
      * underneath it must not take the interview with it.
      */
     pendingPriceLineId: uuid("pending_price_line_id"),
+    /**
+     * THE MEASUREMENT BEING ASKED FOR (X7), the same shape and the same
+     * reason: when this is set the walk is collecting a NUMBER ABOUT THE
+     * BUILDING, and the answer is read by `measure-math.ts` rather than
+     * handed to the model.
+     *
+     * It points at a `job_estimate_outline_measures` row — what was asked
+     * for — and the answer lands in `job_measurements`, which belongs to
+     * the project. No FK, like every other reference on this table.
+     */
+    pendingMeasureId: uuid("pending_measure_id"),
+    /**
+     * WHEN THE WALK STOPPED MEASURING AND STARTED ASKING.
+     *
+     * The measure-up runs while this is null and never again — a fact, not
+     * an inference. Deriving it from "is every declared measurement
+     * answered" looked cheaper and is wrong: the outline is the tenant's and
+     * they edit it, so adding a measurement on Tuesday would drop every walk
+     * in progress back into measuring. Stamped when the last one is
+     * answered, and stamped straight away on an outline that asks for none.
+     */
+    measuredAt: timestamp("measured_at", { withTimezone: true }),
     startedByClerkUserId: text("started_by_clerk_user_id"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /**

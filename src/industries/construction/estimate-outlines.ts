@@ -63,6 +63,62 @@ export const NEW_BUILD_OUTLINE: EstimateOutlineSeed = {
   name: "New build",
   notes:
     "A house from a bare lot, in build order. Prune the phases you never do and write your own questions into the ones you do.",
+  /**
+   * WHAT TO MEASURE BEFORE THE FIRST PHASE (X7). The founder's idea:
+   * *"before the questions it prompts you to grab measurements... then the
+   * questions can use this information as it goes."*
+   *
+   * These are the numbers that feed MORE THAN ONE phase, which is the whole
+   * test for belonging here. A perimeter is footing, foundation wall,
+   * backfill and siding; a footprint is excavation, slab and roof. A number
+   * only one phase needs is a question on that phase, not a measurement.
+   *
+   * Nothing here is a size, a rate or a rule of thumb — it is a list of what
+   * to go and find out, which is the difference between a starter and one
+   * company's house.
+   */
+  measures: [
+    {
+      name: "Footprint",
+      unit: "sf",
+      kind: "area",
+      guidance: "Outside face of the exterior walls, ground floor.",
+      required: true,
+    },
+    {
+      name: "Perimeter",
+      unit: "lf",
+      kind: "length",
+      guidance: "All the way round the outside face, including any bump-outs.",
+      required: true,
+    },
+    {
+      name: "Finished floor area",
+      unit: "sf",
+      kind: "area",
+      guidance: "Every heated floor added together. Say what you counted in the note.",
+      required: true,
+    },
+    {
+      name: "Wall height",
+      unit: "lf",
+      kind: "length",
+      guidance: "Floor to plate on the main level.",
+      required: true,
+    },
+    {
+      name: "Exterior wall area",
+      unit: "sf",
+      kind: "area",
+      guidance: "Gross, before windows and doors come out. Perimeter times height gets you most of the way.",
+    },
+    {
+      name: "Roof area",
+      unit: "sf",
+      kind: "area",
+      guidance: "On the slope, not the plan. Note the pitch beside it.",
+    },
+  ],
   steps: [
     {
       title: "Permits and fees",
@@ -467,6 +523,43 @@ export const REMODEL_OUTLINE: EstimateOutlineSeed = {
   name: "Remodel",
   notes:
     "Work in a building that already exists. Starts with what comes out, what gets protected and what nobody can see yet.",
+  /**
+   * A REMODEL IS MEASURED DIFFERENTLY, which is why the list is the
+   * outline's and not the pack's. Nobody measures a remodel's perimeter;
+   * they measure the rooms being worked in, the wall the cabinets go on and
+   * how far the crew has to carry everything.
+   *
+   * Only the first is required. On a remodel half of these are unknown
+   * until something is opened up, and a walk that refused to start would be
+   * a walk nobody finished — passing one is a real answer.
+   */
+  measures: [
+    {
+      name: "Area being worked in",
+      unit: "sf",
+      kind: "area",
+      guidance: "Floor area of the rooms in the scope. Note any that are partial.",
+      required: true,
+    },
+    {
+      name: "Existing wall height",
+      unit: "lf",
+      kind: "length",
+      guidance: "Floor to ceiling in the rooms being worked in. Old houses vary room to room.",
+    },
+    {
+      name: "Wall length being changed",
+      unit: "lf",
+      kind: "length",
+      guidance: "Everything coming out, going in or being furred. Not the walls you are leaving alone.",
+    },
+    {
+      name: "Openings affected",
+      unit: "ea",
+      kind: "count",
+      guidance: "Windows, doors and cased openings in the scope.",
+    },
+  ],
   steps: [
     {
       title: "Scope and existing conditions",

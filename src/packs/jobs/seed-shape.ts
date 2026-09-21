@@ -54,10 +54,31 @@ export interface EstimateOutlineStepSeed {
   questions?: EstimateOutlineQuestionSeed[];
 }
 
+/** Which takeoff tool a measurement is taken with (ADR 0074's three). */
+export const SEED_MEASURE_KINDS = ["length", "area", "count"] as const;
+export type SeedMeasureKind = (typeof SEED_MEASURE_KINDS)[number];
+
+/**
+ * A NUMBER ABOUT THE BUILDING, ASKED FOR BEFORE THE QUESTIONS (X7).
+ *
+ * A starter list, like the steps and the questions, and the tenant's from
+ * the moment it lands: a remodel wants different numbers from a new build
+ * and a commercial shell wants different ones again.
+ */
+export interface EstimateOutlineMeasureSeed {
+  name: string;
+  unit?: string;
+  kind?: SeedMeasureKind;
+  guidance?: string;
+  required?: boolean;
+}
+
 /** A starter way of walking an estimate — "New build", "Remodel" (ADR 0098). */
 export interface EstimateOutlineSeed {
   name: string;
   notes?: string;
+  /** What to measure before the first phase opens (X7). */
+  measures?: EstimateOutlineMeasureSeed[];
   steps: EstimateOutlineStepSeed[];
 }
 
@@ -138,6 +159,22 @@ function questionFrom(raw: unknown): EstimateOutlineQuestionSeed | null {
   };
 }
 
+function measureFrom(raw: unknown): EstimateOutlineMeasureSeed | null {
+  const m = asRecord(raw);
+  if (!m || typeof m.name !== "string" || m.name.trim() === "") return null;
+  return {
+    name: m.name.trim(),
+    unit: typeof m.unit === "string" ? m.unit.trim() : undefined,
+    kind:
+      typeof m.kind === "string" &&
+      (SEED_MEASURE_KINDS as readonly string[]).includes(m.kind)
+        ? (m.kind as SeedMeasureKind)
+        : "length",
+    guidance: typeof m.guidance === "string" ? m.guidance : undefined,
+    required: m.required === true,
+  };
+}
+
 /** Total by construction: unreadable means no outlines, never a throw. */
 export function estimateOutlinesFrom(seed: unknown): EstimateOutlineSeed[] {
   const outlines = asRecord(seed)?.estimateOutlines;
@@ -169,9 +206,17 @@ export function estimateOutlinesFrom(seed: unknown): EstimateOutlineSeed[] {
     }
     /** An outline with no readable step is not an outline. */
     if (steps.length === 0) continue;
+    const measures: EstimateOutlineMeasureSeed[] = [];
+    if (Array.isArray(outline.measures)) {
+      for (const rawMeasure of outline.measures) {
+        const measure = measureFrom(rawMeasure);
+        if (measure) measures.push(measure);
+      }
+    }
     out.push({
       name: outline.name.trim(),
       notes: typeof outline.notes === "string" ? outline.notes : undefined,
+      measures,
       steps,
     });
   }
@@ -191,8 +236,11 @@ export function summarizeJobsSeed(seed: unknown): string | null {
   }
   if (outlines.length > 0) {
     const steps = outlines.reduce((n, o) => n + o.steps.length, 0);
+    const measures = outlines.reduce((n, o) => n + (o.measures?.length ?? 0), 0);
     parts.push(
-      `${outlines.length} estimate ${outlines.length === 1 ? "outline" : "outlines"} (${steps} steps)`,
+      `${outlines.length} estimate ${outlines.length === 1 ? "outline" : "outlines"} (${steps} steps${
+        measures > 0 ? `, ${measures} measurements` : ""
+      })`,
     );
   }
   return parts.length === 0 ? null : parts.join(", ");

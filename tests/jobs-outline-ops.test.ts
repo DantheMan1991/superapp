@@ -15,6 +15,7 @@ import {
   updateOutline,
 } from "../src/packs/jobs/outline-ops";
 import { JobsError, type JobsCtx } from "../src/packs/jobs/ops";
+import { deleteAssembly, saveItemAsAssembly } from "../src/packs/jobs/assembly-ops";
 
 /**
  * ESTIMATE OUTLINES: the write path (X1, ADR 0098).
@@ -494,5 +495,116 @@ d("estimate outline ops", () => {
         .where(eq(schema.jobEstimateOutlineQuestions.stepId, stepIds[0])),
     );
     expect(orphans).toEqual([]);
+  });
+
+  /* ------------------------------------------------------------------------
+   * A STEP NAMES ITS ASSEMBLY (X11).
+   *
+   * The founder: *"I'm struggling to see that we are going to get the
+   * consistent items being put on the estimate in the way I want with the
+   * verbiage I want."* The pin is the answer, and these are the two things
+   * about it that could quietly be wrong.
+   * ---------------------------------------------------------------------- */
+
+  it("keeps the item a step always makes, and lets it be taken off again", async () => {
+    const assembly = await as((tx) =>
+      saveItemAsAssembly(tx, ctx, {
+        name: "Drywall, hung and finished",
+        clientNote: "",
+        notes: "",
+        drivingQuantityThousandths: 1_000_000,
+        drivingUnit: "sf",
+        lines: [
+          {
+            description: "Board",
+            clientDescription: "",
+            clientVisible: true,
+            unit: "sf",
+            quantityThousandths: 1_000_000,
+            unitCostCents: 42,
+            markupPpm: null,
+            unitPriceCents: null,
+            costCode: "",
+            sortOrder: 0,
+          },
+        ],
+      }),
+    );
+
+    const outline = await as((tx) =>
+      createOutline(tx, ctx, {
+        name: "Pinned",
+        steps: [{ title: "Drywall", assemblyId: assembly.id, questions: [] }],
+      }),
+    );
+    const pinned = await as((tx) => loadOutline(tx, tenantId, outline.id));
+    expect(pinned!.steps[0].assemblyId).toBe(assembly.id);
+
+    /** **ABSENT LEAVES IT.** Anything that writes a step without knowing
+     *  about pins — a seed, a chart read into an outline — must not undo one. */
+    await as((tx) =>
+      updateOutline(tx, ctx, outline.id, {
+        version: pinned!.outline.version,
+        steps: [{ id: pinned!.steps[0].id, title: "Drywall", questions: [] }],
+      }),
+    );
+    const still = await as((tx) => loadOutline(tx, tenantId, outline.id));
+    expect(still!.steps[0].assemblyId).toBe(assembly.id);
+
+    /** And null is how the editor unpins one. */
+    await as((tx) =>
+      updateOutline(tx, ctx, outline.id, {
+        version: still!.outline.version,
+        steps: [{ id: still!.steps[0].id, title: "Drywall", assemblyId: null, questions: [] }],
+      }),
+    );
+    const cleared = await as((tx) => loadOutline(tx, tenantId, outline.id));
+    expect(cleared!.steps[0].assemblyId).toBeNull();
+  });
+
+  /**
+   * **THE TRAP THIS REPO HAS PAID FOR TWICE.** Drizzle emits a BARE
+   * `ON DELETE set null` on a composite `(tenant_id, assembly_id)` key, and a
+   * bare one can never fire — it would try to null `tenant_id` as well.
+   * `constraints.test.ts` proves the SHAPE in `pg_constraint`; this proves the
+   * BEHAVIOUR, by deleting a real assembly and looking at the real step.
+   */
+  it("unpins a step when its assembly leaves the library, and keeps the step", async () => {
+    const assembly = await as((tx) =>
+      saveItemAsAssembly(tx, ctx, {
+        name: "Tiled shower",
+        clientNote: "",
+        notes: "",
+        drivingQuantityThousandths: 1_000,
+        drivingUnit: "ea",
+        lines: [
+          {
+            description: "Pan",
+            clientDescription: "",
+            clientVisible: true,
+            unit: "ea",
+            quantityThousandths: 1_000,
+            unitCostCents: 45_000,
+            markupPpm: null,
+            unitPriceCents: null,
+            costCode: "",
+            sortOrder: 0,
+          },
+        ],
+      }),
+    );
+    const outline = await as((tx) =>
+      createOutline(tx, ctx, {
+        name: "Showers",
+        steps: [{ title: "Bathrooms", assemblyId: assembly.id, questions: [] }],
+      }),
+    );
+
+    await as((tx) => deleteAssembly(tx, ctx, assembly.id));
+
+    const after = await as((tx) => loadOutline(tx, tenantId, outline.id));
+    expect(after!.steps).toHaveLength(1);
+    expect(after!.steps[0].title).toBe("Bathrooms");
+    expect(after!.steps[0].assemblyId).toBeNull();
   });
 });

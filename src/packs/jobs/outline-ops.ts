@@ -406,6 +406,14 @@ async function writeSteps(
       section: (step.section ?? "").trim(),
       costCode: (step.costCode ?? "").trim(),
       guidance: (step.guidance ?? "").trim(),
+      /**
+       * **ABSENT LEAVES THE PIN; NULL CLEARS IT** (X11). The editor posts the
+       * whole outline and so always sends this, which is what lets somebody
+       * unpin a step; anything else writing a step — the profile seed, a
+       * chart read into an outline — leaves the field out and does not
+       * silently undo a pin somebody set.
+       */
+      assemblyId: step.assemblyId === undefined ? undefined : (step.assemblyId ?? null),
       sortOrder: sortOrderAt(index),
     };
 
@@ -422,6 +430,7 @@ async function writeSteps(
         row.section !== values.section ||
         row.costCode !== values.costCode ||
         row.guidance !== values.guidance ||
+        (values.assemblyId !== undefined && row.assemblyId !== values.assemblyId) ||
         row.sortOrder !== values.sortOrder
       ) {
         stepUpdates.push({

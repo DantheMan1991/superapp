@@ -1,12 +1,12 @@
 import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobAssembly, JobAssemblyLine } from "@/db/schema";
+import type { AssemblyLineShape, JobAssembly, JobAssemblyLine } from "@/db/schema";
 import { violatedUniqueIndex } from "@/lib/db-errors";
 import {
   explodeAssembly,
   resolveCostCode,
-  type AssemblyLineShape,
+  type AssemblyLine,
   type ExplodedLine,
 } from "./assembly-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
@@ -85,7 +85,13 @@ export interface SaveAssemblyInput {
   notes: string;
   drivingQuantityThousandths: number;
   drivingUnit: string;
-  lines: readonly AssemblyLineShape[];
+  /**
+   * One line naming the rooms it covers, or a line per room (X11). Left out
+   * it stays as it is — which for everything saved before this existed is
+   * `one_line`, the only thing the walk ever did.
+   */
+  lineShape?: AssemblyLineShape;
+  lines: readonly AssemblyLine[];
 }
 
 /**
@@ -123,6 +129,7 @@ export async function saveItemAsAssembly(
         notes: input.notes.trim(),
         drivingQuantityThousandths: input.drivingQuantityThousandths,
         drivingUnit: input.drivingUnit.trim(),
+        lineShape: input.lineShape,
         createdByClerkUserId: ctx.userId,
       })
       .returning();
@@ -200,6 +207,7 @@ export async function updateAssembly(
         notes: input.notes.trim(),
         drivingQuantityThousandths: input.drivingQuantityThousandths,
         drivingUnit: input.drivingUnit.trim(),
+        lineShape: input.lineShape,
         version: input.version + 1,
         updatedAt: new Date(),
       })

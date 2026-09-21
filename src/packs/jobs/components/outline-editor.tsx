@@ -111,8 +111,21 @@ interface StepDraft {
   section: string;
   costCode: string;
   guidance: string;
+  /** The assembly this step always makes (X11); blank for none. */
+  assemblyId: string;
   questions: QuestionDraft[];
 }
+
+/** One of the tenant's saved items, as the picker needs it. */
+export interface AssemblyChoice {
+  id: string;
+  name: string;
+  per: string;
+  perRoom: boolean;
+}
+
+/** What the picker calls "no assembly". Radix refuses an empty item value. */
+const NO_ASSEMBLY = "none";
 
 export interface LoadedStep {
   id: string;
@@ -120,6 +133,7 @@ export interface LoadedStep {
   section: string;
   costCode: string;
   guidance: string;
+  assemblyId: string | null;
   questions: {
     id: string;
     prompt: string;
@@ -145,6 +159,7 @@ function draftsFrom(steps: readonly LoadedStep[]): StepDraft[] {
     section: s.section,
     costCode: s.costCode,
     guidance: s.guidance,
+    assemblyId: s.assemblyId ?? "",
     questions: s.questions.map((q) => ({
       key: q.id,
       id: q.id,
@@ -176,6 +191,8 @@ function payloadOf(name: string, notes: string, steps: readonly StepDraft[]) {
       section: s.section.trim(),
       costCode: s.costCode.trim(),
       guidance: s.guidance.trim(),
+      /** Null, not absent — this form is how a step is UNpinned. */
+      assemblyId: s.assemblyId === "" ? null : s.assemblyId,
       questions: s.questions.map((q) => ({
         id: q.id,
         prompt: q.prompt.trim(),
@@ -197,6 +214,7 @@ export function OutlineEditor({
   initialVersion,
   canWrite,
   books,
+  assemblies,
 }: {
   outlineId: string;
   initialName: string;
@@ -206,6 +224,8 @@ export function OutlineEditor({
   canWrite: boolean;
   /** Every cost code list this business keeps, for checking a step's code. */
   books: CostCodeBook[];
+  /** Their saved items, so a step can name the one it always makes (X11). */
+  assemblies: AssemblyChoice[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -413,6 +433,54 @@ export function OutlineEditor({
             maxLength={4000}
           />
 
+          {/*
+            **THE ITEM THIS PHASE ALWAYS MAKES** (X11). The founder: *"I'm
+            struggling to see that we are going to get the consistent items
+            being put on the estimate in the way I want with the verbiage I
+            want."* Naming it here is what stops the walk choosing — the
+            lines and the wording come from the assembly, and the
+            conversation is left with how much of it there is.
+
+            Nothing is shown at all until there is something to pick, because
+            an empty drop-down on every step of a thirty-step outline is
+            thirty pieces of furniture in the way.
+          */}
+          {assemblies.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Always makes</span>
+              <Select
+                value={step.assemblyId === "" ? NO_ASSEMBLY : step.assemblyId}
+                onValueChange={(value) =>
+                  patchStep(step.key, {
+                    assemblyId: value === NO_ASSEMBLY ? "" : value,
+                  })
+                }
+                disabled={!canWrite}
+              >
+                <SelectTrigger className="h-8 w-72" aria-label="The item this step always makes">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ASSEMBLY}>
+                    Whatever the answers come to
+                  </SelectItem>
+                  {assemblies.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name} ({a.per})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {step.assemblyId !== "" && (
+                <span className="text-xs text-muted-foreground">
+                  {assemblies.find((a) => a.id === step.assemblyId)?.perRoom
+                    ? "a line for each room it is in"
+                    : "one line, naming the rooms it covers"}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="mt-4 space-y-3">
             {step.questions.length === 0 && (
               <p className="text-sm text-muted-foreground">
@@ -601,6 +669,7 @@ export function OutlineEditor({
                   title: "",
                   section: "",
                   costCode: "",
+                  assemblyId: "",
                   guidance: "",
                   questions: [],
                 },

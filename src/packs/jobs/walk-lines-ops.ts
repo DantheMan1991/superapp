@@ -3,6 +3,13 @@ import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimateProposedLine } from "@/db/schema";
 import { explodeAssembly, resolveCostCode } from "./assembly-math";
+import {
+  applyPin,
+  asLineShape,
+  describeWithRooms,
+  shapeLines,
+  type RoomArea,
+} from "./line-shaping";
 import { getAssembly, listAssemblies } from "./assembly-ops";
 import { priceBookFrom } from "./price-memory";
 import {
@@ -103,6 +110,12 @@ export async function proposeLines(
     shapes: readonly ProposedShape[];
     /** Every answer on this step, for checking a figure it says was said. */
     answers: readonly string[];
+    /**
+     * The rooms in the building, so a line that covers several can be named
+     * in the building's own words — or split into one line each, when the
+     * assembly it is says so (X11).
+     */
+    rooms?: readonly RoomArea[];
     today: string;
     /** The job, so an awarded bid on this phase can supply the number (X3). */
     projectId?: string;
@@ -114,6 +127,30 @@ export async function proposeLines(
 
   const book = priceBookFrom(await priceBookRows(tx, ctx.tenantId));
   const library = await listAssemblies(tx, ctx.tenantId);
+
+  /**
+   * **THE PHASE'S OWN ITEM, AND HOW MANY LINES IT IS** (X11).
+   *
+   * Both were a model's judgement until now — whether to reach for an
+   * assembly at all, and whether four rooms are one line or four. The step
+   * carries the first and the assembly carries the second, so what happens
+   * here is arithmetic over rows rather than a rule in a prompt that has to
+   * be re-decided on every bid. The prompt still SAYS both, because an
+   * answer written to fit the item comes out better than one corrected
+   * afterwards; this is what makes it true either way.
+   */
+  const pinned = input.step.assemblyId
+    ? (library.find((a) => a.assembly.id === input.step.assemblyId) ?? null)
+    : null;
+  const shapes = shapeLines(
+    applyPin(input.shapes, pinned?.assembly.name ?? null),
+    library.map((a) => ({
+      name: a.assembly.name,
+      lineShape: asLineShape(a.assembly.lineShape),
+      drivingUnit: a.assembly.drivingUnit,
+    })),
+    input.rooms ?? [],
+  );
 
   /**
    * **A BID THEY AWARDED BEATS EVERYTHING** (X3). It is this job, this scope
@@ -155,7 +192,7 @@ export async function proposeLines(
     return listProposal(tx, ctx.tenantId, input.interviewId, input.step.id);
   }
 
-  for (const shape of input.shapes) {
+  for (const shape of shapes) {
     const named = shape.assembly
       ? library.find(
           (a) => a.assembly.name.trim().toLowerCase() === shape.assembly!.trim().toLowerCase(),
@@ -178,7 +215,14 @@ export async function proposeLines(
         );
         for (const line of exploded) {
           priced.push({
-            description: line.description,
+            /**
+             * **THE ROOM GOES ON THE ASSEMBLY'S OWN WORDS** (X11), not just
+             * on the shape that summoned it. An assembly supplies its
+             * descriptions, so without this a phase split into three showers
+             * would come out as three identical sets of lines — the split
+             * done, and invisible on the sheet it was done for.
+             */
+            description: describeWithRooms(line.description, shape.rooms ?? []),
             clientDescription: line.clientDescription,
             clientVisible: line.clientVisible,
             unit: line.unit,

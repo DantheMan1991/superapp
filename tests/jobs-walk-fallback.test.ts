@@ -29,6 +29,7 @@ const STEP: WalkStep = {
   section: "",
   costCode: "1100",
   guidance: "",
+  assemblyId: null,
   questions: [
     q("q1", "Who is producing the drawings?", {
       kind: "choice",

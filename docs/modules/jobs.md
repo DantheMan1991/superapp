@@ -126,6 +126,102 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — A step names its assembly (`claude/a-step-names-its-assembly`, X11, [ADR 0103](../decisions/0103-a-step-names-the-item-it-always-makes-and-the-item-says-whether-it-is-one-line-or-a-line-per-room.md))
+
+The other half of X10. X10 gave the library a screen, so thirty assemblies
+became ownable; this is what makes the walk USE them without deciding to.
+
+The founder's question, in full, is the one this answers:
+
+> *"right now i'm struggling to see that we are going to get the consisten
+> items being put on the estimate in the way i want with the verbiage i want.
+> how do we cross this bridge?"*
+
+Two judgements were still the model's, freshly made on every bid: **whether to
+reach for an assembly at all**, and **whether four rooms are one line or
+four**. Both are facts about the business.
+
+**What was added.** Migration `0414`:
+
+| Column | On | Means |
+| --- | --- | --- |
+| `assembly_id` | `job_estimate_outline_steps` | The item this phase always makes. Nullable, and null is the normal case. |
+| `line_shape` | `job_assemblies` | `one_line` or `per_room`, default `one_line` — which is what the walk always did. |
+
+Plus a new pure module, [`line-shaping.ts`](../../src/packs/jobs/line-shaping.ts),
+and a `rooms` field on the propose tool.
+
+### The rooms moved out of the sentence and into a field
+
+X8b asked the model to name the rooms in the words of the line, and it did.
+A FIELD is what makes them usable: **you cannot split `Tiled shower — master
+bath, hall bath` into two lines without knowing where the name ends and the
+list begins.** So `rooms` is its own array, the software composes the
+description from it in the building's own spelling — which is also how one
+room comes out spelled one way across every bid — and `baseDescription` is the
+belt to that braces, cutting a trailing room list the model wrote anyway while
+leaving `Tile — mud set, Schluter, mtl only` alone, because none of those is a
+room.
+
+### What `per_room` promises, and what it refuses
+
+One line per room, **sized by that room's floor area only when the item is
+priced in the unit the rooms are measured in**, and one of it otherwise. A
+shower priced `ea` comes out one per room; carpet priced `sf` comes out at each
+room's measured area, with the room named in `derivedFrom`.
+
+Dividing a line's total between its rooms was considered and refused: it gives
+every room a number nobody stated. And **nothing computes a `one_line`
+quantity** — floor area is right for flooring and wrong for paint, the model
+already derives it with the working shown, and a second invisible route to the
+same figure is two answers to one question.
+
+Rolling up ADDS the quantities and **only when both are known**. An unknown is
+not a zero; a roll-up that quietly dropped half would read as a measured number
+for a floor it covers part of.
+
+### Driven, and what driving corrected
+
+The pilot tenant's one assembly (*Tile flooring*, per 320 sf) pinned to a step
+on a real walk of EST-6, Miller barn conversion, 11 rooms:
+
+- **`per_room`** — 4 shapes in, 12 out. The pinned line split into 9 room lines
+  at 310 / 420 / 280 / 24 / 224 / 62 / 132 / 48 / 576 sf, each note reading
+  *"<room> floor area"*, and the assembly's own line descriptions carried the
+  room: `Tile, material — Hall bath`.
+- **`one_line`** — 4 shapes in, 4 out, rooms named, 6 rows on the bid.
+
+**Both runs came back with `assembly: null` on every shape** — the model,
+handed a pin it thought made no sense for that phase, ignored it. `applyPin`
+made it true anyway, which is the entire point of the slice and the reason the
+enforcement is not a prompt.
+
+**And driving corrected `applyPin` itself.** It took the FIRST shape. If the
+walk has already decided a line is a *different* assembly of theirs, taking it
+throws away a decision the estimator's own library supports in order to honour
+a default. It now lands on the first line that has not claimed one, and steps
+aside when every line has.
+
+### The instrumentation lesson
+
+`console.error` from a server action did not reach `preview_logs` at all, and
+half an hour went into theorising about a roll-up that was never broken — the
+33-line run had simply been a `per_room` run. **Writing the inputs and outputs
+to a file was what ended it in one click**, and the answer was that the code
+was right and the assumption about which state the row had been in was wrong.
+When a drive disagrees with the code, log the INPUT before re-reading the code.
+
+### Kept comfortable
+
+The picker is not rendered at all on an outline whose business has no
+assemblies — an empty drop-down on every step of a thirty-step outline is
+thirty pieces of furniture in the way. `assemblyId` absent leaves a pin alone
+and `null` clears it, so the editor can unpin and a seed cannot silently
+un-pin. And the composite FK is `ON DELETE SET NULL ("assembly_id")`, hand-
+edited to the PG 15 column-list form, proved in `pg_constraint` on dev AND
+production and again by deleting a real assembly in the db test — the trap this
+repo has now paid for three times.
+
 ### 2026-09-21 — Owning your assemblies (`claude/owning-your-assemblies`, X10)
 
 The founder, having seen the walk put *"Plan revisions, $150"* on a bid he

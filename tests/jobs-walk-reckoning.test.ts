@@ -33,6 +33,7 @@ function step(over: Partial<WalkStep> & { id: string }): WalkStep {
     section: "",
     costCode: "5200",
     guidance: "",
+    assemblyId: null,
     questions: [q({ id: `${over.id}-who` })],
     ...over,
   };

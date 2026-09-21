@@ -230,6 +230,30 @@ that you never sub framing, that a walkout needs the engineer's number before
 anything is priced, that the footing quantity comes off the foundation plan.
 The walk reads it. Your client never sees it.
 
+**`Always makes`** — the assembly this step always produces, or *Whatever the
+answers come to*. This is how you stop a phase coming out differently on every
+bid.
+
+Pick one of your saved assemblies and the walk stops choosing: the lines, the
+wording and the split between labour, material and equipment all come out of
+that assembly, and the conversation is left working out how much of it there
+is and which rooms it is in. *Drywall* is always *Drywall, hung and finished*.
+Beside the picker it reminds you how that assembly is bid — one line naming
+the rooms, or a line for each room — which is set on the assembly itself
+(*Assemblies* on the projects page).
+
+- **Leaving it on *Whatever the answers come to* is normal**, and is how every
+  step behaved before this existed. Custom work has no assembly to name.
+- **A pin never deletes the rest of the phase.** Anything else the walk finds
+  at this step still comes out as its own line — the one-off door, the safe
+  room — so a step that is usually standard can still carry the unusual.
+- **A line that has already claimed a different assembly of yours is left
+  alone.** If the walk decides a line is your *Archway, drywall*, that stands;
+  the pin goes to the next line instead.
+- The picker only appears once your business has at least one assembly.
+- Take an assembly out of the library and any step naming it goes quietly back
+  to *Whatever the answers come to*. The step itself is never removed.
+
 {button:|ghost|trash} at the right removes the step and its questions.
 
 ### A question

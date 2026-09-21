@@ -9,6 +9,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Panel } from "@/components/app/panel";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { AssemblyLineShape } from "@/db/schema";
 import { formatMoney, parseMoneyToCents } from "@/lib/money";
 import { quantityStringToThousandths } from "../billing-math";
 import type { EditableLine } from "../assembly-math";
@@ -50,6 +58,7 @@ export function AssemblyEditor({
   initialNotes,
   initialPer,
   initialUnit,
+  initialLineShape,
   initialLines,
   canWrite,
   symbol,
@@ -61,6 +70,7 @@ export function AssemblyEditor({
   initialNotes: string;
   initialPer: string;
   initialUnit: string;
+  initialLineShape: AssemblyLineShape;
   initialLines: EditableLine[];
   canWrite: boolean;
   symbol: string | null;
@@ -72,6 +82,7 @@ export function AssemblyEditor({
   const [notes, setNotes] = useState(initialNotes);
   const [per, setPer] = useState(initialPer);
   const [unit, setUnit] = useState(initialUnit);
+  const [lineShape, setLineShape] = useState<AssemblyLineShape>(initialLineShape);
   const [lines, setLines] = useState<EditableLine[]>(
     initialLines.length > 0 ? initialLines : [BLANK],
   );
@@ -104,6 +115,7 @@ export function AssemblyEditor({
           notes,
           drivingQuantity: per,
           drivingUnit: unit,
+          lineShape,
           lines: real.map((l) => ({
             description: l.description,
             clientDescription: l.clientDescription,
@@ -214,6 +226,36 @@ export function AssemblyEditor({
           </span>{" "}
           of it takes, and dropping it onto a bid at a different quantity scales them all.
         </p>
+
+        {/*
+          HOW IT GOES ON THE SHEET (X11) — the founder's own rule, recorded
+          rather than re-decided: one item for LVP listing every room, a line
+          each for the showers. It is a property of the ITEM, so this is
+          where it is set, once.
+        */}
+        <div className="mt-4 border-t pt-4 sm:max-w-md">
+          <Label htmlFor="line-shape" className="text-xs">
+            When it covers several rooms
+          </Label>
+          <Select
+            value={lineShape}
+            onValueChange={(v) => setLineShape(v as AssemblyLineShape)}
+            disabled={!canWrite}
+          >
+            <SelectTrigger className="mt-1 w-full" id="line-shape">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="one_line">One line, naming the rooms</SelectItem>
+              <SelectItem value="per_room">A line for each room</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {lineShape === "per_room"
+              ? "A walk that finds this in four rooms writes four lines, each named after its room and sized by that room's floor area when this is priced by area."
+              : "A walk that finds this in four rooms writes one line naming all four. Restructure any bid by hand afterwards — this only decides where the walk starts."}
+          </p>
+        </div>
       </Panel>
 
       <Panel className="p-5">

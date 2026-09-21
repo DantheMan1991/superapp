@@ -11,6 +11,7 @@ import { thousandthsToQuantityString } from "@/packs/jobs/billing-math";
 import { PACK } from "@/packs/jobs/vocabulary";
 import { AssemblyEditor } from "@/packs/jobs/components/assembly-editor";
 import { toEditable } from "@/packs/jobs/assembly-math";
+import { asLineShape } from "@/packs/jobs/line-shaping";
 
 /** One assembly, open for editing (X10). */
 export default async function AssemblyPage({
@@ -52,6 +53,7 @@ export default async function AssemblyPage({
         initialNotes={found.assembly.notes}
         initialPer={thousandthsToQuantityString(found.assembly.drivingQuantityThousandths)}
         initialUnit={found.assembly.drivingUnit}
+        initialLineShape={asLineShape(found.assembly.lineShape)}
         initialLines={found.lines.map(toEditable)}
         canWrite={allowsWrite(ctx.role, "member")}
         symbol={ctx.tenant.currencySymbol ?? null}

@@ -100,6 +100,7 @@ async function stepsOfOutline(
       section: s.section,
       costCode: s.costCode,
       guidance: s.guidance,
+      assemblyId: s.assemblyId,
       questions: s.questions.map((q) => ({
         id: q.id,
         prompt: q.prompt,

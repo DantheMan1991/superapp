@@ -1,0 +1,4 @@
+ALTER TABLE "job_assemblies" ADD COLUMN "line_shape" text DEFAULT 'one_line' NOT NULL;--> statement-breakpoint
+ALTER TABLE "job_estimate_outline_steps" ADD COLUMN "assembly_id" uuid;--> statement-breakpoint
+ALTER TABLE "job_estimate_outline_steps" ADD CONSTRAINT "job_estimate_outline_steps_assembly_fk" FOREIGN KEY ("tenant_id","assembly_id") REFERENCES "public"."job_assemblies"("tenant_id","id") ON DELETE SET NULL ("assembly_id") ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "job_assemblies" ADD CONSTRAINT "job_assemblies_line_shape_valid" CHECK ("job_assemblies"."line_shape" in ('one_line', 'per_room'));

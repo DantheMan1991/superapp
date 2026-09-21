@@ -5,7 +5,7 @@ import {
   scaleQuantity,
   suggestDriver,
   toEditable,
-  type AssemblyLineShape,
+  type AssemblyLine,
 } from "../src/packs/jobs/assembly-math";
 
 /**
@@ -17,7 +17,7 @@ import {
  * estimate is worse than a refusal, because it goes out in a proposal.
  */
 
-function line(over: Partial<AssemblyLineShape> = {}): AssemblyLineShape {
+function line(over: Partial<AssemblyLine> = {}): AssemblyLine {
   return {
     description: "Tile, material",
     clientDescription: "",

@@ -126,6 +126,109 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — The way back into a finished walk, and the phase that ended it early (`claude/back-into-a-finished-walk`, X9, [ADR 0102](../decisions/0102-a-person-picks-a-finished-walk-back-up-and-a-phase-lands-in-the-item-it-already-made.md))
+
+The report was *"a phase you go back and answer on a finished walk is never
+worked out into lines and never asked for a price"*, and it named `runTurn`'s
+guard. **That guard is real and it was the third lock on a door with three.**
+The button was not offered, the server refused the click, and only then was the
+money skipped — so nothing about the reported flow was reachable, and the dev
+branch bears that out: walk EST-6's transcript has no Drywall answer in it at
+all, because there was no way to record one.
+
+### What the dev branch actually showed
+
+EST-6 on 24-109, read straight out of the database: `finished` at 02:06:08 with
+**eight of its ten phases never asked**, including the foundation. It had been
+taken to Painting (ninth) from the rail, answered there and at Landscaping
+(tenth), and Landscaping is last on the list — so `applyAndMoveOn`'s
+`nextStep`, which only ever looks FORWARD, found nothing after it and closed
+the walk. The screen then said *"That is every question in New build"* over a
+bid missing its concrete.
+
+**`nextStep` was right until X4 made it possible to jump about.** `onwardStep`
+is the rule ADR 0099 already stated: the next phase with work in it, after this
+one if there is one and **back up the list if there is not**, and null — which
+closes the walk — only when nothing anywhere is outstanding.
+
+### A person may pick a finished walk back up; the walk may not
+
+`goToStep` and `reopenQuestion` are the two doors a CLICK reaches, and they now
+resume a `finished` interview. Everything else — `claimTurn`, `recordAnswers`,
+`moveToStep` — still refuses a closed walk, which is what stops a stale tab
+writing into a bid somebody has finished. An `abandoned` walk is never resumed:
+somebody stopped that one on purpose, and its screen redirects to the estimate
+anyway.
+
+**No revisiting mode**, which ADR 0099 turned down and this would have been:
+the walk is running because somebody is walking it, and it closes itself again
+by the same rule that closed it the first time. The status is the fact.
+
+### Which button, and why only one of them is offered
+
+**Ask again is the only door into a covered phase.** Every phase of a finished
+walk is covered, and `currentStep` honours a bookmark only while its step has
+work — so *Work on this* on a covered phase would send the walk somewhere else
+and the button would be a lie. It now appears only where `outstanding > 0`.
+Superseding an answer is what makes a step outstanding again, which is exactly
+what X4 built *Ask again* to do.
+
+### The money bug underneath, which only driving it found
+
+Applying a phase **always appended a new item**. Re-walk Landscaping and the
+estimate grows a second `Landscaping` beside the first, both in the total —
+proved on dev before the fix, at $2,100.00 next to $4.00. `applyProposal` now
+finds the item this step already made **through the `estimate_line_id` the
+proposed row kept and never through the name** (two items may share one, and a
+person may rename the walk's — the founder's own sheet has `DRYWALL, INCL.
+LABOR` over a step called `Drywall`), replaces the lines it put there, and
+leaves anything else in that item alone.
+
+That name-matching had a second face: with two items called `Landscaping`, the
+linking pass at the end of an apply found the WRONG one, so the new rows were
+never linked — the reckoning could not see the money, and the next apply would
+have made a third item.
+
+### And what the report named
+
+`runTurn` guarded its pricing block on `first.finished`, which is only *"the
+interview's status is not running"*. The two things it stood in for are said
+directly now — a turn with no view has nothing to price, a resync recorded
+nothing — so a phase that finished gets priced whatever happened to the walk
+underneath it, and `applyAndMoveOn` puts the money on and then **leaves a
+closed walk closed** rather than moving its bookmark or closing it twice.
+
+Two more on the same seam: the last price of a walk used to come back as
+*"This walk is finished. Start a new one to go again."* — because the phase
+landed, the walk closed, and the opening turn for the next phase was taken
+anyway — and `proposeForStep`'s bare `catch {}` is now a `catch` that logs the
+step, because *"why did Drywall come out empty"* has to start somewhere.
+
+### Driven, on dev, as the report asked
+
+EST-6, in the browser. The finished walk's rail offers a way in for the first
+time; **Work on this** on Drywall (never asked) picks the walk back up and asks
+*"Who's handling drywall on this one?"*; the answer *"In-house. Half inch
+everywhere, moisture board in both baths, ceilings hung and finished level 4."*
+settles the phase, and the lines come out measured from the building:
+
+```
+Wall board, 1/2", hang & finish, 1,216 sf — what are you getting per sf?   2.25
+Ceiling board, 1/2", hang & finish, 2,076 sf — …                           2.45
+Moisture-resistant board, both baths — what are you getting for that?       480
+Level 4 finish, all areas — …                                     Skip this one
+→ ITEM "Drywall", 4 lines, and the reckoning went from $4.00 to $8,306.20
+→ and the walk moved BACK UP to Rough carpentry rather than closing
+```
+
+Then **Ask again** on that same phase, answered and re-priced: still **one**
+`Drywall` item, now holding the four new lines at $11,429.60, the old ones
+gone, and the moisture board coming back at `basis: memory` from the price
+said twenty minutes earlier. The duplicate `Landscaping` the old code made on
+the way past was deleted by hand afterwards, so the dev bid is as it was plus
+a phase that is now priced.
+
+No migration.
 ### 2026-09-21 — The rooms in the building (`claude/the-rooms`, X8, [ADR 0101](../decisions/0101-a-room-is-a-name-a-floor-and-an-area-and-one-answer-is-shared-out-across-them.md))
 
 The founder, right after X7 merged:
@@ -1420,7 +1523,7 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
 | `job_estimate_outline_steps.section` | **The part of the bid a step belongs to** — a heading, not a code. Arrives from the cost code's `category` when an outline is read off a chart, and editable afterwards because the two differ: `Siding Labor` is accounted under `04. Structural` and printed under *Labour*. Where the price sheet's headings will come from. Blank on every outline written before it existed. |
 | `job_estimate_outline_questions` | One question at a stop: the prompt, its `kind` (choice / yes_no / number / money / text, which is what becomes the quick-reply buttons), a choice's `choices` in jsonb, a number's `unit`, and `notes` for the interviewer. | Composite FK to the step, **cascade**. CHECK: prompt present, kind on the list, and **options belong to a choice and to nothing else** — `jsonb_typeof` first, because a CHECK evaluating to NULL passes; a choice needs ≥ 2 and every other kind needs 0. **A ROW rather than a string in an array**, so an answer can point at one (ADR 0098) — which is also why the save keeps its id. Since 2026-09-19 also `always_ask`: a question the walk may never decide is irrelevant, the counterweight to letting it skip. Always ASKED, not always answered. |
-| `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
+| `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. **A finished walk goes back to running when a PERSON clicks into a phase** (X8, ADR 0102) — both columns move together, which is what that CHECK is for — and the partial unique index is what refuses it while a newer walk is running on the same estimate. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
 | `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
 | `job_rooms` | **A room in the building** (X8, ADR 0101): name, `slug`, the `level` it is on, sort order, notes. | Hangs off the PROJECT, cascade. **Unique on `(tenant, project, level, slug)` — per FLOOR, not per building**, because a house has a `Bathroom` upstairs and a `Bathroom` downstairs. No room TYPE column on purpose: *Master bath* already tells the walk there is a shower in it, and a taxonomy is a thing the tenant maintains that would be wrong for commercial on day one. Its floor AREA is not here — it is a `job_measurements` row scoped to it, so it is read by the same parser, traced with the same dialog and carries the same provenance, and a room's wall area later is a row rather than a migration. |
@@ -1877,6 +1980,30 @@ ordering only bites when two new tables reference each other in one file.
   the page. Key it on the row's version, which every save bumps, so it
   remounts with what was saved. Found on the T&M editor in 5d; the cost-plus
   and fixed-price editors had it since 5 and 5b.
+- **A FINISHED walk can be picked back up, and only by a person** —
+  [ADR 0102](../decisions/0102-a-person-picks-a-finished-walk-back-up-and-a-phase-lands-in-the-item-it-already-made.md).
+  `goToStep` and `reopenQuestion` are the two doors a CLICK reaches and they
+  put a `finished` interview back to `running`; `claimTurn`, `recordAnswers`
+  and `moveToStep` still refuse a closed walk, and an `abandoned` one is never
+  resumed. There is no revisiting mode and ADR 0099 turned one down: the walk
+  is running because somebody is walking it, and it closes itself again by the
+  same rule as the first time.
+- **A walk ends when nothing is OUTSTANDING, never when the list runs out.**
+  `onwardStep`, not `nextStep`: forwards stopped meaning finished the day the
+  rail let somebody jump about, and EST-6 on dev closed over eight phases
+  nobody had been asked about because the one it finished was last on the
+  list. Null from `onwardStep` is the only thing that closes a walk.
+- **A phase that lands twice lands in the SAME item.** `applyProposal` finds
+  it through the `estimate_line_id` the proposed row kept — never through the
+  name, because two items may share one and a person may rename the walk's —
+  and replaces the lines it put there. Appending made a second `Landscaping`
+  in the total, and the linking pass then matched the wrong one by name, so
+  the new rows were never linked and the reckoning could not see the money.
+- **`Work on this` is offered only where a phase has a question outstanding.**
+  `currentStep` honours a bookmark only while its step has work (ADR 0099
+  turned down honouring it regardless), so on a covered phase the button
+  would send the walk somewhere else. **Ask again** is the door into a
+  covered phase, and on a finished walk it is the only one.
 - **Read the constraint from `err.cause`, never `err.message`.** Under drizzle's
   wrapper the message is the SQL. `violatedUniqueIndex` in `src/lib/db-errors.ts`;
   four translations in this pack were dead for three slices before a test noticed.

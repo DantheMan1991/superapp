@@ -302,6 +302,59 @@ function requireRunning(interview: JobEstimateInterview): void {
 }
 
 /**
+ * PICKING A FINISHED WALK BACK UP, and only ever because a PERSON said to.
+ *
+ * X4's whole promise is that running out of questions does not finish a bid:
+ * the reckoning says what is still outstanding and you click into a phase to
+ * fix it (ADR 0099). On a finished walk that click reached `moveToStep` and
+ * `claimTurn`, both of which refuse a walk that is not running — so the one
+ * screen written for the end of a walk had two buttons that could only ever
+ * produce an error, and the way back in did not exist.
+ *
+ * **The walk is running again, and that is the truth rather than a mode.**
+ * ADR 0099 turned down a `revisiting` flag for exactly this reason: coverage,
+ * the rail, the reckoning and `currentStep` all already say where a walk is,
+ * and a second concept beside them is a second thing to keep in step. It
+ * closes itself again the moment nothing is outstanding, which is the same
+ * rule that closed it the first time.
+ *
+ * **An abandoned walk stays abandoned.** Somebody stopped that one on
+ * purpose, and its screen redirects to the estimate, so there is nothing to
+ * pick up. Starting a new walk is the way back.
+ *
+ * Returns true when it actually resumed one, so the caller can say so.
+ */
+async function resumeIfFinished(
+  tx: Tx,
+  ctx: JobsCtx,
+  interview: JobEstimateInterview,
+): Promise<boolean> {
+  if (interview.status === "running") return false;
+  if (interview.status !== "finished") {
+    throw new JobsError("WALK_CLOSED", "that walk was stopped; start a new one");
+  }
+  requireWrite(ctx, "member");
+  try {
+    await tx
+      .update(schema.jobEstimateInterviews)
+      .set({ status: "running", finishedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.jobEstimateInterviews.tenantId, ctx.tenantId),
+          eq(schema.jobEstimateInterviews.id, interview.id),
+        ),
+      );
+  } catch (err) {
+    /** Somebody has started a fresh walk on this estimate since. Theirs wins. */
+    if (violatedUniqueIndex(err) === "job_estimate_interviews_one_running_idx") {
+      throw new JobsError("WALK_RUNNING", "this estimate is already being walked");
+    }
+    throw err;
+  }
+  return true;
+}
+
+/**
  * CLAIM THE TURN — the first half of the house pattern, and the only part
  * that must be inside a transaction.
  *
@@ -827,11 +880,17 @@ export async function reopenQuestion(
   ctx: JobsCtx,
   interviewId: string,
   questionId: string,
-): Promise<{ stepId: string | null; prompt: string }> {
+): Promise<{ stepId: string | null; prompt: string; resumed: boolean }> {
   requireWrite(ctx, "member");
   const walk = await getWalk(tx, ctx.tenantId, interviewId);
   if (!walk) throw new JobsError("NOT_FOUND", "that walk is no longer here");
-  requireRunning(walk.interview);
+  /**
+   * **ASKING AGAIN IS HOW YOU GET BACK INTO A FINISHED WALK.** Every phase of
+   * one is covered by definition, so `currentStep` will not honour a bookmark
+   * pointing at any of them — superseding an answer is what makes a step
+   * outstanding again, and therefore the only door that works.
+   */
+  const resumed = await resumeIfFinished(tx, ctx, walk.interview);
 
   const standing = walk.answers.filter(
     (a) => a.questionId === questionId && a.supersededAt === null,
@@ -877,13 +936,16 @@ export async function reopenQuestion(
       ),
     );
 
-  return { stepId, prompt: standing[0].prompt };
+  return { stepId, prompt: standing[0].prompt, resumed };
 }
 
 /**
  * A PERSON PUTTING THEMSELVES ON A STEP. Unlike `moveToStep` from the walk's
  * own reasoning, this is not policed by the must-ask guard — see the note
  * there. The pending question goes with it, for the reason above.
+ *
+ * **IT PICKS A FINISHED WALK BACK UP**, because the phase it is being sent to
+ * has questions nobody has answered and that is work the bid is waiting on.
  */
 export async function goToStep(
   tx: Tx,
@@ -896,6 +958,7 @@ export async function goToStep(
   if (!walk.steps.some((s) => s.id === stepId)) {
     throw new JobsError("NOT_FOUND", "that step is not in this outline");
   }
+  await resumeIfFinished(tx, ctx, walk.interview);
   const moved = await moveToStep(tx, ctx, interviewId, stepId, { byPerson: true });
   await tx
     .update(schema.jobEstimateInterviews)

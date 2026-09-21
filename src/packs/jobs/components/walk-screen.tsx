@@ -129,6 +129,11 @@ export function WalkScreen({
   const opened =
     openedIndex >= 0 ? { step: reck.steps[openedIndex], index: openedIndex } : null;
 
+  /** The conversation is over. The rail and the reckoning are not. */
+  const done = view.status !== "running";
+  /** Phases with questions nobody has answered, which a finished walk names. */
+  const unasked = reck.steps.filter((s) => s.outstanding > 0).length;
+
   /** Shared by the two rail actions: both end with a fresh view and a turn. */
   function moved(
     run: () => Promise<{ error: string } | { ok: true; view?: WalkView | null }>,
@@ -157,17 +162,23 @@ export function WalkScreen({
     });
   }
 
+  /**
+   * **A FINISHED WALK SAYS IT IS GOING AGAIN.** Both doors pick one back up
+   * rather than refusing — the reckoning exists to be acted on — and a
+   * conversation that simply reappeared over a screen reading *"that is every
+   * question"* would be the surprise.
+   */
   function goTo(stepId: string) {
     moved(
       () => goToStepAction({ interviewId: view.interviewId, stepId, projectId, estimateId }),
-      "Back on that one.",
+      done ? "Picking the walk back up there." : "Back on that one.",
     );
   }
 
   function askAgain(questionId: string) {
     moved(
       () => askAgainAction({ interviewId: view.interviewId, questionId, projectId, estimateId }),
-      "Asking that one again.",
+      done ? "Picking the walk back up on that one." : "Asking that one again.",
     );
   }
 
@@ -259,7 +270,6 @@ export function WalkScreen({
     });
   }
 
-  const done = view.status !== "running";
   /**
    * **THE WALK IS ASKING WHAT THE BUILDING MEASURES (X7)**, not what the
    * work is. The answer box takes a figure, the drawings are one click
@@ -354,8 +364,18 @@ export function WalkScreen({
         <Panel className="p-5">
           {done ? (
             <div className="space-y-3">
+              {/**
+                * **IT ONLY SAYS "EVERY QUESTION" WHEN IT WAS.** A walk used to
+                * close the moment there was no step LEFT ON THE LIST, so one
+                * taken to a late phase from the rail closed over the phases
+                * before it — and said this over a bid with seven of them never
+                * asked. The close rule is fixed; this is the sentence, and
+                * walks closed under the old one are still out there.
+                */}
               <p className="text-sm">
-                That is every question in {view.outlineName}.
+                {unasked > 0
+                  ? `This walk stopped with ${unasked} ${unasked === 1 ? "phase" : "phases"} still to ask.`
+                  : `That is every question in ${view.outlineName}.`}
                 {reck.ready
                   ? " Nothing is outstanding."
                   : " What is left is below — click any phase to look at it."}

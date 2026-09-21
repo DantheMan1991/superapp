@@ -56,7 +56,7 @@ import {
   recordWalkMeasurement,
   setMeasureAsk,
 } from "./walk-measure-ops";
-import { currentStep, live, nextStep, type WalkAnswer, type WalkStep } from "./walk-math";
+import { currentStep, live, onwardStep, type WalkAnswer, type WalkStep } from "./walk-math";
 import { PACK } from "./vocabulary";
 
 /**
@@ -938,10 +938,24 @@ async function proposeForStep(
      * a model that had nothing to say from a bug in this function — which
      * is exactly the position driving X8 put us in. The pack's other
      * best-effort paths log the same way (`attention source x failed`).
+     *
+     * **The step is named**, because the answer to *"why did Drywall come
+     * out empty"* has to start somewhere.
      */
-    console.error("walk: could not work out this phase's lines", err);
+    console.error(
+      `walk: could not work out the lines for ${step.title} (${step.id})`,
+      err,
+    );
     return null;
   }
+}
+
+/** What a phase leaves behind when it lands on the estimate. */
+interface PhaseLanded {
+  /** The item that went on, and what it came to. Null when it was empty. */
+  put: { name: string; cents: number } | null;
+  /** There is another phase to open. False means the walk is over. */
+  onward: boolean;
 }
 
 /**
@@ -954,12 +968,12 @@ async function applyAndMoveOn(
   ctx: WalkCtx,
   interviewId: string,
   stepId: string,
-): Promise<{ name: string; cents: number } | null> {
+): Promise<PhaseLanded> {
   return withTenant(
     ctx.tenantId,
     async (tx) => {
       const walk = await getWalk(tx, ctx.tenantId, interviewId);
-      if (!walk) return null;
+      if (!walk) return { put: null, onward: false };
       const proposed = await listProposal(tx, ctx.tenantId, interviewId, stepId);
       let put: { name: string; cents: number } | null = null;
       /** Nothing worth writing is not a failure; the phase is simply empty. */
@@ -984,12 +998,27 @@ async function applyAndMoveOn(
           };
         }
       }
+      /**
+       * **THE MONEY LANDS EITHER WAY; THE CONVERSATION ONLY MOVES IF THERE IS
+       * ONE.** A phase can finish on a walk that is no longer running — one
+       * closed in another tab while this turn was with the model, or the last
+       * price of a phase somebody came back to. Putting the item on is still
+       * right; moving the bookmark and closing the walk again are not, and
+       * `closeWalk` would refuse the second one anyway.
+       */
+      if (walk.interview.status !== "running") return { put, onward: false };
       const answers = asWalkAnswers(walk.answers);
-      const onward = nextStep(walk.steps, answers, stepId);
+      /**
+       * **NOT `nextStep`.** Forwards stopped meaning finished when X4 made it
+       * possible to jump about: answering the LAST phase on the list closed
+       * the walk over eight earlier ones nobody had been asked about. A walk
+       * ends when nothing is outstanding (ADR 0099), which is what this says.
+       */
+      const onward = onwardStep(walk.steps, answers, stepId);
       /** The guard belongs to the phase being LEFT, which is this one. */
       await moveToStep(tx, ctx, interviewId, onward?.id ?? null, { guardStepId: stepId });
       if (!onward) await closeWalk(tx, ctx, interviewId, "finished");
-      return put;
+      return { put, onward: onward !== null };
     },
     { role: ctx.role },
   );
@@ -1078,21 +1107,39 @@ async function answerPrice(
     return { ok: true, view, finished: false };
   }
 
-  const put = stepId ? await applyAndMoveOn(ctx, interviewId, stepId) : null;
+  const landed = stepId
+    ? await applyAndMoveOn(ctx, interviewId, stepId)
+    : { put: null, onward: false };
+
+  /**
+   * **THE LAST PRICE OF A WALK IS NOT AN ERROR.** This opened the next phase
+   * unconditionally, and when the phase that just landed was the last one the
+   * walk had already closed itself a line earlier — so `claimTurn` refused,
+   * the refusal escaped to the action's catch, and the person's final answer
+   * came back as *"This walk is finished. Start a new one to go again."* over
+   * money that had in fact gone on perfectly. Nothing to open is the end of
+   * the walk, and the screen says so.
+   */
+  if (!landed.onward) {
+    return {
+      ok: true,
+      view: await freshView(ctx, interviewId),
+      finished: true,
+      put: landed.put,
+    };
+  }
+
   /** Open the phase the walk has just arrived at. */
   const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
   if (opened.ok) {
-    return { ok: true, view: opened.view ?? null, finished: !!opened.finished, put };
+    return {
+      ok: true,
+      view: opened.view ?? null,
+      finished: !!opened.finished,
+      put: landed.put,
+    };
   }
-  const view = await withTenant(
-    ctx.tenantId,
-    async (tx) => {
-      const walk = await getWalk(tx, ctx.tenantId, interviewId);
-      return walk ? walkView(walk) : null;
-    },
-    { role: ctx.role },
-  );
-  return { ok: true, view, finished: false };
+  return { ok: true, view: await freshView(ctx, interviewId), finished: false, put: landed.put };
 }
 
 /**
@@ -1136,7 +1183,21 @@ async function runTurn(
   answering?: string,
 ) {
   const first = await oneTurn(ctx, interviewId, said, { answering });
-  if (!first.ok || first.finished || !first.view || first.resynced) return first;
+  /**
+   * **WHAT THE PRICING NEEDS, NOT WHETHER THE WALK IS STILL OPEN.** This read
+   * `first.finished` as well, and `finished` is only *"the interview's status
+   * is not running"* — so a turn that committed answers and found the walk
+   * closed underneath it (another tab, or the phase somebody came back to on
+   * a finished walk) banked the scope and skipped the money entirely, with no
+   * error anywhere. The answers were on record and the phase was worth
+   * nothing.
+   *
+   * The two things `finished` was standing in for are said directly: a turn
+   * with no view has nothing to price (the empty outline that closes itself
+   * below), and a resync recorded nothing at all. **A phase that finished
+   * gets priced, and `applyAndMoveOn` leaves a closed walk closed.**
+   */
+  if (!first.ok || !first.view || first.resynced) return first;
 
   /**
    * **A PHASE ENDS IN MONEY, NOT IN SILENCE.** Its questions are settled, so
@@ -1164,14 +1225,31 @@ async function runTurn(
 
   try {
     /** Did the step actually change? Compare what it ran on with where it is. */
-    const stillHere = await withTenant(
+    const where = await withTenant(
       ctx.tenantId,
       async (tx) => {
         const walk = await getWalk(tx, ctx.tenantId, interviewId);
-        return walk?.step?.id ?? null;
+        return {
+          stepId: walk?.step?.id ?? null,
+          running: walk?.interview.status === "running",
+          /** Read here so a walk that has just closed goes back SAYING so. */
+          view: walk ? walkView(walk) : null,
+        };
       },
       { role: ctx.role },
     );
+    /**
+     * **A CLOSED WALK ASKS NOTHING MORE.** The phase that just landed was the
+     * last of them, or somebody came back to one on a finished walk and it is
+     * finished again. `claimTurn` would refuse and the refusal would be
+     * swallowed; not asking is the same answer without the round trip — and
+     * the view goes back fresh, so the screen shows the reckoning rather than
+     * a conversation the walk has left.
+     */
+    if (!where.running) {
+      return { ...first, view: where.view ?? first.view, finished: true };
+    }
+    const stillHere = where.stepId;
     /** `null` means coverage is complete and the walk is riding out the last
      *  step; that is not a transition and needs no second turn. */
     if (stillHere === first.ranOn || stillHere === null) return first;
@@ -1551,7 +1629,14 @@ const goToStepSchema = z.object({
   estimateId: z.string().uuid(),
 });
 
-/** Put the walk on a step and ask that step's question. */
+/**
+ * Put the walk on a step and ask that step's question.
+ *
+ * **IT PICKS A FINISHED WALK BACK UP**, which is the whole point of the rail:
+ * the reckoning names a phase nobody has answered and this is the click that
+ * goes and answers it. The walk closes itself again as soon as nothing is
+ * outstanding, so it ends where it was.
+ */
 export async function goToStepAction(input: unknown) {
   const parsed = goToStepSchema.safeParse(input);
   if (!parsed.success) return { error: "Check the form and try again." };
@@ -1567,7 +1652,16 @@ export async function goToStepAction(input: unknown) {
     const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
       ignoreCooldown: true,
     });
-    return { ok: true as const, view: out.view };
+    /**
+     * **THE VIEW COMES BACK EVEN WHEN THE TURN DID NOT.** The screen keeps
+     * whatever it has when this is empty, and on a walk just picked back up
+     * that is the finished panel — no question, no answer box, and no sign
+     * that the click did anything.
+     */
+    return {
+      ok: true as const,
+      view: out.view ?? (await freshView(ctx, parsed.data.interviewId)),
+    };
   } catch (err) {
     return toResult(err);
   }
@@ -1583,6 +1677,11 @@ const askAgainSchema = z.object({
 /**
  * ASK ME THAT ONE AGAIN. Supersedes the answer, which re-opens its step, and
  * takes a turn there so the question is on the screen when the click lands.
+ *
+ * **ON A FINISHED WALK THIS IS THE ONLY DOOR BACK IN**, and it is the one
+ * X4 wrote for it: every phase of a finished walk is covered, so no bookmark
+ * will stick to any of them until an answer stops standing. Superseding one
+ * re-opens its step and picks the walk back up on it.
  */
 export async function askAgainAction(input: unknown) {
   const parsed = askAgainSchema.safeParse(input);
@@ -1614,7 +1713,13 @@ export async function askAgainAction(input: unknown) {
     const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
       ignoreCooldown: true,
     });
-    return { ok: true as const, view: out.view, prompt: where.prompt };
+    return {
+      ok: true as const,
+      view: out.view ?? (await freshView(ctx, parsed.data.interviewId)),
+      prompt: where.prompt,
+      /** The walk was finished and is going again, which the screen says. */
+      resumed: where.resumed,
+    };
   } catch (err) {
     return toResult(err);
   }

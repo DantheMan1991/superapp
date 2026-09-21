@@ -4,6 +4,8 @@ import {
   parseRoomList,
   roomLines,
   roomSlug,
+  roomIsNamedIn,
+  roomsWithNothingPriced,
   roomsWithoutArea,
   totalFloorArea,
   type RoomFacts,
@@ -159,5 +161,70 @@ describe("formatRoomArea, totalFloorArea and roomsWithoutArea", () => {
   it("names the rooms still owing a number", () => {
     const rooms = [room({ name: "Kitchen" }), room({ name: "Pantry", areaThousandths: null })];
     expect(roomsWithoutArea(rooms).map((r) => r.name)).toEqual(["Pantry"]);
+  });
+});
+
+/**
+ * WHAT THE BID NEVER MENTIONS (X8b).
+ *
+ * The founder, weighing this against a template estimate sheet: *"How is
+ * this question thing we are building better than just have a template
+ * estimate sheet with all of the assemblies preloaded."*
+ *
+ * This is one of the answers. A template fails by SILENCE — the row you did
+ * not fill in looks like the row that does not apply. With a room list and
+ * lines that name their rooms, a room nobody priced anything against is a
+ * fact, not something you have to notice.
+ */
+describe("roomsWithNothingPriced", () => {
+  const rooms = [
+    room({ id: "a", name: "Great room", level: "Main floor" }),
+    room({ id: "b", name: "Powder room", level: "Main floor" }),
+    room({ id: "c", name: "Bedroom 2", level: "Upstairs" }),
+    room({ id: "d", name: "Bedroom 3", level: "Upstairs" }),
+  ];
+
+  it("names the rooms no line mentions", () => {
+    const lines = ["LVP flooring — great room, kitchen and dining", "Carpet — bedroom 2"];
+    expect(roomsWithNothingPriced(rooms, lines).map((r) => r.name)).toEqual([
+      "Powder room",
+      "Bedroom 3",
+    ]);
+  });
+
+  /**
+   * **A NUMBER IS THE WHOLE DIFFERENCE** between `Bedroom 2` and `Bedroom 3`,
+   * and the pack's own `significantWords` drops anything under three
+   * characters. Getting this wrong would quietly mark both covered.
+   */
+  it("does not treat Bedroom 2 as Bedroom 3", () => {
+    expect(roomsWithNothingPriced(rooms, ["Carpet — bedroom 3"]).map((r) => r.name)).toContain(
+      "Bedroom 2",
+    );
+    expect(roomsWithNothingPriced(rooms, ["Carpet — bedroom 3"]).map((r) => r.name)).not.toContain(
+      "Bedroom 3",
+    );
+  });
+
+  it("reads a plural, because a line says bedrooms", () => {
+    expect(roomIsNamedIn("Bedroom 2", "Carpet — bedrooms 2 and 3")).toBe(true);
+    expect(roomIsNamedIn("Bedroom 3", "Carpet — bedrooms 2 and 3")).toBe(true);
+  });
+
+  /**
+   * **EVERY word of the name has to be there.** `Powder room` against a line
+   * that only says `room` would be the quiet miss this exists to catch.
+   */
+  it("does not count a room because one of its words appears", () => {
+    expect(roomIsNamedIn("Powder room", "Room finishes throughout")).toBe(false);
+    expect(roomIsNamedIn("Great room", "Powder room tile")).toBe(false);
+  });
+
+  it("is every room when the bid has no lines at all", () => {
+    expect(roomsWithNothingPriced(rooms, [])).toHaveLength(4);
+  });
+
+  it("is nothing when there are no rooms to miss", () => {
+    expect(roomsWithNothingPriced([], ["Anything"])).toEqual([]);
   });
 });

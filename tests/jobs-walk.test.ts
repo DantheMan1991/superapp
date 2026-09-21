@@ -670,11 +670,36 @@ describe("the rooms in the prompts", () => {
     expect(prompt).toContain("- Kitchen: 310 sf");
   });
 
-  /** The same trap one layer down: fifteen flooring lines is not an estimate. */
-  it("tells the proposal one line per finish, not one per room", () => {
+  /**
+   * **THE RULE THIS SHIPPED WRONG ONCE.** X8 said *"one line per finish, not
+   * one per room"*, which is the LVP half only — the founder's own examples
+   * are one line for the same flooring in four rooms and a line EACH for
+   * three different showers. Rolling those three into one would have been a
+   * number nobody could check, and he would have split it by hand forever.
+   *
+   * The rule is: roll up what is identical, split what differs.
+   */
+  it("tells the proposal to roll up what is identical and split what differs", () => {
     const prompt = proposeSystemPrompt({ ...proposeBase, rooms });
-    expect(prompt).toContain("ONE LINE PER FINISH, NOT ONE PER ROOM");
+    expect(prompt).toContain("ROLL UP WHAT IS IDENTICAL; SPLIT WHAT DIFFERS");
+    expect(prompt).toContain("three showers with different tile are three lines");
     expect(prompt).toContain("derivedFrom");
+  });
+
+  /**
+   * And the rooms are named EITHER WAY — which is not decoration. It is what
+   * `roomsWithNothingPriced` reads to tell somebody the powder room has
+   * nothing on the bid, and what lets the same line be recognised next job.
+   */
+  it("tells the proposal to name the rooms a line covers", () => {
+    const prompt = proposeSystemPrompt({ ...proposeBase, rooms });
+    expect(prompt).toContain("NAME THE ROOMS EITHER WAY");
+  });
+
+  it("keeps the walk's ask-once rule, and says to group the ones that match", () => {
+    const prompt = walkSystemPrompt({ ...walkBase, rooms });
+    expect(prompt).toContain("ASK ONCE AND SHARE IT OUT");
+    expect(prompt).toContain("Where the rooms get the SAME thing say so once");
   });
 
   it("says nothing at all about rooms on a job with none", () => {

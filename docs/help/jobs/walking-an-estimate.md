@@ -316,6 +316,26 @@ cost. Under it, either:
   outstanding, and the bid is ready as far as this tool can tell.
 - **N phases are not finished** — followed by each one and why.
 
+### Rooms with nothing on the bid
+
+If the job has [rooms](#then-it-asks-what-rooms-are-in-it), an amber note names
+any the bid never mentions: *"Powder room, mud room and garage have nothing on
+this bid."*
+
+This is the thing a price sheet cannot do for you. A blank row on a spreadsheet
+looks exactly like a row that does not apply, and the one you meant to come
+back to is the one that costs you. Here it has a name.
+
+**It reads the lines' own words.** A line that says *"LVP — great room, kitchen
+and dining"* covers three rooms; a line that just says *"Flooring"* covers none
+as far as this can tell, so it will name rooms you have actually priced. That
+is deliberate — it would rather point at something you have done than stay
+quiet about something you have not.
+
+**It is not a problem to fix.** It is amber, not red, and it is never counted
+in *N phases are not finished* — a garage with nothing against it is usually
+exactly right. It is there to be looked at once before the bid goes out.
+
 The reasons you will see:
 
 | What it says | What happened |

@@ -126,6 +126,67 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — Roll up what is identical, and name the rooms nobody priced (`claude/rooms-on-the-bid`, X8b)
+
+The founder, asked how the walk beats a template estimate sheet with his
+assemblies preloaded:
+
+> *"with LVP flooring I typically just have one item for LVP that lists all of
+> the rooms that includes. But for Showers I typically list each one
+> separately. not always though. how do we handle things like that?"*
+
+**His question showed X8's rule was half right.** It said *"a finish that
+varies by room is one line per finish, not one per room"* — which is the LVP
+half. It would have rolled three different showers into one line and he would
+have split them by hand on every bid.
+
+Look at his own examples and the rule writes itself: **LVP is the same product
+in four rooms; three showers are different from each other.** So:
+
+> **ROLL UP WHAT IS IDENTICAL; SPLIT WHAT DIFFERS.**
+
+That is not a new idea — it is why *"not always though"* is in his question.
+It is not inconsistency, it is the rule firing differently.
+
+A second rule went in beside it: **name the rooms either way.** That is not
+decoration; the next section reads those names.
+
+### A room nothing on the bid mentions
+
+The other half of his question was really *why is this better than a template*,
+and this is one of the answers a template structurally cannot give.
+
+**A template fails by silence.** A 291-row sheet's unfilled row looks exactly
+like the row that does not apply, and the forgotten one is the error that eats
+the margin. With a room list (X8) and lines that name their rooms, *"the powder
+room has nothing on this bid"* is a fact this code can work out.
+
+- Read off EVERY line on the estimate, not just the walk's own — a room covered
+  by a line somebody typed by hand is covered.
+- Matched on stemmed words, with **digits kept**: `2` is the entire difference
+  between `Bedroom 2` and `Bedroom 3`, and the pack's own `significantWords`
+  drops anything under three characters, which is why `room-math.ts` has its
+  own.
+- **Every word of the name must appear**, which errs toward warning. Wrong by
+  warning costs a glance; wrong by staying quiet costs the omission.
+- **Amber, and not counted in `ready`.** A garage with no finishes against it
+  is usually correct. Blocking on it would teach somebody to ignore the panel
+  that matters.
+
+### The thing that made this worth the whole session
+
+`tsc --noEmit` was **silently not type-checking the repo**. A corrupt
+`.next/dev/types/validator.ts` — written by the running dev server, and inside
+tsconfig's `**/*.ts` — had three syntax errors, and syntax errors abort the
+program before semantic checking. It exited 0. Three call sites of
+`reckoningFor` were missing a newly-required argument and nothing said so;
+filtering `.next/` out of the output hid it completely.
+
+`.next/dev` and `.next/cache` are excluded now. **`.next/types` stays included
+— Next needs it.** Worth remembering next to the older lesson that `npm run
+build` catches what `tsc` does not: it turns out `tsc` can also catch nothing
+at all and say so with a zero.
+
 ### 2026-09-21 — The rooms in the building (`claude/the-rooms`, X8, [ADR 0101](../decisions/0101-a-room-is-a-name-a-floor-and-an-area-and-one-answer-is-shared-out-across-them.md))
 
 The founder, right after X7 merged:

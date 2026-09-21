@@ -256,6 +256,40 @@ export function WalkReckoning({
         </>
       )}
 
+      {/**
+        * **ROOMS NOTHING ON THE BID MENTIONS** (X8b).
+        *
+        * The founder, weighing this against a template estimate sheet:
+        * *"How is this question thing we are building better than just have
+        * a template estimate sheet with all of the assemblies preloaded."*
+        * This is one of the answers. A template fails by SILENCE — the row
+        * you did not fill in looks exactly like the row that does not
+        * apply — and the forgotten room is the error that eats the margin.
+        *
+        * Amber rather than red, and not counted in "not finished": a garage
+        * with no finishes against it is usually correct. Something to look
+        * at, not something in the way. Blocking on it would teach somebody
+        * to ignore the panel that matters.
+        */}
+      {reckoning.roomsUnpriced.length > 0 && (
+        <div className="mt-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
+          <p className="text-sm text-warning-foreground">
+            {reckoning.roomsUnpriced.length}{" "}
+            {reckoning.roomsUnpriced.length === 1 ? "room has" : "rooms have"} nothing on this
+            bid.
+          </p>
+          <p className="mt-1 text-xs text-warning-foreground/80">
+            {reckoning.roomsUnpriced
+              .map((r) => (r.level ? `${r.name} (${r.level})` : r.name))
+              .join(" · ")}
+          </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Read off the lines&apos; own words, so a line that does not name its rooms will show
+            here even when it covers them. Often right — a garage usually has nothing.
+          </p>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
         <span>{reckoning.priced} priced</span>
         {reckoning.byOthers > 0 && <span>{reckoning.byOthers} by others, in the exclusions</span>}

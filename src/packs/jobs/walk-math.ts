@@ -146,6 +146,30 @@ export function nextStep(
   return rest.find((s) => !stepIsCovered(s, answers)) ?? null;
 }
 
+/**
+ * WHERE THE WALK GOES WHEN A PHASE LANDS, and **null only when nothing
+ * anywhere is outstanding** — which is the one thing that ends a walk.
+ *
+ * `nextStep` looks FORWARD, and that was the whole rule while a walk could
+ * only ever go forwards. X4 made it possible to jump about, and forwards
+ * stopped meaning finished: walk EST-6 on dev was taken to Painting from the
+ * rail, answered it and Landscaping, and **closed itself over eight phases
+ * nobody had ever been asked about** — because Landscaping is last on the
+ * list, so there was no step after it.
+ *
+ * A walk is finished when nothing is outstanding, not when the questions run
+ * out ([ADR 0099](../../../docs/decisions/0099-a-walk-is-finished-when-nothing-is-outstanding-not-when-the-questions-run-out.md)).
+ * So the walk carries on to the next phase with work in it — after this one
+ * if there is one, and back up the list if there is not.
+ */
+export function onwardStep(
+  steps: readonly WalkStep[],
+  answers: readonly WalkAnswer[],
+  afterId: string,
+): WalkStep | null {
+  return nextStep(steps, answers, afterId) ?? currentStep(steps, answers, null);
+}
+
 export interface WalkProgress {
   steps: number;
   /** Steps with nothing outstanding. */

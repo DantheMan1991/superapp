@@ -31,6 +31,7 @@ export const DB_BACKED_TESTS = [
   "tests/health-signals.test.ts",
   "tests/profile-seed.test.ts",
   "tests/jobs-outline-ops.test.ts",
+  "tests/jobs-walk-ops.test.ts",
   "tests/engagements-ops.test.ts",
   "tests/engagement-onboarding.test.ts",
   "tests/discovery-ops.test.ts",

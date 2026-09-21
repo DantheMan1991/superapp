@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimateProposedLine } from "@/db/schema";
 import { explodeAssembly, resolveCostCode } from "./assembly-math";
@@ -223,12 +223,49 @@ export async function proposeLines(
 }
 
 /**
+ * **WHAT THIS STEP PUT ON THE ESTIMATE ALREADY**, through the link the row
+ * kept and never through the name. A person may rename the item — the
+ * founder's own sheet has `DRYWALL, INCL. LABOR` over a step called
+ * `Drywall` — and matching on words would either miss it or, worse, hit a
+ * different phase that happens to read the same.
+ */
+async function appliedBefore(
+  tx: Tx,
+  tenantId: string,
+  interviewId: string,
+  stepId: string | null,
+): Promise<Set<string>> {
+  const rows = await tx
+    .select({ estimateLineId: schema.jobEstimateProposedLines.estimateLineId })
+    .from(schema.jobEstimateProposedLines)
+    .where(
+      and(
+        eq(schema.jobEstimateProposedLines.tenantId, tenantId),
+        eq(schema.jobEstimateProposedLines.interviewId, interviewId),
+        stepId === null
+          ? isNull(schema.jobEstimateProposedLines.stepId)
+          : eq(schema.jobEstimateProposedLines.stepId, stepId),
+        isNotNull(schema.jobEstimateProposedLines.estimateLineId),
+      ),
+    );
+  return new Set(rows.map((r) => r.estimateLineId).filter((id): id is string => id !== null));
+}
+
+/**
  * Put a step's proposal on the estimate, as one item with its lines inside.
  *
  * **AN ITEM PER PHASE** (ADR 0079): the client buys "Foundation", and the
  * concrete, the forms and the rebar sit behind it. That is the shape the
  * proposal already prints in, and it is why a walk produces a readable
  * document rather than ninety loose lines.
+ *
+ * **AND A PHASE WALKED TWICE IS STILL ONE ITEM.** This appended, always, and
+ * driving the way back into a finished walk is what found it: ask a phase
+ * again, answer it, price it, and the estimate grew a SECOND `Landscaping`
+ * beside the first — both in the total, which is the plausible wrong number
+ * this whole layer exists to refuse, at the place it does the most damage.
+ * A phase that lands again lands in the item it made before, replacing the
+ * lines it put there and leaving anything a person added beside them.
  */
 export async function applyProposal(
   tx: Tx,
@@ -258,10 +295,27 @@ export async function applyProposal(
     ? await listCostCodes(tx, ctx.tenantId, project.costCodeSetId)
     : [];
 
-  const groupName = proposed[0].stepTitle.trim() || "From the walk";
+  /**
+   * The item this phase made last time, if it is still there. Its lines are
+   * being replaced; anything else in it — a line somebody typed in beside
+   * them — stays, because the walk did not put it there.
+   */
+  const madeBefore = await appliedBefore(tx, ctx.tenantId, input.interviewId, input.stepId);
+  const priorLines = loaded.lines.filter((l) => madeBefore.has(l.id));
+  const priorGroupId = priorLines.find((l) => l.groupId !== null)?.groupId ?? null;
+  const priorGroup = priorGroupId
+    ? (loaded.groups.find((g) => g.id === priorGroupId) ?? null)
+    : null;
+
+  /** **THE NAME THEY GAVE IT WINS**, for the same reason the link does. */
+  const groupName = priorGroup
+    ? priorGroup.name
+    : proposed[0].stepTitle.trim() || "From the walk";
   /** The heading the step sat under, recorded when the line was proposed. */
   const groupSection = proposed[0].stepSection.trim();
   const key = `walk-${input.stepId ?? "loose"}`;
+  /** Where the new lines go: back into the phase's own item, or a new one. */
+  const landing = priorGroup ? priorGroup.id : key;
 
   /**
    * THE WHOLE FORM, as the editor posts it: every group and line that is
@@ -286,25 +340,34 @@ export async function applyProposal(
         priceMode: g.priceMode,
         fixedPriceCents: g.fixedPriceCents,
       })),
-      { key, name: groupName, section: groupSection },
+      /** Only when the phase has no item yet; otherwise it keeps the one it has. */
+      ...(priorGroup ? [] : [{ key, name: groupName, section: groupSection }]),
     ],
     lines: [
-      ...loaded.lines.map((l) => ({
-        id: l.id,
-        groupRef: l.groupId,
-        costCodeId: l.costCodeId,
-        description: l.description,
-        clientDescription: l.clientDescription,
-        clientVisible: l.clientVisible,
-        unit: l.unit,
-        quantityThousandths: l.quantityThousandths,
-        unitCostCents: l.unitCostCents,
-        markupPpm: l.markupPpm,
-        unitPriceCents: l.unitPriceCents,
-        notes: l.notes,
-      })),
+      /**
+       * **THE LINES THIS PHASE PUT ON BEFORE ARE GONE**, because the answers
+       * that produced them have been answered again and the new proposal is
+       * what the phase is now. A line left out of a whole-form save is a line
+       * deleted (ADR 0082), which is exactly what is wanted here.
+       */
+      ...loaded.lines
+        .filter((l) => !madeBefore.has(l.id))
+        .map((l) => ({
+          id: l.id,
+          groupRef: l.groupId,
+          costCodeId: l.costCodeId,
+          description: l.description,
+          clientDescription: l.clientDescription,
+          clientVisible: l.clientVisible,
+          unit: l.unit,
+          quantityThousandths: l.quantityThousandths,
+          unitCostCents: l.unitCostCents,
+          markupPpm: l.markupPpm,
+          unitPriceCents: l.unitPriceCents,
+          notes: l.notes,
+        })),
       ...proposed.map((p) => ({
-        groupRef: key,
+        groupRef: landing,
         costCodeId: resolveCostCode(p.costCode, codes),
         description: p.description,
         clientDescription: p.clientDescription,
@@ -324,7 +387,14 @@ export async function applyProposal(
 
   /** Remember which line each proposal became — the takeoff's own shape. */
   const after = await getEstimate(tx, ctx.tenantId, input.estimateId);
-  const group = after?.groups.find((g) => g.name === groupName);
+  /**
+   * **BY ID WHERE THERE IS ONE.** Two items can share a name — the estimate
+   * has never forbidden it — and a search by words would then link this
+   * phase's lines to somebody else's item.
+   */
+  const group = priorGroup
+    ? after?.groups.find((g) => g.id === priorGroup.id)
+    : after?.groups.find((g) => g.name === groupName);
   const made = (after?.lines ?? []).filter((l) => l.groupId === group?.id);
   const now = new Date();
   for (const p of proposed) {

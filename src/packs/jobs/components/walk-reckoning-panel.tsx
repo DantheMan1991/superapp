@@ -107,9 +107,13 @@ export function StepCard({
   isCurrent: boolean;
   busy: boolean;
   /**
-   * The walk is over. **Neither button is offered rather than offered and
-   * refused** — a control that can only produce an error toast is the
-   * "buttons that just don't make sense" the founder hit in his first hour.
+   * The walk is over — which is when somebody most needs these two buttons,
+   * not least. They used to be hidden here, on the grounds that a control
+   * that can only produce an error toast is worse than none: `goToStep` and
+   * `askAgain` both refused a walk that was not running, so on the one screen
+   * X4 built for the end of a bid there was **no way back into a phase at
+   * all**. Both doors now pick a finished walk back up, so the button is
+   * offered and it works; this only changes the words beside it.
    */
   closed: boolean;
   symbol: string | null;
@@ -138,7 +142,15 @@ export function StepCard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          {!isCurrent && !closed && (
+          {/**
+            * **ONLY WHERE THERE IS SOMETHING TO ASK.** A bookmark on a phase
+            * whose questions are all settled does not stick — `currentStep`
+            * honours it only while the step has work in it, and ADR 0099
+            * turned down honouring it anyway, because that wedges a walk on a
+            * step with nothing to say. On a covered phase the way back in is
+            * **Ask again** on the answer you want to change, below.
+            */}
+          {!isCurrent && step.outstanding > 0 && (
             <Button size="sm" variant="secondary" disabled={busy} onClick={onGo}>
               <CornerUpLeft className="size-3.5" /> Work on this
             </Button>
@@ -170,7 +182,7 @@ export function StepCard({
                   <p className="mt-0.5 text-sm">{a.answer}</p>
                 )}
               </div>
-              {a.questionId && !closed && (
+              {a.questionId && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -189,6 +201,20 @@ export function StepCard({
         <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
           {step.outstanding} {step.outstanding === 1 ? "question" : "questions"} on this step
           nobody has answered.
+        </p>
+      )}
+
+      {/**
+        * **SAY THAT THE WALK STARTS AGAIN**, because it does: both buttons
+        * put a finished walk back on this phase, price it, and let it close
+        * itself again when nothing is outstanding. Somebody who thought they
+        * were only reading the transcript should not discover that by being
+        * asked a question.
+        */}
+      {closed && (
+        <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+          This walk is finished. Working on a phase picks it back up, and it
+          finishes again once nothing is outstanding.
         </p>
       )}
     </Panel>

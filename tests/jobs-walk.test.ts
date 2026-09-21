@@ -3,6 +3,7 @@ import {
   currentStep,
   mustAskOutstanding,
   nextStep,
+  onwardStep,
   outstanding,
   quickRepliesFor,
   settledIds,
@@ -188,6 +189,56 @@ describe("nextStep", () => {
 
   it("starts from the beginning when the step it is after has gone", () => {
     expect(nextStep(steps, [], "deleted")?.id).toBe("s1");
+  });
+});
+
+/**
+ * WHERE THE WALK GOES WHEN A PHASE LANDS (X9).
+ *
+ * The rule this whole block exists to hold: **running off the end of the list
+ * is not the end of the walk.** X4 made it possible to jump about from the
+ * rail, and `applyAndMoveOn` still asked only what came AFTER — so walk EST-6
+ * on dev was taken to the second-to-last phase, answered it and the last one,
+ * and closed itself over eight phases nobody had ever been asked about. A
+ * walk is finished when nothing is outstanding (ADR 0099).
+ */
+describe("onwardStep", () => {
+  const steps = [
+    step({ id: "s1", title: "Rough carpentry", questions: [q({ id: "a" })] }),
+    step({ id: "s2", title: "Drywall", questions: [q({ id: "b" })] }),
+    step({ id: "s3", title: "Landscaping", questions: [q({ id: "c" })] }),
+  ];
+
+  it("goes on to the next phase with work in it", () => {
+    const done = [answer({ questionId: "b", stepId: "s2" })];
+    expect(onwardStep(steps, done, "s2")?.id).toBe("s3");
+  });
+
+  it("GOES BACK UP THE LIST when the last phase is the one that landed", () => {
+    // Somebody jumped to the end from the rail. Rough carpentry has never
+    // been asked, and before this the walk closed itself over it.
+    const done = [answer({ questionId: "c", stepId: "s3" })];
+    expect(onwardStep(steps, done, "s3")?.id).toBe("s1");
+  });
+
+  it("is null ONLY when every phase is covered", () => {
+    const all = [
+      answer({ questionId: "a", stepId: "s1" }),
+      answer({ questionId: "b", stepId: "s2" }),
+      answer({ questionId: "c", stepId: "s3" }),
+    ];
+    expect(onwardStep(steps, all, "s3")).toBeNull();
+    // And one question re-opened anywhere is enough to keep it going.
+    const reopened = all.filter((a) => a.questionId !== "a");
+    expect(onwardStep(steps, reopened, "s3")?.id).toBe("s1");
+  });
+
+  it("never lands on the phase that just finished", () => {
+    const done = [
+      answer({ questionId: "b", stepId: "s2" }),
+      answer({ questionId: "c", stepId: "s3" }),
+    ];
+    expect(onwardStep(steps, done, "s2")?.id).toBe("s1");
   });
 });
 

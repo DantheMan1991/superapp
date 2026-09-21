@@ -126,6 +126,74 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — The phase the money belongs to (`claude/the-phase-the-money-belongs-to`)
+
+Driving walk EST-6 on Hilltop Farm's 24-109, the header read
+
+```
+04. STRUCTURAL
+Rough carpentry            step 1 of 10
+```
+
+over the question *"Wall board, 1/2", hang & finish, 1,216 sf — what are you
+getting per sf?"*, which is a DRYWALL line. **Every price in a phase was
+asked under the name of a different phase**, and the whole right-hand panel
+went with it: *Nothing on this step yet* beside the answers you had just
+given, and Rough carpentry's outstanding question under *Still to come*.
+
+**X6 WROTE THE CAUSE DOWN AND DID NOT FOLLOW IT OUT OF ITS OWN FUNCTION.**
+Its note says *"`currentStep` has already left the finished phase"* — that is
+how the code knows the phase is finished, and it is why `proposeForStep` and
+`moveToStep` both take the step EXPLICITLY. The screen still read it off the
+derived one. Nobody reported it; it is confusing rather than wrong, and a
+price answered against the wrong mental phase is the mistake this whole layer
+exists to avoid.
+
+**A PENDING PRICE KNOWS ITS OWN PHASE, SO NOTHING IS DERIVED.** The proposed
+line carries `step_id`, and `step_title` and `step_section` AS THEY WERE —
+columns X2b wrote for exactly this reason. `readPendingPrice` reads that one
+row, **and costs no query at all when no price is pending**, which is every
+ordinary turn. `LoadedWalk` carries it, so every caller of `walkView` has it
+for free and the turn path passes its own.
+
+**ONE PHASE, AND THE WHOLE SCREEN IS ABOUT IT.** The fix is not a second
+override in the header — it is `phaseOnScreen`, one pure function in
+`walk-price-math.ts` that `viewOf` calls once. `stepId`, `stepTitle`,
+`stepSection`, `stepGuidance` and `stepNumber` are all that one phase, so the
+header, the rail's ring, the answers panel, the outstanding list and the
+proposal panel's *"What X comes to"* cannot each pick their own answer. The
+screen's own change is four lines: a `what it costs` marker beside the name.
+`WalkView.pricing` is non-null for exactly that marker.
+
+**Two things it decides rather than ducks.** The outline is read live
+(ADR 0098), so a phase RENAMED mid-walk reads by its new name and the line's
+remembered words are the fallback — which is what lets a phase DELETED
+mid-walk still say what it was called. And a phase the outline has lost
+reports number 0, so nothing prints *"step 0 of 10"*.
+
+### Driven, and the bug reproduced first
+
+On dev, on the walk the founder left part way through. Gutters' last question
+answered → the phase closed and asked for its money, under
+
+```
+Gutters   what it costs · step 5 of 10
+```
+
+with *"Who is doing this one? / In-house"* still in the panel beside it and
+the ring on square 5. `6.50` per lf, then `840` for the downspouts, and the
+item went on the estimate — the bid went from 2 priced / $12,467.70 to
+3 priced / $14,139.70 — and the header moved to `Plumbing · step 6 of 10`
+with the marker gone. Then the same again on Plumbing at 375px, where the
+line still fits.
+
+**And the old behaviour was confirmed on the same screen**, by turning the
+new branch off for one reload: `04. STRUCTURAL / Rough carpentry · step 1
+of 10` over the Gutters price question, `Nothing on this step yet`, and Rough
+carpentry's always-ask question under *Still to come*. The report was exact.
+`tests/jobs-walk-price.test.ts` holds the five cases, and four of them fail
+against the old behaviour.
+
 ### 2026-09-21 — Owning your assemblies (`claude/owning-your-assemblies`, X10)
 
 The founder, having seen the walk put *"Plan revisions, $150"* on a bid he
@@ -1713,6 +1781,15 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/walk-price-math.ts` + `walk-price-ops.ts` — **asking for
+  the money** (X6). The pure half writes the question from the line, reads
+  one figure out of the answer and refuses two; the ops half parks the ask
+  on the interview and banks what was said. **The model is in none of it.**
+  `phaseOnScreen` is also here, and it is the one place that decides WHICH
+  phase the walk screen is about: while a price is pending that is the phase
+  being PRICED, because `currentStep` has already left it — pass it the
+  steps, where the walk is standing, and the pending price, and everything
+  from the header to the rail's ring reads one answer.
 - `src/packs/jobs/room-math.ts` + `room-ops.ts` + `room-actions.ts` +
   `components/rooms-dialog.tsx` — **the rooms in the building** (X8, ADR
   0101). A room is a name, a floor and a floor area, and the area is a

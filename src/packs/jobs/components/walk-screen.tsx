@@ -278,6 +278,18 @@ export function WalkScreen({
   const measuring = view.measuring.ask !== null;
   /** Either half of the measure-up: the phase rail is beside the point. */
   const settingUp = measuring || view.measuring.askingRooms;
+  /**
+   * **IT IS ASKING FOR THE MONEY ON THE PHASE THAT JUST FINISHED (X6).**
+   * The header does not have to work that out: `phaseOnScreen` has already
+   * named the right phase in `stepTitle`, because the DERIVED step has left
+   * it and reading the header off that put *04. STRUCTURAL / Rough
+   * carpentry* over a drywall price. All this adds is the word that says
+   * why the walk is still standing there.
+   */
+  const pricing = view.pricing !== null;
+  /** The muted words beside the phase's name. */
+  const place = view.stepNumber > 0 ? `step ${view.stepNumber} of ${view.stepCount}` : "";
+  const aside = pricing ? ["what it costs", place].filter(Boolean).join(" · ") : place;
   /** What the rooms come to, for the one line that says so. */
   const roomsMeasured = view.measuring.rooms.reduce(
     (n, r) => n + (r.areaThousandths ?? 0),
@@ -311,9 +323,9 @@ export function WalkScreen({
                   {view.measuring.left} to go
                 </span>
               ) : view.measuring.askingRooms ? null : (
-                view.stepCount > 0 && (
+                aside !== "" && (
                   <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    step {view.stepNumber} of {view.stepCount}
+                    {aside}
                   </span>
                 )
               )}

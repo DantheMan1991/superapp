@@ -4,6 +4,7 @@ import {
   resolveCostCode,
   scaleQuantity,
   suggestDriver,
+  toEditable,
   type AssemblyLineShape,
 } from "../src/packs/jobs/assembly-math";
 
@@ -198,5 +199,60 @@ describe("resolveCostCode: the code is text, and it lands on THIS job's set", ()
     expect(resolveCostCode("", codes)).toBeNull();
     expect(resolveCostCode("   ", codes)).toBeNull();
     expect(resolveCostCode("09 30 00", [])).toBeNull();
+  });
+});
+
+/**
+ * A LINE AS A FORM SHOWS IT (X10).
+ *
+ * Stored money is cents and stored quantity is thousandths; a text input
+ * holds neither. The conversion lives in the pure module and not in the
+ * editor for a reason worth a test of its own: **a server component may not
+ * call a function out of a `"use client"` file**, only render one. It was in
+ * the wrong file first, `tsc` and `next build` were both green, and opening
+ * the page was the only thing that said so.
+ */
+describe("toEditable", () => {
+  function line(over: Partial<Parameters<typeof toEditable>[0]> = {}) {
+    return {
+      description: "Tile, material",
+      clientDescription: "",
+      clientVisible: true,
+      unit: "sf",
+      quantityThousandths: 320_000,
+      unitCostCents: 420,
+      costCode: "09 30 00",
+      markupPpm: null,
+      unitPriceCents: null,
+      ...over,
+    };
+  }
+
+  it("writes the quantity and the money the way a box takes them", () => {
+    const e = toEditable(line());
+    expect(e.quantity).toBe("320");
+    expect(e.unitCost).toBe("4.20");
+  });
+
+  it("keeps a fractional quantity rather than rounding it into the box", () => {
+    expect(toEditable(line({ quantityThousandths: 24_500 })).quantity).toBe("24.5");
+  });
+
+  /** Nothing is not zero: a line saved without a markup has none, not 0%. */
+  it("carries a missing markup and price through as missing", () => {
+    const e = toEditable(line());
+    expect(e.markupPpm).toBeNull();
+    expect(e.unitPriceCents).toBeNull();
+  });
+
+  it("carries the words and the flags untouched", () => {
+    const e = toEditable(line({ clientVisible: false, clientDescription: "Porcelain tile" }));
+    expect([e.description, e.clientDescription, e.unit, e.costCode, e.clientVisible]).toEqual([
+      "Tile, material",
+      "Porcelain tile",
+      "sf",
+      "09 30 00",
+      false,
+    ]);
   });
 });

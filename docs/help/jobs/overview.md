@@ -422,6 +422,31 @@ It saves the lines exactly as you priced them — descriptions, the client's wor
 - **It is a starting point, not a quote.** Check the quantities after you drop one. The dialog tells you what one of them costs at the size it was saved, so you can see straight away whether it is the right thing.
 - **{button:Take it out of the library|ghost}** removes an assembly you no longer want. **Lines it has already made are untouched** — those belong to the {{project|plural|lower}} they are on.
 - Assemblies belong to your business, not to a {{project|lower}}: every {{project|lower}} you estimate from now on can use them.
+
+**Seeing and changing them — `Assemblies` on the projects page.** The library
+lists every one you have, what each is priced per, how many lines it holds and
+what one of it costs. Open one to change it:
+
+| What you can change | Notes |
+| --- | --- |
+| The name, and the size it is priced per | Everything scales off that size, so changing it changes what a dropped assembly works out to. |
+| The sentence the client reads | Carried onto the item this makes. |
+| Your own note | Never printed. |
+| The lines | Description, quantity, unit, unit cost and cost code, plus whether each line stays off the proposal. Add lines, remove them, reword them. |
+
+**{button:New assembly|outline}** makes one from nothing — give it a name and a
+size and it opens with a single line to fill in. Useful when you know what an
+item should be before you have priced one.
+
+**Saving never touches a bid.** An item this assembly has already made copied
+these lines into that {{project|lower}}, and the copy is that job's. Change the
+library as much as you like; nothing you have sent moves.
+
+**Why it is worth keeping tidy.** The walk uses assemblies instead of working
+lines out for itself, so the wording you settle here is the wording that comes
+out on every bid — and prices are remembered against the line's description, so
+the same item written two ways is remembered as two things and neither gets
+faster.
 **Moving around the lines with the keyboard.** A takeoff is usually typed down one column — forty quantities, then forty costs — so the arrows work the way they do in a spreadsheet.
 
 | Key | What it does |

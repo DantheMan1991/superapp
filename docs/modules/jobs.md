@@ -126,6 +126,84 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — Owning your assemblies (`claude/owning-your-assemblies`, X10)
+
+The founder, having seen the walk put *"Plan revisions, $150"* on a bid he
+would never itemise:
+
+> *"how do I influence or teach it what to write on the estimate... how do we
+> control what sub members get put on an item. When to include equipment
+> hours, when to include labor materials etc... I'm struggling to see that we
+> are going to get the consistent items being put on the estimate in the way
+> I want with the verbiage I want."*
+
+**The answer already existed and was unreachable.** An assembly IS "how this
+business writes this item" — its lines, its wording, its split between labour,
+material and equipment — and the walk's own rule 3 has told the model to use
+one since X2b. But:
+
+- **There was no screen.** `find src/app -ipath "*assembl*"` returned nothing.
+  You could not see what you had.
+- **There was no UPDATE.** `saveItemAsAssembly`, `deleteAssembly` and
+  `linesForDrop` were the entire library. Fixing a typo in one line meant
+  deleting the assembly and building an estimate item to re-save from.
+- **You could only make one from an estimate item**, never from nothing.
+
+So: making one was a click; OWNING thirty was impossible. `updateAssembly`,
+a library at `/dashboard/m/jobs/assemblies`, and an editor per assembly.
+
+### The link that was missing, which was a different complaint
+
+> *"One more thing. I don't see how to edit and manage the questions."*
+
+They were at `/dashboard/m/jobs/estimate-outlines` the whole time. The only
+two links to it in the app were on the panel shown to a tenant with NO
+outline, and in module settings. **The place you teach it was unreachable
+from the place you notice it needs teaching.** The projects page's owner row
+now carries Estimate outlines and Assemblies beside Cost codes.
+
+### Replace the lines, never merge them
+
+`updateAssembly` deletes and re-inserts, the call `writeSteps` already makes
+for an outline: the editor hands back the whole list as it stands, and
+reconciling row by row needs an identity the screen does not carry. Nothing
+points AT an assembly line — an assembly that made an estimate item copied
+itself into that item, and the copy is the job's — so replacing loses
+nothing. **Saving the library never reaches back into a bid you sent.**
+
+### The bug that `tsc` and `build` were both blind to
+
+`toEditable` — the conversion between stored cents/thousandths and what a
+text box holds — was exported from the `"use client"` editor, and the server
+page called it. **A server component may not call a function out of a client
+module, only render one.** `tsc` was clean, `next build` compiled, and the
+page threw on open:
+
+```
+Attempted to call toEditable() from the server but toEditable is on the
+client.
+```
+
+It lives in `assembly-math.ts` now, which both sides may import. This is the
+client half of the lesson the repo already had for `server-only`, and the
+reason is the same: **a boundary violation is not a type error.**
+
+### Driven
+
+On dev, the library listed Hilltop Farm's one assembly (*Tile flooring*, per
+320 sf, 3 lines, $3,584.00) — which carried two lines both called `tile
+labour`, exactly the inconsistency the founder is worried about, preserved
+from whenever it was saved and until now unfixable. Renamed one line and
+saved; the row came back `v2` with **three lines, not six**, re-spaced by
+tens.
+
+**Not built yet, and it is the half that makes this a guarantee rather than a
+hope:** a step naming its assembly, and an assembly carrying whether it is
+one line or a line per room and whether it is an allowance. The founder has
+settled the allowance question — *"the allowance is a cost we mark up like
+everything else"* — so the client-facing allowance figure is the marked-up
+price and a change order compares price with price.
+
 ### 2026-09-21 — Roll up what is identical, and name the rooms nobody priced (`claude/rooms-on-the-bid`, X8b)
 
 The founder, asked how the walk beats a template estimate sheet with his

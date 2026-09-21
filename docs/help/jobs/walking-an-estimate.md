@@ -97,12 +97,74 @@ underneath you is worse than one that is out of date where you can see it.
 If the job has no drawings, the picker says so. Type the number instead;
 nothing about the walk depends on there being a PDF.
 
+## Then it asks what rooms are in it
+
+The last thing before the questions start. **Paste the list** — one room a
+line — or press {button:Skip the rooms|ghost} if you would rather not.
+
+This is what lets the questions be specific. Without rooms the walk asks
+*"how much flooring?"*; with them it asks what is going where, and the
+answer it works out covers the whole list at once.
+
+### Pasting the list
+
+One a line. A **floor on its own line ending in a colon** groups everything
+under it until the next one:
+
+```
+Main floor:
+Kitchen        310
+Great room, 420
+Dining         280
+Powder room     24
+Mud room
+Upstairs:
+Master bedroom 14 x 16
+Master bath     62
+Bedroom 3
+```
+
+An area can follow the name after **a tab, a comma or a wide gap** — two or
+more spaces. A single space is not a separator, so `Master bedroom` stays one
+room rather than becoming a room called *Master*. The area reads the same way
+the measurements do, so `14 x 16` is 224 and `18'-6"` is 18.5.
+
+**A room with no area is fine.** The name is most of what matters: it is what
+lets a question say *"what tile in the master bath?"*, and what lets the bid
+be checked for a room nobody priced. Fill the numbers in for the rooms whose
+cost depends on one — which is mostly floors.
+
+If a line cannot be read it says so and names it, rather than quietly
+dropping it.
+
+### The rooms panel
+
+{button:The rooms|outline} is on the screen for the rest of the walk. Inside:
+
+- Every room, grouped by floor, with its area.
+- A box beside any room with no area — type it, or press
+  {button:Measure|outline} to trace it on a drawing exactly as above.
+- {button:Re-measure|outline} on one that already has a number.
+- A bin to take a room off the list. **Taking a room off does not touch the
+  rest of the job** — only that room and its area go.
+
+The panel adds up what the floors come to, so you can check it against the
+plan's own figure.
+
+### Two rooms with the same name
+
+A `Bathroom` upstairs and a `Bathroom` on the main floor are two rooms, and
+both are allowed as long as they are on different floors. Two by the same
+name on the SAME floor are one room — paste the list twice and nothing is
+duplicated.
+
 ### Seeing them afterwards
 
 Once measuring is done the walk starts its questions, and the numbers stay on
-the right under **The building** for the rest of the walk. They belong to the
-job, not to this walk: start a second estimate on the same job and they are
-already there.
+the right under **The building** and **The rooms** for the rest of the walk.
+They belong to the job, not to this walk: start a second estimate on the same
+job and they are already there — it will still ask whether any rooms are
+missing, but nothing has to be measured twice.
 
 ## The screen
 

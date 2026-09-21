@@ -21,6 +21,7 @@ import {
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { asDeclared, asTaken, listMeasurements, listOutlineMeasures } from "./measure-ops";
 import { formatMeasurement, measureSlug } from "./measure-math";
+import { asRoomViews, listRooms, type RoomRow, type RoomView } from "./room-ops";
 import type { MeasureKind } from "./vocabulary";
 
 /**
@@ -61,6 +62,8 @@ export interface LoadedWalk {
   declared: JobEstimateOutlineMeasure[];
   /** What is already known about the building — the PROJECT's, not the walk's. */
   measurements: JobMeasurement[];
+  /** The rooms in it, with their floor areas (X8). */
+  rooms: RoomRow[];
 }
 
 /**
@@ -170,9 +173,12 @@ export async function loadWalk(
     listOutlineMeasures(tx, tenantId, interview.outlineId),
   ]);
   const projectId = project[0]?.projectId ?? "";
-  const measurements = projectId
-    ? await listMeasurements(tx, tenantId, projectId)
-    : [];
+  const [measurements, rooms] = projectId
+    ? await Promise.all([
+        listMeasurements(tx, tenantId, projectId),
+        listRooms(tx, tenantId, projectId),
+      ])
+    : [[], []];
   const steps = outline?.steps ?? [];
   const asWalk = asWalkAnswers(answers);
   /**
@@ -199,6 +205,7 @@ export async function loadWalk(
     projectId,
     declared,
     measurements,
+    rooms,
   };
 }
 
@@ -627,6 +634,14 @@ export interface WalkMeasuring {
   }[];
   /** How many of the outline's list are still to come. */
   left: number;
+  /**
+   * The rooms in the building, with their floor areas (X8). The SAME shape
+   * the rooms panel edits, so the walk and the panel cannot disagree about
+   * what a room is.
+   */
+  rooms: RoomView[];
+  /** True while the measure-up is waiting for the room list. */
+  askingRooms: boolean;
 }
 
 export function walkView(walk: LoadedWalk): WalkView {
@@ -634,6 +649,7 @@ export function walkView(walk: LoadedWalk): WalkView {
     projectId: walk.projectId,
     declared: walk.declared,
     measurements: walk.measurements,
+    rooms: walk.rooms,
   });
 }
 
@@ -681,6 +697,7 @@ export function walkViewFrom(
     projectId: string;
     declared: readonly JobEstimateOutlineMeasure[];
     measurements: readonly JobMeasurement[];
+    rooms: readonly RoomRow[];
   },
 ): WalkView {
   const answers = asWalkAnswers(answerRows);
@@ -698,6 +715,7 @@ export function walkViewFrom(
     projectId: building.projectId,
     declared: [...building.declared],
     measurements: [...building.measurements],
+    rooms: [...building.rooms],
   };
   return viewOf(walk);
 }
@@ -778,6 +796,13 @@ function measuringOf(walk: LoadedWalk): WalkMeasuring {
     left: declared.filter(
       (d) => !taken.some((t) => t.slug === measureSlug(d.name)),
     ).length,
+    rooms: asRoomViews(walk.rooms),
+    /**
+     * The measure-up's last question. `rooms_asked_at` is stamped when it
+     * goes on the screen, so "asked and waiting" is exactly this.
+     */
+    askingRooms:
+      walk.interview.measuredAt === null && walk.interview.roomsAskedAt !== null,
   };
 }
 

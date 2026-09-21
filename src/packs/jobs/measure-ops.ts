@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobEstimateOutlineMeasure, JobMeasurement } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
@@ -193,6 +193,13 @@ export async function reorderOutlineMeasures(
 
 /* ------------------------------------------------ what the building measures */
 
+/**
+ * The measurements of the BUILDING — not of its rooms (X8).
+ *
+ * A room's floor area is not a fact about the building in the sense the walk
+ * means: fifteen of them would swamp the prompt and the panel, and the rooms
+ * carry their own. `listRoomMeasurements` in `room-ops.ts` reads those.
+ */
 export async function listMeasurements(
   tx: Tx,
   tenantId: string,
@@ -205,6 +212,7 @@ export async function listMeasurements(
       and(
         eq(schema.jobMeasurements.tenantId, tenantId),
         eq(schema.jobMeasurements.projectId, projectId),
+        isNull(schema.jobMeasurements.roomId),
       ),
     )
     .orderBy(asc(schema.jobMeasurements.takenAt));
@@ -224,6 +232,8 @@ export function asTaken(rows: readonly JobMeasurement[]): TakenMeasure[] {
 
 export interface MeasurementInput {
   projectId: string;
+  /** The room this is about, when it is about one (X8). Null = the building. */
+  roomId?: string | null;
   name: string;
   unit: string;
   valueThousandths: number;
@@ -250,11 +260,37 @@ export async function recordMeasurement(
   if (!Number.isFinite(input.valueThousandths) || input.valueThousandths <= 0) {
     throw new JobsError("INVALID_VALUE", "a measurement is more than nothing");
   }
+  const roomId = input.roomId ?? null;
+  /**
+   * **THE CONFLICT TARGET HAS TO NAME THE PARTIAL INDEX IT MEANS** (X8).
+   * There are two: one keyed on the project WHERE `room_id IS NULL`, one
+   * keyed on the room WHERE it is not. `ON CONFLICT` with no `WHERE` matches
+   * neither, and Postgres raises rather than guessing — which is the right
+   * behaviour and the reason this reads as two cases instead of one.
+   */
+  const conflict = roomId
+    ? {
+        target: [
+          schema.jobMeasurements.tenantId,
+          schema.jobMeasurements.roomId,
+          schema.jobMeasurements.slug,
+        ],
+        targetWhere: isNotNull(schema.jobMeasurements.roomId),
+      }
+    : {
+        target: [
+          schema.jobMeasurements.tenantId,
+          schema.jobMeasurements.projectId,
+          schema.jobMeasurements.slug,
+        ],
+        targetWhere: isNull(schema.jobMeasurements.roomId),
+      };
   const rows = await tx
     .insert(schema.jobMeasurements)
     .values({
       tenantId: ctx.tenantId,
       projectId: input.projectId,
+      roomId,
       name,
       slug,
       unit: input.unit.trim(),
@@ -268,11 +304,7 @@ export async function recordMeasurement(
       takenAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: [
-        schema.jobMeasurements.tenantId,
-        schema.jobMeasurements.projectId,
-        schema.jobMeasurements.slug,
-      ],
+      ...conflict,
       set: {
         name,
         unit: input.unit.trim(),
@@ -317,11 +349,13 @@ export async function passMeasurement(
       takenByClerkUserId: ctx.userId,
     })
     .onConflictDoUpdate({
+      /** Building-level only: nothing passes a ROOM's area, it is left blank. */
       target: [
         schema.jobMeasurements.tenantId,
         schema.jobMeasurements.projectId,
         schema.jobMeasurements.slug,
       ],
+      targetWhere: isNull(schema.jobMeasurements.roomId),
       set: {
         /**
          * **A PASS DOES NOT WIPE A NUMBER THAT IS ALREADY THERE.** Passing

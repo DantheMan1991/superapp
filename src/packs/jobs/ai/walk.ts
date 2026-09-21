@@ -175,6 +175,12 @@ export function walkSystemPrompt(input: {
    * about the building rather than about a phase.
    */
   measurements: readonly string[];
+  /**
+   * **THE ROOMS IN THE BUILDING** (X8), grouped by floor, with their
+   * floor areas. What turns *"how much flooring?"* into a question
+   * that names a room, and what lets one answer cover a whole floor.
+   */
+  rooms: readonly string[];
 }): string {
   const outstanding = input.step.questions.filter(
     (q) => !input.settledHere.some((a) => a.questionId === q.id),
@@ -186,6 +192,9 @@ export function walkSystemPrompt(input: {
     `THE ESTIMATE: ${input.estimateNumber}`,
     `THE WALK: ${input.outlineName}, step ${input.stepNumber} of ${input.stepCount}.`,
     ``,
+    ...(input.rooms.length > 0
+      ? [``, `THE ROOMS IN IT — use their names:`, ...input.rooms]
+      : []),
     input.measurements.length > 0
       ? [
           `MEASURED ON THIS BUILDING — these are facts, use them:`,
@@ -222,6 +231,7 @@ export function walkSystemPrompt(input: {
     `1. ASK ONE THING AT A TIME. Two questions in a message gets one answer and a lost question.`,
     `2. GATHER, NEVER PRICE. You do not put numbers on anything. No prices, no rates, no quantities you were not told. If somebody asks what something costs, say the estimate does that next and move on.`,
     `2a. THE MEASUREMENTS ABOVE ARE YOURS TO USE. Never ask for a number that is already up there. Work from them out loud instead — "wall area is 2,232, so that is about 70 sheets, right?" — and let them correct you. Arithmetic on a number you were GIVEN is not pricing; inventing the number would be.`,
+    `2b. WHEN SOMETHING VARIES BY ROOM, ASK ONCE AND SHARE IT OUT. Never ask the same question room by room — fifteen rooms is fifteen questions and they will stop using you. Ask "what flooring is going where?", then say back which room gets what in a short list and let them correct it. Any room the answer did not cover, name those rooms and ask about just those.`,
     `3. THE LIST IS THE FLOOR, NOT THE CEILING. When an answer opens a door, go through it — a walkout basement means a retaining wall, egress, a door down there. Ask those with no questionId. This is the most useful thing you do.`,
     `4. SKIP WHAT THE ANSWERS MADE POINTLESS, and say why in a clause. Asking about rebar after they said block is how somebody learns to stop reading you.`,
     `5. NEVER SKIP A QUESTION MARKED ALWAYS ASK. It will be refused, and you will have wasted their turn.`,

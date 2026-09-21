@@ -43,11 +43,14 @@ import {
 } from "./walk-price-ops";
 import { reckoningFor } from "./walk-reckoning-ops";
 import { measureLines, measureQuestionFor, readMeasureReply } from "./measure-math";
+import { parseRoomList, roomLines } from "./room-math";
+import { addRoomList, asRoomFacts } from "./room-ops";
 import { asTaken, recordMeasurement } from "./measure-ops";
 import {
   askNextMeasure,
   clearMeasureAsk,
   finishMeasuring,
+  markRoomsAsked,
   passWalkMeasurement,
   pendingMeasure,
   recordWalkMeasurement,
@@ -357,6 +360,12 @@ async function oneTurn(
        * stops a walk asking for a square footage it was given at step two.
        */
       measurements: measureLines(asTaken(gathered.walk.measurements)),
+      /**
+       * **THE ROOMS, SO A QUESTION CAN NAME ONE** (X8). This is what turns
+       * *"how much flooring?"* into *"what is going in the master bath?"*,
+       * and it is what lets one answer be allocated across a floor.
+       */
+      rooms: roomLines(asRoomFacts(gathered.walk.rooms)),
     });
 
     /* ── Act two: the model, with NO transaction open ─────────────────────── */
@@ -474,6 +483,7 @@ async function oneTurn(
             projectId: gathered.walk.projectId,
             declared: gathered.walk.declared,
             measurements: gathered.walk.measurements,
+            rooms: gathered.walk.rooms,
           })
         : null,
       finished: after?.interview.status !== "running",
@@ -551,8 +561,10 @@ async function measuringContext(ctx: WalkCtx, interviewId: string) {
         projectId: walk.projectId,
         outlineId: walk.interview.outlineId,
         measuredAt: walk.interview.measuredAt,
+        roomsAskedAt: walk.interview.roomsAskedAt,
         pendingMeasureId: walk.interview.pendingMeasureId,
         declared: walk.declared.length,
+        rooms: walk.rooms.length,
       };
     },
     { role: ctx.role },
@@ -568,25 +580,33 @@ async function measuringContext(ctx: WalkCtx, interviewId: string) {
  */
 async function startMeasuring(ctx: WalkCtx, interviewId: string): Promise<boolean> {
   const where = await measuringContext(ctx, interviewId);
-  if (!where) return false;
-  if (where.measuredAt !== null) return false;
-  /**
-   * **AN OUTLINE THAT ASKS FOR NOTHING IS DONE MEASURING.** Stamped rather
-   * than left null, so a measurement added to the outline next week does
-   * not drop this walk back into measuring halfway through.
-   */
-  if (where.declared === 0) {
-    await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
-      role: ctx.role,
-    });
-    return false;
+  if (!where || where.measuredAt !== null) return false;
+
+  if (where.declared > 0) {
+    const ask = await withTenant(
+      ctx.tenantId,
+      (tx) => askNextMeasure(tx, ctx, interviewId, where.outlineId, where.projectId),
+      { role: ctx.role },
+    );
+    if (ask) return true;
   }
-  const ask = await withTenant(
-    ctx.tenantId,
-    (tx) => askNextMeasure(tx, ctx, interviewId, where.outlineId, where.projectId),
-    { role: ctx.role },
-  );
-  return ask !== null;
+
+  /**
+   * **NOTHING TO MEASURE STILL MEANS THE ROOMS GET ASKED FOR** (X8). An
+   * outline that declares no measurements, and a building somebody measured
+   * on last month's estimate, both land here — and the rooms are the half
+   * that makes the finishes questions specific.
+   */
+  if (await askForRooms(ctx, interviewId)) return true;
+
+  /**
+   * Stamped rather than left null, so a measurement added to the outline
+   * next week does not drop this walk back into measuring halfway through.
+   */
+  await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
+    role: ctx.role,
+  });
+  return false;
 }
 
 /** The fresh view, read once, for the several places below that end with one. */
@@ -599,6 +619,77 @@ async function freshView(ctx: WalkCtx, interviewId: string): Promise<WalkView | 
     },
     { role: ctx.role },
   );
+}
+
+
+/**
+ * Put the rooms question, unless it has already been put. True when the
+ * walk is now waiting on it.
+ */
+async function askForRooms(ctx: WalkCtx, interviewId: string): Promise<boolean> {
+  const where = await measuringContext(ctx, interviewId);
+  if (!where || where.measuredAt !== null || where.roomsAskedAt !== null) return false;
+  await withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      await savePendingTurn(tx, ctx, interviewId, {
+        say:
+          where.rooms > 0
+            ? `${where.rooms} ${where.rooms === 1 ? "room" : "rooms"} on this one already. Add any that are missing, or carry on.`
+            : "What rooms are in it? Paste the list — one a line, with a floor heading if you want them grouped. Every finishes question after this can then name one.",
+        questionId: null,
+        quickReplies: [where.rooms > 0 ? "Carry on" : "Skip the rooms"],
+      });
+      await markRoomsAsked(tx, ctx, interviewId);
+    },
+    { role: ctx.role },
+  );
+  return true;
+}
+
+/**
+ * THE ROOMS ANSWER — a pasted list, or a word that means carry on.
+ *
+ * Returns null when the walk is not on the rooms question, so the turn is
+ * handled as an ordinary one.
+ */
+async function answerRooms(
+  ctx: WalkCtx,
+  interviewId: string,
+  said: string | undefined,
+): Promise<TurnOutcome | null> {
+  const where = await measuringContext(ctx, interviewId);
+  if (!where || where.measuredAt !== null || where.roomsAskedAt === null) return null;
+
+  const text = (said ?? "").trim();
+  const read = parseRoomList(text);
+  /**
+   * **A SENTENCE IS NOT A ROOM LIST.** "Skip", "carry on", "none" and an
+   * empty answer all mean move on — and so does anything that reduces to a
+   * single line, because one line of prose would otherwise become a room
+   * called *"the usual ones"*. A real list is pasted, and a real list has
+   * more than one line or a number beside it.
+   */
+  const looksLikeAList =
+    read.rooms.length > 1 || read.rooms.some((r) => r.areaThousandths !== null);
+  if (text !== "" && looksLikeAList) {
+    await withTenant(
+      ctx.tenantId,
+      (tx) => addRoomList(tx, ctx, where.projectId, read.rooms),
+      { role: ctx.role },
+    );
+  }
+  await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
+    role: ctx.role,
+  });
+
+  try {
+    const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+    if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
+  } catch {
+    /** A failed opening turn is not a failed room list: the rooms are in. */
+  }
+  return { ok: true, view: await freshView(ctx, interviewId), finished: false };
 }
 
 /**
@@ -692,7 +783,25 @@ async function afterMeasuring(
   );
   if (next) return { ok: true, view: await freshView(ctx, interviewId), finished: false };
 
-  /** Measuring is over. Open the first phase. */
+  /**
+   * **AND THEN THE ROOMS, ONCE** (X8). The founder wanted them gathered with
+   * the other numbers — *"along with the takeoff measurements at the start,
+   * you should identify the rooms on every floor"* — because every finishes
+   * question after this can then name one.
+   *
+   * Asking is stamped when the question is PUT, not when it is answered:
+   * "asked and waiting" and "not asked yet" are otherwise the same three
+   * nulls, and the walk would either ask twice or never.
+   */
+  const asked = await askForRooms(ctx, interviewId);
+  if (asked) return { ok: true, view: await freshView(ctx, interviewId), finished: false };
+
+  /** Measuring is over — stamped HERE now, not by `askNextMeasure`. */
+  await withTenant(ctx.tenantId, (tx) => finishMeasuring(tx, ctx, interviewId), {
+    role: ctx.role,
+  });
+
+  /** Open the first phase. */
   try {
     const opened = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
     if (opened.ok) return { ok: true, view: opened.view ?? null, finished: !!opened.finished };
@@ -778,6 +887,8 @@ async function proposeForStep(
           costCodes: codes.filter((c) => c.isActive).map((c) => ({ code: c.code, name: c.name })),
           /** The building's numbers, read with the walk in the same call (X7). */
           measurements: measureLines(asTaken(walk.measurements)),
+          /** And its rooms, so a line can be per-room (X8). */
+          rooms: roomLines(asRoomFacts(walk.rooms)),
         };
       },
       { role: ctx.role },
@@ -795,6 +906,7 @@ async function proposeForStep(
         costCodes: gathered.costCodes,
         /** The building's numbers, so a line comes out measured, not lump. */
         measurements: gathered.measurements,
+        rooms: gathered.rooms,
       }),
     });
     if (!proposal) return null;
@@ -814,13 +926,20 @@ async function proposeForStep(
       { role: ctx.role },
     );
     return { lines: rows.length };
-  } catch {
+  } catch (err) {
     /**
      * **PRICING NEVER BLOCKS THE WALK.** If the shapes cannot be worked out,
      * the phase goes on the reckoning unpriced and the conversation carries
      * on — the same rule as the outline fallback. A walk that stops dead is
      * worse than a walk with a hole somebody can see.
+     *
+     * **BUT IT SAYS SO.** This swallowed everything in silence, and the
+     * first time a phase quietly proposed nothing there was no way to tell
+     * a model that had nothing to say from a bug in this function — which
+     * is exactly the position driving X8 put us in. The pack's other
+     * best-effort paths log the same way (`attention source x failed`).
      */
+    console.error("walk: could not work out this phase's lines", err);
     return null;
   }
 }
@@ -1086,6 +1205,10 @@ export async function takeWalkTurnAction(input: unknown) {
     const measured = await answerMeasure(ctx, parsed.data.interviewId, parsed.data.said);
     if (measured) return measured;
 
+    /** The rooms, which close the measure-up (X8). Also not the model's. */
+    const roomed = await answerRooms(ctx, parsed.data.interviewId, parsed.data.said);
+    if (roomed) return roomed;
+
     const priced = await answerPrice(ctx, parsed.data.interviewId, parsed.data.said);
     if (priced) return priced;
 
@@ -1278,6 +1401,7 @@ export async function proposeStepAction(input: unknown) {
             .map((c) => ({ code: c.code, name: c.name })),
           /** The building's numbers, the same as the automatic path (X7). */
           measurements: measureLines(asTaken(walk.measurements)),
+          rooms: roomLines(asRoomFacts(walk.rooms)),
         };
       },
       { role: ctx.role },
@@ -1292,6 +1416,7 @@ export async function proposeStepAction(input: unknown) {
       assemblies: gathered.assemblies,
       costCodes: gathered.costCodes,
       measurements: gathered.measurements,
+      rooms: gathered.rooms,
     });
 
     const proposal = await takeProposal({ system });

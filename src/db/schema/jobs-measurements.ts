@@ -46,6 +46,7 @@ import { tenants } from "./platform";
 import { jobProjects } from "./jobs";
 import { jobSheets } from "./jobs-drawings";
 import { jobSheetMarkups } from "./jobs-markups";
+import { jobRooms } from "./jobs-rooms";
 
 /**
  * Where a number came from, which is the same discipline the estimate lines
@@ -84,6 +85,17 @@ export const jobMeasurements = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").notNull(),
+    /**
+     * **THE ROOM THIS IS ABOUT, WHEN IT IS ABOUT ONE** (X8). Null for a
+     * measurement of the whole building — the perimeter, the roof.
+     *
+     * This is what lets a room's floor area be an ordinary measurement
+     * rather than a column on `job_rooms`: the same parser reads it, the
+     * same dialog measures it off a drawing, the same sheet and trace sit
+     * beside it. Adding a room's WALL area later is then a row, not a
+     * migration.
+     */
+    roomId: uuid("room_id"),
     /** As it is written and read: "Wall perimeter", "Roof area". */
     name: text("name").notNull(),
     /** The name reduced to its identity. Unique per project. */
@@ -117,17 +129,31 @@ export const jobMeasurements = pgTable(
   },
   (t) => [
     uniqueIndex("job_measurements_tenant_id_id_idx").on(t.tenantId, t.id),
-    /** ONE VALUE PER NAME PER BUILDING, refused by the database. */
-    uniqueIndex("job_measurements_tenant_project_slug_idx").on(
-      t.tenantId,
-      t.projectId,
-      t.slug,
-    ),
+    /**
+     * **ONE VALUE PER NAME, PER ROOM OR PER BUILDING** — two partial unique
+     * indexes rather than one over four columns, because a plain unique
+     * index treats NULLs as distinct and the building-level rows would have
+     * been free to duplicate. (PG 15's `NULLS NOT DISTINCT` would also do
+     * it; two partial indexes say which case is which, and the pack already
+     * uses the shape for the one-default rule.)
+     */
+    uniqueIndex("job_measurements_tenant_project_slug_idx")
+      .on(t.tenantId, t.projectId, t.slug)
+      .where(sql`${t.roomId} is null`),
+    uniqueIndex("job_measurements_tenant_room_slug_idx")
+      .on(t.tenantId, t.roomId, t.slug)
+      .where(sql`${t.roomId} is not null`),
     index("job_measurements_tenant_project_idx").on(t.tenantId, t.projectId),
     foreignKey({
       name: "job_measurements_project_fk",
       columns: [t.tenantId, t.projectId],
       foreignColumns: [jobProjects.tenantId, jobProjects.id],
+    }).onDelete("cascade"),
+    /** The area belonged to the room; it goes when the room does. */
+    foreignKey({
+      name: "job_measurements_room_fk",
+      columns: [t.tenantId, t.roomId],
+      foreignColumns: [jobRooms.tenantId, jobRooms.id],
     }).onDelete("cascade"),
     foreignKey({
       name: "job_measurements_sheet_fk",

@@ -522,6 +522,7 @@ describe("the building's numbers in the prompt", () => {
     settledHere: [],
     earlier: [],
     projectWord: "Project",
+    rooms: [],
   };
 
   it("puts them in, and tells it they are facts", () => {
@@ -577,6 +578,7 @@ describe("the building's numbers in the proposal prompt", () => {
     answers: [],
     assemblies: [],
     costCodes: [],
+    rooms: [],
   };
 
   it("puts them in as quoted numbers", () => {
@@ -608,5 +610,75 @@ describe("the building's numbers in the proposal prompt", () => {
 
   it("says nothing at all when the building has not been measured", () => {
     expect(proposeSystemPrompt({ ...base, measurements: [] })).not.toContain("MEASURED ON THIS");
+  });
+});
+
+/**
+ * THE ROOMS, IN BOTH PROMPTS (X8).
+ *
+ * The founder: *"then the estimate questions can start asking questions like
+ * what type of flooring in Master bedroom."* The rules below are the two
+ * that stop that being a disaster — one question instead of fifteen, and one
+ * LINE instead of fifteen.
+ */
+describe("the rooms in the prompts", () => {
+  const walkBase = {
+    jobName: "24-109 Barn",
+    estimateNumber: "EST-3",
+    outlineName: "New build",
+    step: step(),
+    stepNumber: 1,
+    stepCount: 10,
+    settledHere: [],
+    earlier: [],
+    projectWord: "Project",
+    measurements: [],
+  };
+  const proposeBase = {
+    projectWord: "Project",
+    jobName: "24-109 Barn",
+    step: step(),
+    answers: [],
+    assemblies: [],
+    costCodes: [],
+    measurements: [],
+  };
+  const rooms = ["Main floor:", "- Kitchen: 310 sf", "Upstairs:", "- Master bath: 62 sf"];
+
+  it("puts the rooms in the walk's prompt", () => {
+    const prompt = walkSystemPrompt({ ...walkBase, rooms });
+    expect(prompt).toContain("THE ROOMS IN IT");
+    expect(prompt).toContain("- Master bath: 62 sf");
+  });
+
+  /**
+   * **THE RULE THAT DECIDES WHETHER THIS FEATURE HELPS OR HURTS.** Fifteen
+   * rooms times five finish categories is seventy-five questions, and the
+   * whole target is a bid in forty-five minutes.
+   */
+  it("tells the walk to ask once and share the answer out", () => {
+    const prompt = walkSystemPrompt({ ...walkBase, rooms });
+    expect(prompt).toContain("ASK ONCE AND SHARE IT OUT");
+    expect(prompt).toContain("Never ask the same question room by room");
+    /** And to name the rooms the answer missed rather than leaving a hole. */
+    expect(prompt).toContain("Any room the answer did not cover");
+  });
+
+  it("puts the rooms in the proposal's prompt too", () => {
+    const prompt = proposeSystemPrompt({ ...proposeBase, rooms });
+    expect(prompt).toContain("THE ROOMS IN IT");
+    expect(prompt).toContain("- Kitchen: 310 sf");
+  });
+
+  /** The same trap one layer down: fifteen flooring lines is not an estimate. */
+  it("tells the proposal one line per finish, not one per room", () => {
+    const prompt = proposeSystemPrompt({ ...proposeBase, rooms });
+    expect(prompt).toContain("ONE LINE PER FINISH, NOT ONE PER ROOM");
+    expect(prompt).toContain("derivedFrom");
+  });
+
+  it("says nothing at all about rooms on a job with none", () => {
+    expect(walkSystemPrompt({ ...walkBase, rooms: [] })).not.toContain("THE ROOMS IN IT");
+    expect(proposeSystemPrompt({ ...proposeBase, rooms: [] })).not.toContain("THE ROOMS IN IT");
   });
 });

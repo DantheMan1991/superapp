@@ -1,0 +1,1 @@
+ALTER TABLE "job_estimate_interviews" ADD COLUMN "rooms_asked_at" timestamp with time zone;

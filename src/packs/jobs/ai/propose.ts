@@ -155,12 +155,21 @@ export function proposeSystemPrompt(input: {
    * of *"Framing labor, 1,216 sf of wall"*.
    */
   measurements: readonly string[];
+  /**
+   * **THE ROOMS IN THE BUILDING** (X8), grouped by floor, with their
+   * floor areas. What turns *"how much flooring?"* into a question
+   * that names a room, and what lets one answer cover a whole floor.
+   */
+  rooms: readonly string[];
 }): string {
   return [
     `You are turning one phase of a ${input.projectWord.toLowerCase()} estimate into lines, from what the estimator just told you. You do not price anything: you say what the lines ARE, and the software puts the money on.`,
     ``,
     `THE ${input.projectWord.toUpperCase()}: ${input.jobName}`,
     `THIS PHASE: ${input.step.title}${input.step.costCode ? ` (cost code ${input.step.costCode})` : ""}`,
+    ...(input.rooms.length > 0
+      ? [``, `THE ROOMS IN IT, with their floor areas:`, ...input.rooms]
+      : []),
     input.measurements.length > 0
       ? [
           ``,
@@ -194,6 +203,7 @@ export function proposeSystemPrompt(input: {
     `1. YOU NEVER PRICE ANYTHING. There is no field for a cost you worked out, and there is no point trying — a figure that is not in what they said is dropped and the line comes out unpriced.`,
     `2. A QUANTITY IS QUOTED OR EXPLAINED. Use the number they gave, or give the arithmetic in derivedFrom. No quantity and no working means leave it out, and the line becomes a lump they can fill in.`,
     `2a. THE MEASUREMENTS ABOVE COUNT AS NUMBERS THEY GAVE. Work from them and put the working in derivedFrom: "perimeter 128 lf x wall height 9.5 = 1,216 sf". A phase that could have been measured and came out a lump is a phase somebody now has to price blind.`,
+    `2b. A FINISH THAT VARIES BY ROOM IS ONE LINE PER FINISH, NOT ONE PER ROOM. Add up the floor areas of the rooms it covers, name those rooms in the description, and put the addition in derivedFrom. Fifteen flooring lines is a bill of materials, not an estimate.`,
     `3. USE AN ASSEMBLY when one of theirs is what the line is. That is how a phase gets priced properly, and it is better than several bare lines.`,
     `4. BID OUT IS ONE LINE. A phase they are subbing is a single lump for the subcontract, not a breakdown of somebody else's work.`,
     // No backtick may appear inside this template literal — the same trap

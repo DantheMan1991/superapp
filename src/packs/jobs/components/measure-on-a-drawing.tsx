@@ -18,8 +18,6 @@ import {
   type MeasurableSheet,
   type MeasurableSheetView,
 } from "../measure-actions";
-import { measureFromSheetAction } from "../walk-actions";
-import type { WalkView } from "../walk-ops";
 import type { MeasureKind } from "../vocabulary";
 
 /**
@@ -45,16 +43,27 @@ import type { MeasureKind } from "../vocabulary";
  * the founder has already had to say this screen felt slow once.
  */
 export function MeasureOnADrawing({
-  interviewId,
   projectId,
   measure,
-  onMeasured,
+  onUse,
+  label = "Measure it on a drawing",
 }: {
-  interviewId: string;
   projectId: string;
   measure: { name: string; unit: string; kind: MeasureKind };
-  /** The fresh walk view, so the screen never has to guess what changed. */
-  onMeasured: (view: WalkView | null, finished: boolean) => void;
+  /**
+   * **WHERE THE NUMBER GOES IS THE CALLER'S BUSINESS.** It used to write
+   * straight to the walk's pending measurement, which meant a second place
+   * that wanted a traced figure — a room's floor area (X8) — would have
+   * needed a second copy of the picker, the viewer and the dialog. Throw
+   * and the dialog stays open with what was drawn still on screen.
+   */
+  onUse: (
+    valueThousandths: number,
+    markupId: string | null,
+    note: string,
+    sheetId: string,
+  ) => Promise<void>;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [sheets, setSheets] = useState<MeasurableSheet[] | null>(null);
@@ -97,26 +106,19 @@ export function MeasureOnADrawing({
   }
 
   function use(valueThousandths: number, markupId: string | null, note: string) {
+    if (!sheet) return;
     startSaving(async () => {
       try {
-        const result = await measureFromSheetAction({
-          interviewId,
+        await onUse(
           valueThousandths,
-          sheetId: sheet?.sheetId ?? "",
-          markupId: markupId ?? undefined,
-          note: `${note}${sheet ? ` · ${sheet.label}` : ""}`.slice(0, 200),
-        });
-        if ("error" in result) {
-          toast.error(result.error);
-          /** The view comes back even on a failure, so the screen stays true. */
-          if (result.view) onMeasured(result.view, false);
-          return;
-        }
+          markupId,
+          `${note} · ${sheet.label}`.slice(0, 200),
+          sheet.sheetId,
+        );
         setOpen(false);
         setSheet(null);
-        onMeasured(result.view ?? null, result.finished);
       } catch {
-        toast.error("That did not get through. Try again.");
+        /** The caller has already said what went wrong; keep what was drawn. */
       }
     });
   }
@@ -124,7 +126,7 @@ export function MeasureOnADrawing({
   return (
     <>
       <Button type="button" variant="outline" size="sm" onClick={openIt}>
-        <Ruler className="mr-1.5 size-4" /> Measure it on a drawing
+        <Ruler className="mr-1.5 size-4" /> {label}
       </Button>
       <Dialog
         open={open}

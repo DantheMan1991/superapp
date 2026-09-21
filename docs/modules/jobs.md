@@ -120,6 +120,90 @@ no equivalent for the editor, so a change here has to be clicked.
 
 ## Build log
 
+### 2026-09-21 — The rooms in the building (`claude/the-rooms`, X8, [ADR 0101](../decisions/0101-a-room-is-a-name-a-floor-and-an-area-and-one-answer-is-shared-out-across-them.md))
+
+The founder, right after X7 merged:
+
+> *"along with the takeoff measurements at the start, you should identify the
+> rooms on every floor... Then the estimate questions can start asking
+> questions like what type of flooring in Master bedroom or what type of
+> shower in master bathroom."*
+
+And, asked what a room has to carry: *"the only reason i said we should
+measure each room is we need to know flooring sq footage."*
+
+**The pack already needed this and was faking it.** `job_selections.location`
+is free text whose own comment says *"The room or area, as the business says
+it: 'Master bath'"* — a string nobody can group by, filter on, or check for
+completeness. Rooms give a concept that has existed since slice 9 a spine.
+
+### A room is a name, a floor and an area
+
+Nothing else. No room type: *Master bath* already tells the walk there is a
+shower in it, the walk reads the names, and a taxonomy is a thing the tenant
+maintains that would be wrong for commercial on day one.
+
+**The area is a `job_measurements` row scoped to the room, not a column.**
+That is X7 paying for itself: a room's area is read by the parser that reads
+`24 x 40` and `38'-6"`, traced with the same *Measure it on a drawing*
+dialog, and carries the same sheet-and-markup provenance. A room's WALL area,
+when paint eventually wants one, is a ROW rather than a migration.
+
+### The decision the feature lives or dies on
+
+Fifteen rooms times five finish categories is seventy-five questions, against
+a target of a bid in forty-five minutes. **The rooms are data the questions
+USE, not a multiplier on how many there are.** Rule 2b in the walk's prompt:
+ask *"what flooring is going where?"* once, say back which room gets what,
+and NAME the rooms the answer did not cover. Rule 2b in the proposal's: one
+line per finish with the rooms' areas added up in `derivedFrom` — fifteen
+flooring lines is a bill of materials.
+
+### Three things found by driving it
+
+- **The rooms question never ran on a building that was already measured.**
+  `askNextMeasure` stamped `measured_at` when the declared list came back
+  empty, so a second estimate on the same job went straight to its first
+  phase. Deciding the measure-up is OVER belongs to the caller, which knows
+  the rooms are still owed.
+- **A room was keyed per building.** A house has a `Bathroom` upstairs and a
+  `Bathroom` on the main floor; 0410 would have refused the second. Corrected
+  by 0412 before the branch left.
+- **`proposeForStep` swallowed every failure in silence**, so a phase that
+  proposed nothing was indistinguishable from a bug in that function — which
+  is exactly where an hour went. It logs now.
+
+### And one that was not mine
+
+Going back into a FINISHED walk and answering a phase records the answers and
+never prices them: `runTurn` returns early on `first.finished`, before the
+money. That is X4/X6 behaviour and the whole point of the reckoning is going
+back into a closed walk, so it is a real gap — spun out rather than widened
+into this branch.
+
+### Driven end to end, on dev
+
+A fresh walk on a job whose building was already measured. It asked for the
+rooms — which is the bug above, fixed — and this went in:
+
+```
+Main floor:            Upstairs:              ---
+Kitchen     310        Master bedroom  14 x 16    Garage  24 x 24
+Great room, 420        Master bath     62
+Dining      280        Bedroom 2       11 x 12
+Powder room  24        Bedroom 3
+Mud room               Hall bath       48
+```
+
+→ **11 rooms, 9 with an area, 2,076 sf in all.** `14 x 16` read as 224, the
+comma and the wide gap both split, `Master bedroom` did NOT split on its
+single space, and *"Could not read 1 line"* named the `---`. Mud room and
+Bedroom 3 came through with no area and an input beside them.
+
+Migrations 0410–0413. Not built: reading the room names off a sheet's text.
+`getTextContent()` is already in the codebase and returns positions, so that
+is a parser, not a model — next slice.
+
 ### 2026-09-20 — The walk measures the house before it prices it (`claude/measure-the-house`, X7, [ADR 0100](../decisions/0100-a-measurement-is-a-fact-about-the-building-not-an-answer-to-a-question.md))
 
 Two asks from the founder, one message apart, and a defect nobody had
@@ -5816,6 +5900,9 @@ not a rendered page**, and this pack cost one browser load to learn it again.
 | `job_estimate_interviews` | **A walk** (X2a, ADR 0098): the estimate being priced by conversation, the outline it is walking, running / finished / abandoned, a bookmark on the current step, and the question on the screen right now (`pending_say`, `pending_question_id`, `pending_quick_replies`) so a refresh loses nothing. `exchanges` and `last_turn_at` are the cap and the cooldown. | FORCE RLS, member-wide — walking an estimate IS the estimating, so unlike the outline it is not owner work. Cascade from the estimate; **NO ACTION to the outline**, so an outline somebody is mid-way through cannot be deleted. `job_estimate_interviews_one_running_idx` is a PARTIAL unique index: one running walk per estimate, because two would each bank answers the other cannot see. CHECK: status on the list, `(status = 'running') = (finished_at is null)` both ways, replies a jsonb array. |
 | `job_estimate_interview_answers` | One thing asked and what came back: the step and question it belongs to, **the words it was asked in**, the answer, or a skip with its reason. | Cascade from the walk. **`step_id` and `question_id` carry NO foreign key** — a transcript is a record of what happened (the lien waiver's rule), and an answer that vanished because somebody tidied the outline would be a record that lies. `question_id` is also null whenever the walk asked something the outline never had, which it is meant to do. CHECK: prompt present, and **a skip is whole or absent** — skipped with a reason and no answer, or neither. |
 | `job_estimate_proposed_lines` | **What a walk works out for a step, before anybody accepts it** (X2b, ADR 0098): the line's words, unit, quantity and unit cost, plus `basis` / `basis_detail` for where the MONEY came from and `quantity_basis` / `quantity_note` for where the QUANTITY did — two different questions. `estimate_line_id` once it is on the estimate. | Cascade from the walk. A table rather than a value in the page because everything else about a walk survives a reload and this would have been the one thing that did not. CHECK: description present, both bases on their lists, nothing negative, **`(quantity_basis = 'derived') = (there is working to show)`** — a derived figure with nothing to show would be the unexplained number the slice refuses — and applied is both halves or neither. |
+| `job_rooms` | **A room in the building** (X8, ADR 0101): name, `slug`, the `level` it is on, sort order, notes. | Hangs off the PROJECT, cascade. **Unique on `(tenant, project, level, slug)` — per FLOOR, not per building**, because a house has a `Bathroom` upstairs and a `Bathroom` downstairs. No room TYPE column on purpose: *Master bath* already tells the walk there is a shower in it, and a taxonomy is a thing the tenant maintains that would be wrong for commercial on day one. Its floor AREA is not here — it is a `job_measurements` row scoped to it, so it is read by the same parser, traced with the same dialog and carries the same provenance, and a room's wall area later is a row rather than a migration. |
+| `job_measurements.room_id` | **The room a measurement is about**, null for the building itself. The unique rule became TWO PARTIAL indexes: keyed on the project `WHERE room_id IS NULL`, keyed on the room where it is not — a plain unique over the nullable column would treat every building-level NULL as distinct and let them duplicate silently. `ON CONFLICT` therefore has to name which index it means, which is why `recordMeasurement` reads as two cases. Cascade from the room: the area belonged to it. |
+| `job_estimate_interviews.rooms_asked_at` | **When the measure-up asked what rooms are in the building** (X8). Stamped when the question is PUT rather than answered — "asked and waiting" and "not asked yet" are otherwise the same three nulls, and the walk would ask twice or never. |
 | `job_estimate_outline_measures` | **What to measure before the questions start** (X7, ADR 0100): the name, the `unit` the answer lands in, the `kind` of takeoff tool it wants (length / area / count), `guidance` in the business's own words, and `required`. | Composite FK to the outline, **cascade** — it is the outline's list, beside the steps and the questions, and **owner work** to edit for the same reason the steps are. CHECK: name present, kind on the list. Unique per `(outline, name)`. The test for belonging on it is whether MORE THAN ONE phase reads the number. |
 | `job_measurements` | **A number about the BUILDING** (X7, ADR 0100): name, `slug`, unit, `value_thousandths`, `source` (measured / said / derived), a note, and `passed_at` for *not on this job*. `sheet_id` / `markup_id` when it was traced. | Hangs off the **PROJECT**, not the estimate and not the walk — a perimeter does not change between revisions, so two walks and three revisions read one row. **Unique on `(tenant, project, slug)`**, which is what makes the name the identity and makes re-measuring a correction. CHECK: name and slug present, source on the list, and **a value OR a pass, never neither**. The two composite FKs are `ON DELETE SET NULL ("sheet_id")` / `("markup_id")` in **PG 15's column-list form** — the bare one drizzle-kit emits can never fire, because it would null `tenant_id`; the trace can go and the number stays, since it was true when it was taken. |
 | `job_estimate_interviews.pending_measure_id` / `.measured_at` | The measurement being asked for right now (so the answer lands on the row whose id was on screen, never on one the model inferred), and **when the walk stopped measuring and started asking**. `measured_at` is STAMPED, not derived: deriving it from "is the list answered" would drop every walk in progress back into measuring the moment somebody added a measurement to the outline. |
@@ -5861,6 +5948,16 @@ ordering only bites when two new tables reference each other in one file.
 
 ## Key files & seams
 
+- `src/packs/jobs/room-math.ts` + `room-ops.ts` + `room-actions.ts` +
+  `components/rooms-dialog.tsx` — **the rooms in the building** (X8, ADR
+  0101). A room is a name, a floor and a floor area, and the area is a
+  measurement scoped to it rather than a column — which is why this is a
+  short file and not a second copy of the one below. `parseRoomList` is
+  where the care is: split on a tab, a comma or a wide gap but **never a
+  single space** (`Master bedroom` would become `Master`), a trailing colon
+  is a floor, and a line whose area will not read keeps the ROOM and drops
+  the number. The two prompt rules that stop fifteen rooms becoming
+  seventy-five questions live in `ai/walk.ts` (2b) and `ai/propose.ts` (2b).
 - `src/packs/jobs/measure-math.ts` + `measure-ops.ts` + `walk-measure-ops.ts`
   + `measure-actions.ts` + `components/measure-on-a-drawing.tsx` +
   `components/outline-measures.tsx` — **measuring the building before pricing

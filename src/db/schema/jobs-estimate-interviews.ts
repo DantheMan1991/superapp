@@ -132,6 +132,21 @@ export const jobEstimateInterviews = pgTable(
      * answered, and stamped straight away on an outline that asks for none.
      */
     measuredAt: timestamp("measured_at", { withTimezone: true }),
+    /**
+     * WHEN THE WALK ASKED FOR THE ROOMS (X8).
+     *
+     * The measure-up ends by asking what rooms are in the building, because
+     * the founder wanted them gathered with the other numbers: *"along with
+     * the takeoff measurements at the start, you should identify the rooms
+     * on every floor."*
+     *
+     * Its own column rather than inferred from "measured_at is null and no
+     * measurement is pending" — that inference is true in two other states
+     * as well, including an outline that declares no measurements at all,
+     * and the walk would have asked for rooms twice or never depending on
+     * which. `measured_at` is stamped for the same reason.
+     */
+    roomsAskedAt: timestamp("rooms_asked_at", { withTimezone: true }),
     startedByClerkUserId: text("started_by_clerk_user_id"),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     /**

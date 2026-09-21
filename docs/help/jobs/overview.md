@@ -1292,14 +1292,42 @@ The sentence again at the top and {button:Add a set|primary}. Then three panels.
 
 | Column | What it is |
 | --- | --- |
-| `Page` | The tick — ticked when the page is a sheet — a small picture of the page, the page number and why the row reads as it does: `read off the title block`, `no number found` (unticked; tick it and type the number if it is a sheet), `no text on the page` (a scanned set: read the number off the picture and type it). |
+| `Page` | The tick — ticked when the page is a sheet — a small picture of the page, the page number and why the row reads as it does: `read off the title block`, `no number found` (unticked; tick it and type the number if it is a sheet), `no text on the page` (a scanned set: read the number off the page and type it). **Click the picture to open the page full screen** — see below. |
 | `Sheet` | The sheet number, read off the title block. Typed lower case is saved upper case. A number on two ticked pages is marked `Twice in this set.` and the save waits. |
 | `Title` | The title, read off the title block in sentence case. Fix it or leave it. |
 | `Rev` | The revision mark on the sheet, if it has one: `2`, `B`, `ASI-3`. |
 
 The line above the table counts the pages, the ticked rows and any ticked without a number. {button:Save 38 sheets|primary} stores what you confirmed — `38 sheets on the job` — and the page shows them. A page you leave unticked (the cover, a legend) is simply not a sheet.
 
-The reading is a rule, not a guess at meaning: the sheet number is the number-shaped text nearest the bottom-right corner of the page, where every title block puts it, and the title is the biggest other text in that corner that is not a label, a date or a scale. A set laid out unusually gets its numbers typed; the pictures are there for that.
+The reading is a rule, not a guess at meaning: the sheet number is the number-shaped text nearest the bottom-right corner of the page, where every title block puts it, and the title is the biggest other text in that corner that is not a label, a date or a scale. A set laid out unusually gets its numbers typed, and the page below is how you read them.
+
+#### Looking at a page
+
+**Click any page's picture in the table** and that page opens full screen, drawn
+from the PDF itself rather than blown up from the little picture — so the title
+block is as readable as it is on paper. Use it whenever the reading came back
+empty, or you want to check what a page actually is before ticking it.
+
+Along the top:
+
+- {button:Title block|secondary} jumps to the bottom-right corner at 4×, which
+  is where the sheet number and title are on virtually every set. This is the
+  one to press; it usually answers the question on its own.
+- **← and →**, or the arrows on your keyboard, walk to the previous and next
+  page without closing anything.
+- {button:−|outline} and {button:+|outline} zoom between 1× and 8×, and
+  **ctrl+wheel** zooms about the pointer. **Drag the page** to move about.
+- {button:✕|outline}, or **Esc**, closes the page and puts you back in the
+  table. The table is still exactly where it was — nothing is lost.
+
+Under that are the same three boxes as the row — `Sheet`, `Title`, `Rev` —
+plus the tick for whether the page is a sheet, **so you type what you are
+reading without closing the page**. Press **Enter** in `Sheet` or `Title` and
+it saves and moves to the next page, which is the whole loop on a set that has
+to be typed: read the corner, type the number, Enter, again.
+
+Everything you type here is in the table when you close it, and the
+{button:Save 38 sheets|primary} button still does the saving.
 
 ### A set's row
 

@@ -126,6 +126,96 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — A page you can actually read (`claude/reading-the-sheet-titles`)
+
+The founder, having uploaded a real set: *"It did a really bad job of reading
+sheet names and numbers. It only read maybe 10% of them. Also, the thumbnails
+should be able to be clicked on and expanded so I can manually read the
+drawing name or number."*
+
+**TWO HALVES, AND ONLY ONE OF THEM CAN BE BUILT WITHOUT HIS FILE.** This
+entry is the second half. The reading itself is deliberately untouched — see
+*What is NOT fixed here* below.
+
+**A THUMBNAIL CANNOT BE ENLARGED INTO AN ANSWER.** The index's picture is a
+168px JPEG; scaling it up gives a blur, not a sheet number. `PageLoupe` draws
+the page again from the PDF at up to 8×, with a **`Title block`** button that
+goes straight to the bottom-right corner at 4× — where every convention puts
+the number, so on a set the reader missed it is two clicks from the row to the
+answer.
+
+**AND IT IS A PLACE TO TYPE.** Reading the number is half the job. The
+`Sheet`, `Title` and `Rev` boxes and the is-it-a-sheet tick are in the loupe,
+Enter saves and moves to the next page, and the arrows walk the set — so
+forty numbers is one pass rather than forty open-close-type rounds. That is
+the difference between a viewer and the thing the complaint asked for.
+
+**THE BYTES GO WITH THE READ** rather than the file being fetched again: the
+browser had them a second ago, and a 50MB set downloaded per look is the slow
+way round. `readPdf` hands its own COPY to pdf.js for the reason below.
+
+### Three things found by clicking it, none of which any test would have
+
+- **pdf.js DETACHES the array it is given.** `getDocument({ data })`
+  transfers the buffer to its worker, so the caller's `Uint8Array` comes back
+  detached and every later read throws *"Cannot perform Construct on a
+  detached or out-of-bounds ArrayBuffer"*. That cost nothing while `readPdf`
+  threw the bytes away, and everything the moment the index kept them.
+  `readPdf` now passes a copy. **This is a defect in the read path, not in
+  the loupe** — anything that wanted those bytes would have hit it.
+- **`position: fixed` inside a dialog is not fixed to the viewport.** The
+  panel is placed with the CSS `translate` property, which makes it the
+  containing block for anything fixed inside it: the loupe laid itself out
+  inside the dialog's box and was clipped by its scroll — in the DOM,
+  measurable at 768×660, and invisible. It is portalled to `document.body`.
+  Same family as [[breakpoints-cannot-see-the-layout]]'s traps.
+- **Escape closed the whole index.** Radix closes a dialog on Escape from its
+  own document listener, so one press shut the loupe AND threw away every
+  number typed into the table. The handler is in the CAPTURE phase and stops
+  the key.
+
+And one that looked right and was not: **`Title block` set the zoom and
+scrolled on the next frame**, before React had re-rendered, so it scrolled to
+the far edge of a 1× page and the canvas then grew underneath it. Nothing
+errored; the button simply did nothing. The scroll is consumed by the render
+effect once the canvas has its size.
+
+### What is NOT fixed here, and why
+
+**The reading.** `guessSheet` is a heuristic over a real title block, and
+**every test it has is synthetic** — hand-built `PageText` runs in
+`tests/jobs-drawings.test.ts`. A stand-in set built for this slice (landscape
+ARCH-D, right-edge title block, a cover with an index) reads **7 of 7**, and
+his real set reads about one in ten. So the tests pass, a clean file passes,
+and the thing that fails is whatever real sets do that neither does — which
+no amount of reasoning about the regex will name. Changing the heuristic
+against another synthetic file is the mistake [[synthetic-page-confirmed-a-wrong-fix]]
+already paid for.
+
+**Nothing of his upload survived to look at.** Neither database has a drawing
+set beyond the seeded two, and the largest PDF in the dev cabinet is 0.1MB —
+the index was abandoned before saving, which is what a set needing 90% typed
+would produce. (The first check said zero sets on both and was WRONG: it ran
+as `app_user` with no tenant context, so RLS returned nothing. Re-run as the
+owner it says two, seeded. A count of zero from the app role is not evidence
+of anything.)
+
+**There is an instrument waiting for the file.** A script mirroring
+`pdf-reading.ts`'s coordinate mapping exactly and calling the real
+`guessSheet` prints, per page, what was proposed, why it failed, and the
+dozen lines nearest the bottom-right corner with their scores. One command
+over his PDF names the cause.
+
+### Driven end to end, on dev
+
+On 24-109, a set added, the file read into 7 pages, the page 4 picture
+clicked: the page drawn full screen, {button:Title block} landing on
+`SHEET TITLE / EXTERIOR ELEVATIONS` and `SHEET NO. / A-201` large enough to
+read, `A-102B` typed into the loupe and present in the table row after Esc,
+Enter walking from page 4 to page 5. The same at 375px, where the toolbar
+wraps to two rows and the corner still lands. The trial set was removed
+afterwards.
+
 ### 2026-09-21 — Don't ask what never varies (`claude/dont-ask-what-never-varies`, X13, [ADR 0105](../decisions/0105-a-question-can-carry-the-answer-this-business-always-gives-and-the-walk-states-them-all-before-it-takes-any.md))
 
 > *"i'd say 80/20 standard vs custom."*
@@ -2139,6 +2229,15 @@ ordering only bites when two new tables reference each other in one file.
   sides, the revision cloud as `cloudPath`, a pin's punch item through the
   field slice's own `addPunchItem`, and the viewer's SVG over the canvas in
   the page's own units.
+- `src/packs/jobs/components/page-loupe.tsx` — **one page, big enough to read
+  the title block off**. Drawn from the PDF at up to 8×, `Title block` going
+  to the bottom-right corner at 4×, and the `Sheet`/`Title`/`Rev` boxes in it
+  so a set the reader could not make sense of is still one pass. Mirrors
+  `sheet-viewer.tsx`'s rendering deliberately (whole page, one canvas at
+  `boxWidth * zoom`, `PIXEL_CAP`, ctrl+wheel and drag). **Portalled to the
+  body** — a dialog's `translate` makes it the containing block for anything
+  `fixed` — and its Escape is caught in the capture phase so it does not
+  close the index behind it.
 - `src/packs/jobs/drawings-ops.ts` + `drawings-math.ts` — the sets and sheets
   (ADR 0072): the file is Documents' (`registerAttachedFile` with
   `docKind: "drawing"`, `attachDocumentToRecord`), the pack keeps which page

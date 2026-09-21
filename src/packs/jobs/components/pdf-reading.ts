@@ -32,7 +32,15 @@ const THUMBNAIL_WIDTH = 168;
  */
 export async function readPdf(bytes: Uint8Array, onProgress?: (done: number, total: number) => void): Promise<ReadPdf> {
   const lib = await loadPdfjs();
-  const task = lib.getDocument({ data: bytes });
+  /**
+   * **pdf.js IS GIVEN A COPY, BECAUSE IT KEEPS WHAT IT IS GIVEN.** The array
+   * is transferred to the worker, which leaves the CALLER's buffer detached —
+   * every later read of it throws *"Cannot perform Construct on a detached or
+   * out-of-bounds ArrayBuffer"*. That cost nothing while the bytes were
+   * thrown away here, and everything the moment the index kept them to draw
+   * a page from. One copy, and the file the person picked is still a file.
+   */
+  const task = lib.getDocument({ data: new Uint8Array(bytes) });
   const doc = await task.promise;
   const pages: ReadPage[] = [];
   try {

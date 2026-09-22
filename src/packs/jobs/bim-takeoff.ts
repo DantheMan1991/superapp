@@ -118,6 +118,22 @@ export function countColumnOf(columns: readonly ScheduleColumn[]): ScheduleColum
 }
 
 /**
+ * **A FRAMING MEMBER IS NAMED BY ITS TYPE AND ITS CUT LENGTH** (X16). Forty-six
+ * 2x10s at 14' and twelve at 12' are two things on a lumber list, not one
+ * 2x10 with a total length, so a framing schedule — a *Count* column beside
+ * a *Cut Length* — is named by both columns unless the person says
+ * otherwise. Any other schedule is named by one.
+ */
+export function alsoColumnDefault(columns: readonly ScheduleColumn[]): ScheduleColumn | null {
+  if (!countColumnOf(columns)) return null;
+  return (
+    columns.find(
+      (c) => c.kind === "quantity" && c.dimension === "length" && normal(c.header) === "cut length",
+    ) ?? null
+  );
+}
+
+/**
  * THE SCHEDULE AS THINGS WITH QUANTITIES.
  *
  * Rows sharing a name are one thing, in the order first seen, every quantity
@@ -136,6 +152,8 @@ export function takeoffRows(
   columns: readonly ScheduleColumn[],
   rows: readonly ScheduleRow[],
   keyIndex: number,
+  /** A second column that splits a name — a member's cut length (X16). */
+  alsoIndex: number | null = null,
 ): { rows: TakeoffRow[]; unnamed: number } {
   const count = countColumnOf(columns);
   const quantityColumns = columns.filter(
@@ -144,12 +162,14 @@ export function takeoffRows(
   const out = new Map<string, TakeoffRow>();
   let unnamed = 0;
   for (const row of rows) {
-    const key = (row.cells[keyIndex] ?? "").trim();
-    const slug = keySlug(key);
-    if (slug === "") {
+    const name = (row.cells[keyIndex] ?? "").trim();
+    if (keySlug(name) === "") {
       unnamed += 1;
       continue;
     }
+    const more = alsoIndex === null ? "" : (row.cells[alsoIndex] ?? "").trim();
+    const key = more === "" ? name : `${name} · ${more}`;
+    const slug = keySlug(key);
     let group = out.get(slug);
     if (!group) {
       group = {

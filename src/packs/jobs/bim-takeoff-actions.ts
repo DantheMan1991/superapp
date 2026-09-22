@@ -46,6 +46,9 @@ const textSchema = z.object({
   projectId: z.string().uuid(),
   text: z.string().min(1).max(MAX_SCHEDULE_CHARS),
   fileName: z.string().trim().max(200).default(""),
+  /** The column that names things, and the one that splits a name; -1 for none (X16). */
+  keyBy: z.number().int().min(0).max(500).optional(),
+  alsoBy: z.number().int().min(-1).max(500).optional(),
 });
 
 export async function previewTakeoffAction(
@@ -57,7 +60,11 @@ export async function previewTakeoffAction(
     const ctx = await gate();
     const preview = await withTenant(
       ctx.tenantId,
-      (tx) => previewTakeoff(tx, ctx.tenantId, parsed.data.text, parsed.data.fileName),
+      (tx) =>
+        previewTakeoff(tx, ctx.tenantId, parsed.data.text, parsed.data.fileName, {
+          keyBy: parsed.data.keyBy,
+          alsoBy: parsed.data.alsoBy,
+        }),
       { role: ctx.role },
     );
     return { ok: true as const, preview };
@@ -94,6 +101,7 @@ export async function takeoffFromModelAction(
           text: parsed.data.text,
           fileName: parsed.data.fileName,
           choices: parsed.data.choices,
+          named: { keyBy: parsed.data.keyBy, alsoBy: parsed.data.alsoBy },
         }),
       { role: ctx.role },
     );

@@ -156,7 +156,7 @@ import {
 } from "../src/packs/jobs/drawings-ops";
 import { attachDocumentToRecord } from "../src/modules/documents/attachments";
 import { addMarkup, deleteMarkup, listMarkups, markupCounts, updateMarkup } from "../src/packs/jobs/markups-ops";
-import { clearSheetScale, measurementOf, measurementsBehind, pushTakeoff, scaleOf, setSheetScale, standBehind, unpushTakeoff } from "../src/packs/jobs/takeoff-ops";
+import { clearSheetScale, measurementOf, measurementsBehind, pushTakeoff, scaleOf, setSheetScale, standBehind, unpushTakeoff, yieldsOfMarkup } from "../src/packs/jobs/takeoff-ops";
 import { loadChangeOrderPaper, loadOrderPaper } from "../src/packs/jobs/paper";
 import { buildChangeOrderPaper, buildOrderPaper } from "../src/packs/jobs/paper-model";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
@@ -5053,9 +5053,9 @@ d("jobs ops", () => {
     // The claim spans sheets and writes the LINK only: the line's quantity and the estimate's version do not move.
     const stood = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [down.id, up.id] }));
     expect([stood.quantityThousandths, stood.unit, stood.kind]).toEqual([93_500 + 37_400, "sf", "area"]);
-    expect(stood.behind?.sheets.map((s) => [s.sheetNumber, s.traces, s.shareThousandths, s.nowThousandths, s.drifted, s.isCurrent, s.markupIds])).toEqual([
-      ["A-101", 1, 93_500, 93_500, false, true, [down.id]],
-      ["A-102", 1, 37_400, 37_400, false, true, [up.id]],
+    expect(stood.behind?.sheets.map((s) => [s.sheetNumber, s.traces, s.shareThousandths, s.nowThousandths, s.drifted, s.isCurrent, s.picks])).toEqual([
+      ["A-101", 1, 93_500, 93_500, false, true, [{ markupId: down.id, figure: "area" }]],
+      ["A-102", 1, 37_400, 37_400, false, true, [{ markupId: up.id, figure: "area" }]],
     ]);
     const after = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!;
     expect([after.estimate.version, after.lines.find((l) => l.id === flooring.id)!.quantityThousandths, after.lines.find((l) => l.id === flooring.id)!.unit]).toEqual([est.version, 1000, ""]);
@@ -5114,6 +5114,128 @@ d("jobs ops", () => {
     expect(again.groupRefs).toEqual({ [saved.groupRefs.g1]: saved.groupRefs.g1 });
   });
 
+  it("A TRACE YIELDS THE FIGURES THE TRADE DERIVES FROM IT (ADR 0110): an opening comes off an area, the run around it is a length, a height stands a wall, a pitch makes a roof, a depth fills a volume; each figure stands behind a line of its own, so one room feeds four lines; the reverse link reads by figure; a figure a trace does not yield refuses by name; and the old columns stay unwritten", async () => {
+    const entity = await newCompany("Takeoff Co 3");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK4", name: "One room, four lines" }));
+    const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
+    const pdf = await run(async (tx) => {
+      const rows = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          blobPathname: `docs/${tenantId}/files/${STAMP}-one-room.pdf`,
+          fileName: "one-room.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-sha-one-room`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId: pdf, target: setTarget(set.id), makePrimary: false }));
+    const [a101] = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 1, sheetNumber: "A-101", title: "First floor" }] }));
+    const draw = (input: Parameters<typeof addMarkup>[2]) => run((tx) => addMarkup(tx, staffCtx, input));
+    const page = { pageWidthPt: 792, pageHeightPt: 612 };
+    await run((tx) => setSheetScale(tx, staffCtx, a101.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 11, unit: "ft", ...page }));
+    const room = await draw({ sheetId: a101.id, kind: "area", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] }, text: "Bedroom 2" });
+    const wall = await draw({ sheetId: a101.id, kind: "length", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }] }, text: "North wall" });
+    const cloud = await draw({ sheetId: a101.id, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
+    // Nothing typed on them yet: the room yields its area and the run around it, the wall its length; a cloud carries no figures at all.
+    let sheet = (await run((tx) => getSheet(tx, tenantId, a101.id)))!;
+    expect(yieldsOfMarkup(room, scaleOf(sheet)).map((y) => [y.figure, y.measurement.quantity])).toEqual([["area", 93.5], ["perimeter", 39]]);
+    await expect(run((tx) => updateMarkup(tx, staffCtx, cloud.id, { figures: { pitch: { rise: 6 } } }))).rejects.toMatchObject({ code: "INVALID_KIND" });
+    // A pitch, a depth and an opening typed onto the room; a height onto the wall. Read tolerantly: a depth in furlongs is dropped, not guessed at.
+    const opening = [{ x: 0.3, y: 0.3 }, { x: 0.35, y: 0.3 }, { x: 0.35, y: 0.35 }, { x: 0.3, y: 0.35 }];
+    const roomNow = await run((tx) => updateMarkup(tx, staffCtx, room.id, { figures: { pitch: { rise: 6 }, depth: { value: 4, unit: "in" }, deducts: [opening], nonsense: { value: 1, unit: "furlong" } } }));
+    expect(roomNow.figures).toEqual({ pitch: { rise: 6 }, depth: { value: 4, unit: "in" }, deducts: [opening] });
+    const wallNow = await run((tx) => updateMarkup(tx, staffCtx, wall.id, { figures: { height: { value: 9, unit: "ft" } } }));
+    expect(wallNow.figures).toEqual({ height: { value: 9, unit: "ft" } });
+    const roomYields = yieldsOfMarkup(roomNow, scaleOf(sheet));
+    expect(roomYields.map((y) => y.figure)).toEqual(["area", "perimeter", "roof", "volume"]);
+    expect(roomYields[0].measurement.quantity).toBeCloseTo(89.76, 6);
+    expect(yieldsOfMarkup(wallNow, scaleOf(sheet)).map((y) => [y.figure, y.measurement.quantity])).toEqual([["length", 11], ["wall", 99]]);
+
+    // Five lines, and the one room stands behind four of them by four different figures; the wall behind the drywall by the wall it stands.
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-TK4",
+        lines: [
+          { description: "Flooring", unit: "sf" },
+          { description: "Baseboard", unit: "lf" },
+          { description: "Drywall", unit: "sf" },
+          { description: "Slab", unit: "cy" },
+          { description: "Roofing", unit: "sf" },
+        ],
+      }),
+    );
+    const lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    const line = (description: string) => lines.find((l) => l.description === description)!;
+    const flooring = await run((tx) => standBehind(tx, staffCtx, { lineId: line("Flooring").id, picks: [{ markupId: room.id, figure: "area" }] }));
+    const baseboard = await run((tx) => standBehind(tx, staffCtx, { lineId: line("Baseboard").id, picks: [{ markupId: room.id, figure: "perimeter" }] }));
+    const drywall = await run((tx) => standBehind(tx, staffCtx, { lineId: line("Drywall").id, picks: [{ markupId: wall.id, figure: "wall" }] }));
+    const slab = await run((tx) => standBehind(tx, staffCtx, { lineId: line("Slab").id, picks: [{ markupId: room.id, figure: "volume" }] }));
+    const roofing = await run((tx) => standBehind(tx, staffCtx, { lineId: line("Roofing").id, picks: [{ markupId: room.id, figure: "roof" }] }));
+    expect([flooring, baseboard, drywall, slab, roofing].map((r) => [r.quantityThousandths, r.unit, r.kind])).toEqual([
+      [89_760, "sf", "area"],
+      [39_000, "lf", "length"],
+      [99_000, "sf", "area"],
+      [1_108, "cy", "volume"],
+      [100_355, "sf", "area"],
+    ]);
+    let rows = await run((tx) => listMarkups(tx, tenantId, a101.id));
+    const behindRoom = rows.find((r) => r.markup.id === room.id)!.takeoffs;
+    expect(behindRoom.map((t) => [t.lineDescription, t.figure, t.shareThousandths]).sort()).toEqual([
+      ["Baseboard", "perimeter", 39_000],
+      ["Flooring", "area", 89_760],
+      ["Roofing", "roof", 100_355],
+      ["Slab", "volume", 1_108],
+    ]);
+    expect(rows.find((r) => r.markup.id === wall.id)!.takeoffs.map((t) => [t.lineDescription, t.figure])).toEqual([["Drywall", "wall"]]);
+    // The old columns stay unwritten.
+    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths]).toEqual([null, null]);
+
+    // A figure a trace does not yield refuses by name; families never mix; the old id-only shape still means the trace's own figure.
+    await expect(run((tx) => standBehind(tx, staffCtx, { lineId: line("Slab").id, picks: [{ markupId: wall.id, figure: "volume" }] }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("North wall cannot stand as as a volume: only an area fills a volume"),
+    });
+    await expect(run((tx) => standBehind(tx, staffCtx, { lineId: line("Drywall").id, picks: [{ markupId: room.id, figure: "wall" }] }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("only a length stands a wall"),
+    });
+    await expect(run((tx) => standBehind(tx, staffCtx, { lineId: line("Flooring").id, picks: [{ markupId: room.id, figure: "area" }, { markupId: room.id, figure: "perimeter" }] }))).rejects.toMatchObject({
+      code: "INVALID_VALUE",
+      message: expect.stringContaining("cannot go onto one line together"),
+    });
+    const plain = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [wall.id], newLine: { description: "Top plate" } }));
+    expect([plain.quantityThousandths, plain.unit, plain.kind]).toEqual([11_000, "lf", "length"]);
+
+    // The reverse link reads by figure: the baseboard is a LENGTH line with 39 lf behind it, off the same trace as the flooring.
+    let behind = await run((tx) => measurementsBehind(tx, tenantId, est.id));
+    expect(behind.size).toBe(6);
+    expect([behind.get(line("Baseboard").id)!.kind, behind.get(line("Baseboard").id)!.unit, behind.get(line("Baseboard").id)!.shareThousandths]).toEqual(["length", "lf", 39_000]);
+    expect(behind.get(line("Slab").id)!.sheets[0].picks).toEqual([{ markupId: room.id, figure: "volume" }]);
+    // One link let go leaves the others: the room still stands behind three lines.
+    await run((tx) => unpushTakeoff(tx, staffCtx, { markupId: room.id, lineId: line("Baseboard").id, figure: "perimeter" }));
+    rows = await run((tx) => listMarkups(tx, tenantId, a101.id));
+    expect(rows.find((r) => r.markup.id === room.id)!.takeoffs.map((t) => t.figure).sort()).toEqual(["area", "roof", "volume"]);
+    expect((await run((tx) => measurementsBehind(tx, tenantId, est.id))).has(line("Baseboard").id)).toBe(false);
+    // The opening taken back out: the area the room yields grows, and every figure standing on it reads as measured since.
+    await run((tx) => updateMarkup(tx, staffCtx, room.id, { figures: { pitch: { rise: 6 }, depth: { value: 4, unit: "in" } } }));
+    behind = await run((tx) => measurementsBehind(tx, tenantId, est.id));
+    expect([behind.get(line("Flooring").id)!.drifted, behind.get(line("Flooring").id)!.shareThousandths, behind.get(line("Flooring").id)!.nowThousandths]).toEqual([true, 89_760, 93_500]);
+    expect(behind.get(line("Slab").id)!.drifted).toBe(true);
+    // The trace rubbed out takes its links with it (cascade); the lines keep their quantities.
+    await run((tx) => deleteMarkup(tx, staffCtx, room.id));
+    behind = await run((tx) => measurementsBehind(tx, tenantId, est.id));
+    expect([...behind.keys()].map((id) => lines.find((l) => l.id === id)?.description ?? "Top plate").sort()).toEqual(["Drywall", "Top plate"]);
+    sheet = (await run((tx) => getSheet(tx, tenantId, a101.id)))!;
+    expect(sheet.id).toBe(a101.id);
+  });
+
   it("THE TAKEOFF: the scale is the sheet's, set from a known dimension or the title block; a length, an area and a count are markups with points that read through it; a push puts the total onto an estimate line, new or existing, and the measurement remembers the line; an accepted estimate refuses; a line taken off the estimate leaves the measurement; a file read again keeps the sheet, its scale and its markups", async () => {
     const entity = await newCompany("Takeoff Co 1");
     const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK1", name: "Measured" }));
@@ -5165,10 +5287,10 @@ d("jobs ops", () => {
     expect(measurementOf(room, scale)?.quantity).toBeCloseTo(93.5, 9);
     // The list carries no line yet.
     let rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    expect(rows.map((r) => [r.markup.kind, r.takeoff])).toEqual([
-      ["count", null],
-      ["length", null],
-      ["area", null],
+    expect(rows.map((r) => [r.markup.kind, r.takeoffs])).toEqual([
+      ["count", []],
+      ["length", []],
+      ["area", []],
     ]);
 
     // An estimate to push onto, and the pushes.
@@ -5186,7 +5308,7 @@ d("jobs ops", () => {
     const onto = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [walls.id], lineId: baseboard.id }));
     expect([onto.lineId, onto.quantityThousandths, onto.unit]).toEqual([baseboard.id, 19_500, "lf"]);
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    expect(rows.map((r) => [r.markup.kind, r.markup.pushedQuantityThousandths, r.takeoff?.estimateNumber ?? null, r.takeoff?.lineDescription ?? null, r.takeoff?.lineQuantityThousandths ?? null])).toEqual([
+    expect(rows.map((r) => [r.markup.kind, r.takeoffs[0]?.shareThousandths ?? null, r.takeoffs[0]?.estimateNumber ?? null, r.takeoffs[0]?.lineDescription ?? null, r.takeoffs[0]?.lineQuantityThousandths ?? null])).toEqual([
       ["count", null, null, null, null],
       ["length", 19_500, "EST-TK1", "Baseboard", 19_500],
       ["area", 93_500, "EST-TK1", "Flooring, kitchen", 93_500],
@@ -5200,7 +5322,7 @@ d("jobs ops", () => {
     expect(
       [room.id, hall.id]
         .map((id) => rows.find((r) => r.markup.id === id)!)
-        .map((r) => [r.markup.pushedQuantityThousandths, r.takeoff?.lineId ?? null, r.takeoff?.lineQuantityThousandths ?? null]),
+        .map((r) => [r.takeoffs[0]?.shareThousandths ?? null, r.takeoffs[0]?.lineId ?? null, r.takeoffs[0]?.lineQuantityThousandths ?? null]),
     ).toEqual([
       [93_500, pushed.lineId, 130_900],
       [37_400, pushed.lineId, 130_900],
@@ -5211,8 +5333,8 @@ d("jobs ops", () => {
     // A push is a statement: the hall taken out of the flooring line leaves the room standing behind it alone.
     await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], lineId: pushed.lineId }));
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    expect(rows.find((r) => r.markup.id === hall.id)!.takeoff).toBeNull();
-    expect(rows.find((r) => r.markup.id === room.id)!.takeoff?.lineQuantityThousandths).toBe(93_500);
+    expect(rows.find((r) => r.markup.id === hall.id)!.takeoffs).toEqual([]);
+    expect(rows.find((r) => r.markup.id === room.id)!.takeoffs[0]?.lineQuantityThousandths).toBe(93_500);
     // The line's unit is the measurement's or nothing: an area onto the baseboard (lf) refuses by name, a length onto the tile (sq. ft.) refuses,
     // a new line asked for in the wrong unit refuses; an area onto the tile is taken however the unit is spelled, and the spelling is kept.
     const tile = lines.find((l) => l.description === "Tile")!;
@@ -5235,7 +5357,7 @@ d("jobs ops", () => {
     // Unpushed: the line keeps its quantity, the measurement stops claiming it.
     await run((tx) => unpushTakeoff(tx, staffCtx, count.id));
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    expect(rows.find((r) => r.markup.id === count.id)!.takeoff).toBeNull();
+    expect(rows.find((r) => r.markup.id === count.id)!.takeoffs).toEqual([]);
     lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
     expect(lines.find((l) => l.description === "Recessed cans")?.quantityThousandths).toBe(3_000);
     // A line taken off the estimate leaves the measurement, unpushed, by the key that sets null.
@@ -5243,7 +5365,8 @@ d("jobs ops", () => {
     const estNow = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.estimate;
     await run((tx) => updateEstimate(tx, staffCtx, est.id, { version: estNow.version, lines: kept }));
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths, rows.find((r) => r.markup.id === room.id)!.takeoff]).toEqual([null, 93_500, null]);
+    // The link went with the line (cascade, ADR 0110); the two columns the link used to live in are no longer written at all.
+    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths, rows.find((r) => r.markup.id === room.id)!.takeoffs]).toEqual([null, null, []]);
     // An accepted estimate refuses a push: its quantities are the agreement.
     const contract = await run((tx) => createContract(tx, ctx, { projectId: project.id, kind: "construction", role: "prime" }));
     await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));

@@ -7,6 +7,7 @@ import {
   ArrowRightToLine,
   Check,
   Cloud,
+  Scissors,
   Hand,
   Hash,
   Loader2,
@@ -42,19 +43,39 @@ import {
 } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
 import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
-import { STANDARD_SCALES, driftedSince, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, unitAccepts, type Measurement, type SheetScale, type SheetShare } from "../takeoff-math";
 import {
+  STANDARD_SCALES,
+  driftedSince,
+  formatMeasure,
+  matchingStandard,
+  measure,
+  sumMeasurements,
+  takeoffUnitFor,
+  toThousandths,
+  unitAccepts,
+  yieldsOf,
+  type Measurement,
+  type SheetScale,
+  type SheetShare,
+  type TraceFigures,
+  type Yield,
+} from "../takeoff-math";
+import {
+  FIGURE_FAMILY,
   MARKUP_COLORS,
   MARKUP_COLOR_HEX,
   MARKUP_COLOR_LABELS,
   MARKUP_KIND_LABELS,
   MEASURE_POINTS_MAX,
   SCALE_UNITS,
+  TRACE_FIGURE_LABELS,
   isMeasureKind,
+  type FigureFamily,
   type MarkupColor,
   type MarkupKind,
   type MeasureKind,
   type ScaleUnit,
+  type TraceFigure,
 } from "../vocabulary";
 import { StatusBadge } from "./status-badge";
 
@@ -77,9 +98,24 @@ export interface MarkupView {
   createdBy: string;
   workItemId: string | null;
   punch: { title: string; done: boolean; dueOn: string | null } | null;
-  /** The estimate line a measurement was pushed onto, as it stands now (ADR 0074). */
-  takeoff: { estimateId: string; lineId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
-  pushedQuantityThousandths: number | null;
+  /** Every estimate line this trace stands behind, by which of its figures, as the estimate has them now (ADR 0074, 0110). */
+  takeoffs: TakeoffLinkView[];
+  /** What was typed onto the trace besides its points (ADR 0110), read tolerantly. */
+  figures: TraceFigures;
+}
+
+/** One line a trace stands behind, by one of its figures. */
+export interface TakeoffLinkView {
+  lineId: string;
+  figure: TraceFigure;
+  /** What this figure of this trace came to when it was pushed, in thousandths of the line's unit. */
+  shareThousandths: number;
+  estimateId: string;
+  estimateNumber: string;
+  estimateStatus: string;
+  lineDescription: string;
+  lineUnit: string;
+  lineQuantityThousandths: number;
 }
 
 export interface EstimateOption {
@@ -104,11 +140,18 @@ export interface EstimateOption {
  * the ticks and hands over each trace's quantity as it is ticked or drawn.
  */
 export interface MeasuringLine {
-  kind: MeasureKind;
+  /** What kind of figure the line wants: a length, an area, a count or a volume — a trace offers every figure it yields of that family (ADR 0110). */
+  family: FigureFamily;
   description: string;
+  /** `${markupId}:${figure}` for every figure ticked, across sheets. */
   selected: ReadonlySet<string>;
-  onToggle: (markupId: string, on: boolean, quantityThousandths: number) => void;
+  onToggle: (markupId: string, figure: TraceFigure, on: boolean, quantityThousandths: number) => void;
   busy: boolean;
+}
+
+/** The words for a family of figure: "an area", "a volume". */
+function familyWords(family: FigureFamily): string {
+  return family === "count" ? "a count" : family === "area" ? "an area" : family === "volume" ? "a volume (an area with a depth typed on it)" : "a length";
 }
 
 /** What a walk is waiting for, when the viewer was opened from one (X7). */
@@ -121,7 +164,7 @@ export interface MeasuringFor {
   onUse: (valueThousandths: number, markupId: string | null, note: string) => void;
 }
 
-type Tool = "select" | MarkupKind | "calibrate";
+type Tool = "select" | MarkupKind | "calibrate" | "deduct";
 
 interface Draft {
   kind: "cloud" | "arrow";
@@ -132,20 +175,30 @@ interface Draft {
 }
 
 interface PointsDraft {
-  kind: MeasureKind | "calibrate";
+  kind: MeasureKind | "calibrate" | "deduct";
   points: PointGeometry[];
 }
+
+/** The fewest points a draft needs: the measuring kinds' own, two for a calibration, three for an opening. */
+const MIN_FOR: Record<PointsDraft["kind"], number> = { ...MIN_POINTS, calibrate: 2, deduct: 3 };
 
 function pointsOf(m: MarkupView): PointGeometry[] {
   const list = (m.geometry as { points?: unknown }).points;
   return Array.isArray(list) ? (list as PointGeometry[]) : [];
 }
 
+/** Everything a trace yields under the sheet's scale (ADR 0110): its own figure and the ones typed onto it. */
+function yieldsFor(m: MarkupView, scale: SheetScale | null): Yield[] {
+  if (!isMeasureKind(m.kind)) return [];
+  const points = pointsOf(m);
+  if (points.length < MIN_POINTS[m.kind]) return [];
+  return yieldsOf(m.kind, { points }, m.figures, scale);
+}
+
+/** A trace's own figure — the NET area once openings are cut out — or null while it needs the scale. */
 function measurementOf(m: MarkupView, scale: SheetScale | null): Measurement | null {
   if (!isMeasureKind(m.kind)) return null;
-  const points = pointsOf(m);
-  if (points.length < MIN_POINTS[m.kind]) return null;
-  return measure(m.kind, { points }, scale);
+  return yieldsFor(m, scale).find((y) => y.figure === m.kind)?.measurement ?? null;
 }
 
 /**
@@ -227,6 +280,8 @@ export function SheetViewer({
   const [editing, setEditing] = useState<MarkupView | null>(null);
   const [scaleOpen, setScaleOpen] = useState(false);
   const [calibration, setCalibration] = useState<{ a: PointGeometry; b: PointGeometry } | null>(null);
+  /** The area an opening is being cut out of, while the deduct tool is up (ADR 0110). */
+  const [deductFor, setDeductFor] = useState<string | null>(null);
   const [takeoffFor, setTakeoffFor] = useState<MarkupView | null>(null);
   const [saving, startTransition] = useTransition();
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -349,6 +404,7 @@ export function SheetViewer({
         setDraft(null);
         setPointsDraft(null);
         setSelectedId(null);
+        setDeductFor(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -368,6 +424,7 @@ export function SheetViewer({
   );
   const numbers = useMemo(() => pinNumbers(likes), [likes]);
   const summary = useMemo(() => summariseMarkups(likes), [likes]);
+  const yields = useMemo(() => new Map(markups.map((m) => [m.id, yieldsFor(m, scale)])), [markups, scale]);
   const measurements = useMemo(() => new Map(markups.map((m) => [m.id, measurementOf(m, scale)])), [markups, scale]);
   const scaleLabel = scale ? (matchingStandard(scale)?.label ?? `${scale.pointsPerUnit.toFixed(2)} pt per ${scale.unit}`) : null;
 
@@ -427,7 +484,7 @@ export function SheetViewer({
     } else if (tool === "text" || tool === "pin") {
       setPending({ kind: tool, x: f.x, y: f.y });
     } else {
-      // A measurement or a calibration: every tap is a point; Finish (or Enter) closes it.
+      // A measurement, a calibration or an opening: every tap is a point; Finish (or Enter) closes it.
       const next = pointsDraft && pointsDraft.kind === tool ? [...pointsDraft.points, f] : [f];
       if (next.length > MEASURE_POINTS_MAX) return;
       if (tool === "calibrate" && next.length === 2) {
@@ -505,15 +562,44 @@ export function SheetViewer({
 
   function finishPoints() {
     if (!pointsDraft || pointsDraft.kind === "calibrate") return;
-    const kind = pointsDraft.kind;
-    if (pointsDraft.points.length < MIN_POINTS[kind]) return;
+    if (pointsDraft.points.length < MIN_FOR[pointsDraft.kind]) return;
     const points = pointsDraft.points;
+    if (pointsDraft.kind === "deduct") {
+      /** An opening cut out of an area (ADR 0110): one more ring on that trace's figures, and its net area moves. */
+      const target = deductFor ? markups.find((m) => m.id === deductFor) : null;
+      setPointsDraft(null);
+      setDeductFor(null);
+      setTool("select");
+      if (!target) return;
+      startTransition(async () => {
+        const result = await updateMarkupAction({
+          sheetId,
+          projectId,
+          id: target.id,
+          version: target.version,
+          figures: { ...target.figures, deducts: [...(target.figures.deducts ?? []), points] },
+        });
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+        toast.success("Opening cut out — the area reads net of it");
+        onChanged?.();
+        router.refresh();
+      });
+      return;
+    }
+    const kind = pointsDraft.kind;
     setPointsDraft(null);
     submit({ kind, geometry: { points } }, (id) => {
-      /** Drawn while a line was measuring: it stands behind the line straight away. */
-      if (forLine && forLine.kind === kind) {
-        const q = measure(kind, { points }, scale);
-        if (q) forLine.onToggle(id, true, toThousandths(q.quantity));
+      /**
+       * Drawn while a line was measuring (ADR 0109): the first figure it
+       * yields of the line's family stands behind the line straight away —
+       * its own for a like line, the run around a room for a baseboard.
+       */
+      if (forLine) {
+        const fit = yieldsOf(kind, { points }, {}, scale).find((y) => FIGURE_FAMILY[y.figure] === forLine.family);
+        if (fit) forLine.onToggle(id, fit.figure, true, toThousandths(fit.measurement.quantity));
       }
     });
   }
@@ -578,10 +664,10 @@ export function SheetViewer({
     }
   }, [forTheWalk, measurements, measuringFor]);
   const draftMeasure =
-    pointsDraft && pointsDraft.kind !== "calibrate" && pointsDraft.points.length >= MIN_POINTS[pointsDraft.kind]
-      ? measure(pointsDraft.kind, { points: pointsDraft.points }, scale)
+    pointsDraft && pointsDraft.kind !== "calibrate" && pointsDraft.points.length >= MIN_FOR[pointsDraft.kind]
+      ? measure(pointsDraft.kind === "deduct" ? "area" : pointsDraft.kind, { points: pointsDraft.points }, scale)
       : null;
-  const needsScale = (tool === "length" || tool === "area") && !scale;
+  const needsScale = (tool === "length" || tool === "area" || tool === "deduct") && !scale;
 
   return (
     <div className="space-y-3">
@@ -666,7 +752,9 @@ export function SheetViewer({
                     ? "Tap where the problem is; the pin goes on the punch list."
                     : tool === "calibrate"
                       ? "Tap the two ends of a dimension the drawing states."
-                      : needsScale
+                      : tool === "deduct"
+                        ? "Tap around the opening, corner by corner, then Finish — it comes off the area."
+                        : needsScale
                         ? "Set the sheet's scale first; a count needs none."
                         : tool === "length"
                           ? "Tap along the wall, corner by corner, then Finish."
@@ -681,7 +769,7 @@ export function SheetViewer({
                 {pointsDraft.points.length} {pointsDraft.points.length === 1 ? "point" : "points"}
                 {draftMeasure ? ` · ${formatMeasure(draftMeasure)}` : ""}
               </span>
-              <Button type="button" size="sm" className="h-7" onClick={finishPoints} disabled={saving || pointsDraft.points.length < MIN_POINTS[pointsDraft.kind]}>
+              <Button type="button" size="sm" className="h-7" onClick={finishPoints} disabled={saving || pointsDraft.points.length < MIN_FOR[pointsDraft.kind]}>
                 <Check className="mr-1 size-3.5" /> Finish
               </Button>
               <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => setPointsDraft(null)}>
@@ -772,8 +860,8 @@ export function SheetViewer({
             <span className="font-medium">{forLine.description}</span>
             <span className="text-muted-foreground">
               {" "}
-              — draw {forLine.kind === "count" ? "a count" : forLine.kind === "area" ? "an area" : "a length"} and it stands behind the line, or tick the ones below that do
-              {scale || forLine.kind === "count" ? "" : ". Set the scale first"}.
+              — draw {familyWords(forLine.family)} and it stands behind the line, or tick the figures below that do
+              {scale || forLine.family === "count" ? "" : ". Set the scale first"}.
             </span>
           </div>
         )}
@@ -806,7 +894,14 @@ export function SheetViewer({
                 measuringFor={
                   measuringFor && m.kind === measuringFor.kind ? measuringFor : null
                 }
-                forLine={forLine && m.kind === forLine.kind ? forLine : null}
+                forLine={forLine}
+                yields={yields.get(m.id) ?? []}
+                onDeduct={() => {
+                  setDeductFor(m.id);
+                  setSelectedId(m.id);
+                  setPointsDraft(null);
+                  setTool("deduct");
+                }}
                 onChanged={onChanged}
               />
             ))}
@@ -849,7 +944,7 @@ export function SheetViewer({
       <TakeoffDialog
         markup={takeoffFor}
         markups={markups}
-        measurements={measurements}
+        yields={yields}
         scale={scale}
         estimates={estimates}
         codes={codes}
@@ -980,10 +1075,16 @@ function Shape({
     );
   }
   if (m.kind === "area") {
-    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + " Z";
+    const ring = (ps: readonly PointGeometry[]) => ps.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + " Z";
+    const holes = m.figures.deducts ?? [];
+    // The openings are holes in the fill (evenodd), each outlined dashed, so the tint reads as what is left.
+    const d = [ring(pts), ...holes.map(ring)].join(" ");
     return (
       <g data-markup={m.id} style={{ cursor: "pointer" }}>
-        <path d={d} fill={hex} fillOpacity={selected ? 0.25 : 0.15} stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        <path d={d} fillRule="evenodd" fill={hex} fillOpacity={selected ? 0.25 : 0.15} stroke={hex} strokeWidth={stroke} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        {holes.map((h, i) => (
+          <path key={i} d={ring(h)} fill="none" stroke={hex} strokeWidth={1.5} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+        ))}
         {pts.map((p, i) => (
           <circle key={i} cx={p.x * W} cy={p.y * H} r={3 * unit} fill={hex} />
         ))}
@@ -1038,11 +1139,12 @@ function DraftShape({ draft, color, W, H, unit }: { draft: Draft; color: MarkupC
 function PointsDraftShape({ draft, color, W, H, unit, measurement }: { draft: PointsDraft; color: MarkupColor; W: number; H: number; unit: number; measurement: Measurement | null }) {
   const hex = draft.kind === "calibrate" ? "#111827" : MARKUP_COLOR_HEX[color];
   const pts = draft.points;
-  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + (draft.kind === "area" && pts.length >= 3 ? " Z" : "");
+  const closed = draft.kind === "area" || draft.kind === "deduct";
+  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * W} ${p.y * H}`).join(" ") + (closed && pts.length >= 3 ? " Z" : "");
   return (
     <g pointerEvents="none">
       {pts.length >= 2 && draft.kind !== "count" && (
-        <path d={d} fill={draft.kind === "area" ? hex : "none"} fillOpacity={0.1} stroke={hex} strokeWidth={2} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        <path d={d} fill={closed ? hex : "none"} fillOpacity={draft.kind === "deduct" ? 0.3 : 0.1} stroke={hex} strokeWidth={2} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
       )}
       {pts.map((p, i) => (
         <circle key={i} cx={p.x * W} cy={p.y * H} r={(draft.kind === "count" ? 7 : 4) * unit} fill={hex} fillOpacity={draft.kind === "count" ? 0.35 : 1} stroke={hex} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
@@ -1060,6 +1162,7 @@ function MarkupRowView({
   markup: m,
   number,
   measurement,
+  yields,
   selected,
   canEdit,
   busy,
@@ -1069,6 +1172,7 @@ function MarkupRowView({
   onSelect,
   onEdit,
   onTakeoff,
+  onDeduct,
   measuringFor,
   forLine,
   onChanged,
@@ -1076,6 +1180,8 @@ function MarkupRowView({
   markup: MarkupView;
   number?: number;
   measurement: Measurement | null;
+  /** Everything the trace yields under the sheet's scale (ADR 0110), its own figure among them. */
+  yields: Yield[];
   selected: boolean;
   canEdit: boolean;
   busy: boolean;
@@ -1085,9 +1191,11 @@ function MarkupRowView({
   onSelect: () => void;
   onEdit: () => void;
   onTakeoff: () => void;
+  /** Start cutting an opening out of this area. */
+  onDeduct: () => void;
   /** Non-null only when a walk is waiting for exactly this kind of number. */
   measuringFor: MeasuringFor | null;
-  /** Non-null only when an estimate line of exactly this kind is measuring (ADR 0109). */
+  /** Non-null while an estimate line is measuring (ADR 0109): the row offers every figure it yields of the line's family. */
   forLine: MeasuringLine | null;
   onChanged?: () => void;
 }) {
@@ -1096,8 +1204,9 @@ function MarkupRowView({
   const [armed, setArmed] = useState(false);
   const hex = MARKUP_COLOR_HEX[m.color];
   const measuring = isMeasureKind(m.kind);
-  /** Against what THIS measurement pushed — its own share of the line, so a second one on the same line does not read as drifted the moment after. */
-  const drifted = measuring && m.takeoff !== null && driftedSince(m.pushedQuantityThousandths, measurement);
+  const own = yields.find((y) => y.figure === m.kind) ?? null;
+  const derived = yields.filter((y) => y.figure !== m.kind);
+  const offered = forLine ? yields.filter((y) => FIGURE_FAMILY[y.figure] === forLine.family) : [];
 
   function toggleDone(done: boolean) {
     const itemId = m.workItemId;
@@ -1127,9 +1236,10 @@ function MarkupRowView({
     });
   }
 
-  function unpush() {
+  /** One link let go (ADR 0110): the line keeps its quantity; this figure of this trace no longer stands behind it. */
+  function unpush(link: TakeoffLinkView) {
     startTransition(async () => {
-      const result = await unpushTakeoffAction({ id: m.id, sheetId, projectId });
+      const result = await unpushTakeoffAction({ id: m.id, sheetId, projectId, lineId: link.lineId, figure: link.figure });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -1162,6 +1272,18 @@ function MarkupRowView({
             {measuring ? ` · ${pointsOf(m).length} ${pointsOf(m).length === 1 ? "point" : "points"}` : ""}
             {m.createdBy ? ` · ${m.createdBy}` : ""} · {m.createdOn}
           </span>
+          {/* What else the trace yields (ADR 0110), each with its working on hover; an area's own working when openings came off it. */}
+          {(derived.length > 0 || (own !== null && own.working !== "")) && (
+            <span className="block text-xs text-muted-foreground">
+              {own !== null && own.working !== "" ? <span title="net of the openings">{own.working}</span> : null}
+              {derived.map((y, i) => (
+                <span key={y.figure} title={y.working}>
+                  {i > 0 || (own !== null && own.working !== "") ? " · " : ""}
+                  {TRACE_FIGURE_LABELS[y.figure].toLowerCase()} <span className="tabular-nums text-foreground">{formatMeasure(y.measurement)}</span>
+                </span>
+              ))}
+            </span>
+          )}
         </span>
       </button>
       {m.kind === "pin" &&
@@ -1177,34 +1299,43 @@ function MarkupRowView({
         ) : (
           <StatusBadge tone="quiet">{m.workItemId ? "Punch item gone" : "Marker only"}</StatusBadge>
         ))}
+      {/* Every line this trace stands behind, by which of its figures (ADR 0074, 0110), each read against ITS OWN share. */}
       {measuring &&
-        (m.takeoff ? (
-          <span className="flex items-center gap-1">
-            <StatusBadge tone={drifted ? "pending" : "good"}>
-              {`→ ${m.takeoff.estimateNumber} · ${m.takeoff.lineDescription} · ${thousandthsToQuantityString(m.takeoff.lineQuantityThousandths)} ${m.takeoff.lineUnit}`}
-              {drifted ? " · measured since" : ""}
-            </StatusBadge>
-            {canEdit && (
-              <Button type="button" variant="ghost" size="icon" className="size-7" onClick={unpush} disabled={pending || busy} title="No longer stands behind the line">
-                <X className="size-3.5" />
-                <span className="sr-only">Unpush</span>
-              </Button>
-            )}
-          </span>
-        ) : m.pushedQuantityThousandths !== null ? (
-          <StatusBadge tone="quiet">Line gone</StatusBadge>
-        ) : null)}
-      {forLine && measurement && (
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs" title={`${formatMeasure(measurement)} stands behind ${forLine.description}`}>
-          <Checkbox
-            checked={forLine.selected.has(m.id)}
-            disabled={pending || busy || forLine.busy}
-            onCheckedChange={(v) => forLine.onToggle(m.id, v === true, toThousandths(measurement.quantity))}
-            aria-label={`${formatMeasure(measurement)} stands behind the line`}
-          />
-          behind the line
-        </label>
-      )}
+        m.takeoffs.map((link) => {
+          const now = yields.find((y) => y.figure === link.figure)?.measurement ?? null;
+          const drifted = driftedSince(link.shareThousandths, now);
+          return (
+            <span key={`${link.lineId}:${link.figure}`} className="flex items-center gap-1">
+              <StatusBadge tone={drifted ? "pending" : "good"}>
+                {`→ ${link.estimateNumber} · ${link.lineDescription} · ${thousandthsToQuantityString(link.lineQuantityThousandths)} ${link.lineUnit}`}
+                {link.figure !== m.kind ? ` · ${TRACE_FIGURE_LABELS[link.figure].toLowerCase()}` : ""}
+                {drifted ? " · measured since" : ""}
+              </StatusBadge>
+              {canEdit && (
+                <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => unpush(link)} disabled={pending || busy} title="No longer stands behind the line">
+                  <X className="size-3.5" />
+                  <span className="sr-only">Unpush</span>
+                </Button>
+              )}
+            </span>
+          );
+        })}
+      {forLine &&
+        offered.map((y) => (
+          <label
+            key={y.figure}
+            className="flex cursor-pointer items-center gap-1.5 text-xs"
+            title={`${formatMeasure(y.measurement)} stands behind ${forLine.description}${y.working ? ` — ${y.working}` : ""}`}
+          >
+            <Checkbox
+              checked={forLine.selected.has(`${m.id}:${y.figure}`)}
+              disabled={pending || busy || forLine.busy}
+              onCheckedChange={(v) => forLine.onToggle(m.id, y.figure, v === true, toThousandths(y.measurement.quantity))}
+              aria-label={`${formatMeasure(y.measurement)} stands behind the line`}
+            />
+            {y.figure === m.kind ? "behind the line" : `${TRACE_FIGURE_LABELS[y.figure].toLowerCase()} ${formatMeasure(y.measurement)}`}
+          </label>
+        ))}
       {measuringFor && measurement && (
         <Button
           type="button"
@@ -1225,6 +1356,11 @@ function MarkupRowView({
       )}
       {canEdit && (
         <span className="flex items-center gap-1">
+          {m.kind === "area" && (
+            <Button type="button" variant="ghost" size="sm" className="h-7" onClick={onDeduct} disabled={pending || busy || !measurement} title={!measurement ? "Set the scale first" : "Cut an opening out of this area"}>
+              <Scissors className="mr-1 size-3.5" /> Cut an opening
+            </Button>
+          )}
           {measuring && (
             <Button type="button" variant="outline" size="sm" className="h-7" onClick={onTakeoff} disabled={pending || busy || !measurement || !hasEstimates} title={!hasEstimates ? "Start an estimate first" : !measurement ? "Set the scale first" : "Onto an estimate line"}>
               <ArrowRightToLine className="mr-1 size-3.5" /> Takeoff
@@ -1337,24 +1473,68 @@ function PointDialog({
   );
 }
 
-/** A markup's words and colour, after the fact. The pin's punch item keeps its own words in Work. */
+/**
+ * A markup's words and colour, after the fact — and on a trace, what it
+ * yields besides its own figure (ADR 0110): a height on a length, a pitch or
+ * a depth on an area, and the openings cut out of it. The pin's punch item
+ * keeps its own words in Work.
+ */
 function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup: MarkupView | null; projectId: string; sheetId: string; onClose: () => void; onChanged?: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState("");
   const [color, setColor] = useState<MarkupColor>("red");
+  const [height, setHeight] = useState("");
+  const [heightUnit, setHeightUnit] = useState<"ft" | "m">("ft");
+  const [pitch, setPitch] = useState("");
+  const [depth, setDepth] = useState("");
+  const [depthUnit, setDepthUnit] = useState<"in" | "mm">("in");
+  const [keepOpenings, setKeepOpenings] = useState(true);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   if (markup && loadedFor !== markup.id) {
     setLoadedFor(markup.id);
     setText(markup.text);
     setColor(markup.color);
+    setHeight(markup.figures.height ? String(markup.figures.height.value) : "");
+    setHeightUnit(markup.figures.height?.unit ?? "ft");
+    setPitch(markup.figures.pitch ? String(markup.figures.pitch.rise) : "");
+    setDepth(markup.figures.depth ? String(markup.figures.depth.value) : "");
+    setDepthUnit(markup.figures.depth?.unit ?? "in");
+    setKeepOpenings(true);
   }
   const needsWords = markup?.kind === "text" || markup?.kind === "pin";
+  const measuring = markup ? isMeasureKind(markup.kind) : false;
+  const openings = markup?.figures.deducts?.length ?? 0;
+
+  /** The figures as typed, in the units typed; a blank box means none. */
+  function figuresPatch(): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (markup?.kind === "length") {
+      const h = Number.parseFloat(height);
+      if (height.trim() !== "" && Number.isFinite(h) && h > 0) out.height = { value: h, unit: heightUnit };
+    }
+    if (markup?.kind === "area") {
+      const r = Number.parseFloat(pitch);
+      if (pitch.trim() !== "" && Number.isFinite(r) && r >= 0) out.pitch = { rise: r };
+      const d = Number.parseFloat(depth);
+      if (depth.trim() !== "" && Number.isFinite(d) && d > 0) out.depth = { value: d, unit: depthUnit };
+      if (keepOpenings && markup.figures.deducts && markup.figures.deducts.length > 0) out.deducts = markup.figures.deducts;
+    }
+    return out;
+  }
 
   function save() {
     if (!markup) return;
     startTransition(async () => {
-      const result = await updateMarkupAction({ id: markup.id, sheetId, projectId, version: markup.version, text: text.trim(), color });
+      const result = await updateMarkupAction({
+        id: markup.id,
+        sheetId,
+        projectId,
+        version: markup.version,
+        text: text.trim(),
+        color,
+        ...(measuring ? { figures: figuresPatch() } : {}),
+      });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -1382,7 +1562,11 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
           {markup?.kind === "pin" && markup.workItemId && (
             <DialogDescription>The pin&apos;s own words. Its punch item is edited on the job&apos;s punch list or in Work.</DialogDescription>
           )}
-          {markup && isMeasureKind(markup.kind) && <DialogDescription>A name for the measurement — the room, the wall — and its colour. The points stay where they are.</DialogDescription>}
+          {markup && isMeasureKind(markup.kind) && (
+            <DialogDescription>
+              A name for the measurement — the room, the wall — its colour, and what it yields besides its own figure. The points stay where they are.
+            </DialogDescription>
+          )}
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -1405,6 +1589,58 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
               ))}
             </div>
           </div>
+          {markup?.kind === "length" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-height">Height — the wall it stands</Label>
+              <div className="flex items-center gap-2">
+                <Input id="mk-height" value={height} onChange={(e) => setHeight(e.target.value)} inputMode="decimal" placeholder="9" className="w-28" />
+                <Select value={heightUnit} onValueChange={(v) => setHeightUnit(v as "ft" | "m")}>
+                  <SelectTrigger className="w-24" aria-label="Height unit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ft">feet</SelectItem>
+                    <SelectItem value="m">metres</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">With a height, the length also yields a wall area — length × height — that a drywall or paint line can take.</p>
+            </div>
+          )}
+          {markup?.kind === "area" && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="mk-pitch">Pitch — as a roof</Label>
+                <div className="flex items-center gap-2">
+                  <Input id="mk-pitch" value={pitch} onChange={(e) => setPitch(e.target.value)} inputMode="decimal" placeholder="6" className="w-24" />
+                  <span className="text-sm text-muted-foreground">: 12</span>
+                </div>
+                <p className="text-xs text-muted-foreground">A plan area at 6:12 yields a roof area 1.118 times itself. Blank means the area is flat.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mk-depth">Depth — as a volume</Label>
+                <div className="flex items-center gap-2">
+                  <Input id="mk-depth" value={depth} onChange={(e) => setDepth(e.target.value)} inputMode="decimal" placeholder="4" className="w-24" />
+                  <Select value={depthUnit} onValueChange={(v) => setDepthUnit(v as "in" | "mm")}>
+                    <SelectTrigger className="w-32" aria-label="Depth unit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in">inches</SelectItem>
+                      <SelectItem value="mm">millimetres</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">A 400 sq ft slab at 4 in yields 4.9 cy, for a line priced by the yard.</p>
+              </div>
+              {openings > 0 && (
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={keepOpenings} onCheckedChange={(v) => setKeepOpenings(v === true)} />
+                  Keep the {openings} {openings === 1 ? "opening" : "openings"} cut out of it
+                </label>
+              )}
+            </>
+          )}
         </div>
         <DialogFooter>
           <Button onClick={save} disabled={pending || (needsWords && text.trim() === "")}>
@@ -1617,11 +1853,14 @@ function KnownLengthDialog({
   );
 }
 
-/** A measurement, or several of one kind, onto an estimate line. */
+/**
+ * A trace's figure — or several of one family, across the sheet and across the
+ * line's other sheets — onto an estimate line (ADR 0074, 0109, 0110).
+ */
 function TakeoffDialog({
   markup,
   markups,
-  measurements,
+  yields,
   scale,
   estimates,
   codes,
@@ -1632,7 +1871,7 @@ function TakeoffDialog({
 }: {
   markup: MarkupView | null;
   markups: MarkupView[];
-  measurements: Map<string, Measurement | null>;
+  yields: Map<string, Yield[]>;
   scale: SheetScale | null;
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
@@ -1647,6 +1886,9 @@ function TakeoffDialog({
   const [lineId, setLineId] = useState<string>(NEW_LINE);
   const [description, setDescription] = useState("");
   const [costCodeId, setCostCodeId] = useState<string>(NONE);
+  /** Which of the clicked trace's figures is going: its own kind unless picked otherwise (ADR 0110). */
+  const [figure, setFigure] = useState<TraceFigure>("area");
+  /** `${markupId}:${figure}` for every figure ticked on this sheet. */
   const [included, setIncluded] = useState<Set<string>>(new Set());
   /**
    * THE LINE'S TRACES ON OTHER SHEETS STAY UNLESS UNTICKED (ADR 0109). A push
@@ -1656,40 +1898,56 @@ function TakeoffDialog({
    */
   const [leftOut, setLeftOut] = useState<Set<string>>(new Set());
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  /** This sheet's other traces already standing behind a line: ticked with it, so a push keeps them (ADR 0109). */
-  const behindHere = (id: string, ofKind: string) => markups.filter((m) => m.kind === ofKind && m.takeoff?.lineId === id).map((m) => m.id);
-  if (markup && loadedFor !== markup.id) {
+  const family: FigureFamily = FIGURE_FAMILY[figure];
+  const lineUnit = takeoffUnitFor(family, scale?.unit ?? "");
+  /** This sheet's figures already standing behind a line, of the family going: ticked with it, so a push keeps them. */
+  const behindHere = (id: string, fam: FigureFamily) =>
+    markups.flatMap((m) => m.takeoffs.filter((t) => t.lineId === id && FIGURE_FAMILY[t.figure] === fam).map((t) => `${m.id}:${t.figure}`));
+  if (markup && loadedFor !== markup.id && isMeasureKind(markup.kind)) {
     setLoadedFor(markup.id);
     setLeftOut(new Set());
-    const preselected = markup.takeoff
-      ? pushedLineId(estimates, markup.takeoff, isMeasureKind(markup.kind) ? takeoffUnitFor(markup.kind, scale?.unit ?? "") : "")
-      : NEW_LINE;
-    setIncluded(new Set([markup.id, ...(preselected === NEW_LINE ? [] : behindHere(preselected, markup.kind))]));
+    setFigure(markup.kind);
+    const fam = FIGURE_FAMILY[markup.kind];
+    const link = markup.takeoffs.find((t) => FIGURE_FAMILY[t.figure] === fam) ?? null;
+    const preselected = link ? pushedLineId(estimates, link, takeoffUnitFor(fam, scale?.unit ?? "")) : NEW_LINE;
+    setIncluded(new Set([`${markup.id}:${markup.kind}`, ...(preselected === NEW_LINE ? [] : behindHere(preselected, fam))]));
     setDescription(markup.text || MARKUP_KIND_LABELS[markup.kind]);
-    setEstimateId(markup.takeoff?.estimateId ?? estimates[0]?.id ?? NONE);
+    setEstimateId(link?.estimateId ?? estimates[0]?.id ?? NONE);
     setLineId(preselected);
   }
-  const kind = markup && isMeasureKind(markup.kind) ? markup.kind : null;
-  const siblings = kind ? markups.filter((m) => m.kind === kind && measurements.get(m.id)) : [];
-  const chosen = siblings.filter((m) => included.has(m.id));
-  const total = chosen.reduce((s, m) => s + (measurements.get(m.id)?.quantity ?? 0), 0);
-  const unitWord = chosen[0] ? (measurements.get(chosen[0].id)?.unit ?? "") : "";
+  const ownYields = markup ? (yields.get(markup.id) ?? []) : [];
+  /** Every figure on the sheet of the family going, each a tick: a room's run around it sits beside a wall's length. */
+  const candidates = markups.flatMap((m) =>
+    (yields.get(m.id) ?? [])
+      .filter((y) => FIGURE_FAMILY[y.figure] === family)
+      .map((y) => ({ key: `${m.id}:${y.figure}`, markupId: m.id, figure: y.figure, label: m.text || MARKUP_KIND_LABELS[m.kind], yield: y, own: y.figure === m.kind })),
+  );
+  const chosen = candidates.filter((c) => included.has(c.key));
+  const total = chosen.reduce((s, c) => s + c.yield.measurement.quantity, 0);
+  const unitWord = chosen[0]?.yield.measurement.unit ?? "";
   const estimate = estimates.find((e) => e.id === estimateId) ?? null;
-  const lineUnit = kind ? takeoffUnitFor(kind, scale?.unit ?? "") : "";
   /** What stands behind the chosen line on OTHER sheets, kept unless unticked. */
   const elsewhere = (estimate?.lines.find((l) => l.id === lineId)?.behind ?? []).filter((s) => s.sheetId !== sheetId);
   const kept = elsewhere.filter((s) => !leftOut.has(s.sheetId));
   const elsewhereThousandths = kept.reduce((sum, s) => sum + (s.nowThousandths ?? s.shareThousandths), 0);
   const lineTotalThousandths = toThousandths(total) + elsewhereThousandths;
 
+  function changeFigure(next: TraceFigure) {
+    if (!markup) return;
+    setFigure(next);
+    // A different family is a different set: start it from this trace's figure and what already stands behind the line.
+    const fam = FIGURE_FAMILY[next];
+    setIncluded(new Set([`${markup.id}:${next}`, ...(lineId === NEW_LINE ? [] : behindHere(lineId, fam))]));
+  }
+
   function push() {
-    if (!markup || !kind || !estimate || chosen.length === 0) return;
+    if (!markup || !estimate || chosen.length === 0) return;
     startTransition(async () => {
       const result = await pushTakeoffAction({
         sheetId,
         projectId,
         estimateId: estimate.id,
-        markupIds: [...chosen.map((m) => m.id), ...kept.flatMap((s) => s.markupIds)],
+        picks: [...chosen.map((c) => ({ markupId: c.markupId, figure: c.figure })), ...kept.flatMap((s) => s.picks)],
         lineId: lineId === NEW_LINE ? "" : lineId,
         newLine: lineId === NEW_LINE ? { description: description.trim(), costCodeId: costCodeId === NONE ? "" : costCodeId, unit: lineUnit } : null,
       });
@@ -1719,29 +1977,50 @@ function TakeoffDialog({
         <DialogHeader>
           <DialogTitle>Takeoff</DialogTitle>
           <DialogDescription>
-            {kind === "count" ? "A count" : kind === "length" ? "A length" : "An area"}{" "}
+            {family === "count" ? "A count" : family === "length" ? "A length" : family === "volume" ? "A volume" : "An area"}{" "}
             onto an estimate line. The line&apos;s quantity becomes the total; its unit price does the rest.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {siblings.length > 1 && (
+          {ownYields.length > 1 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="to-figure">What goes</Label>
+              <Select value={figure} onValueChange={(v) => changeFigure(v as TraceFigure)}>
+                <SelectTrigger className="w-full" id="to-figure">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ownYields.map((y) => (
+                    <SelectItem key={y.figure} value={y.figure}>
+                      {TRACE_FIGURE_LABELS[y.figure]} · {formatMeasure(y.measurement)}
+                      {y.working ? ` — ${y.working}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {candidates.length > 1 && (
             <div className="space-y-1.5">
               <Label>Measurements to add up</Label>
               <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2 text-sm">
-                {siblings.map((m) => (
-                  <li key={m.id}>
-                    <label className="flex items-center gap-2">
+                {candidates.map((c) => (
+                  <li key={c.key}>
+                    <label className="flex items-center gap-2" title={c.yield.working}>
                       <Checkbox
-                        checked={included.has(m.id)}
+                        checked={included.has(c.key)}
                         onCheckedChange={(v) => {
                           const next = new Set(included);
-                          if (v === true) next.add(m.id);
-                          else next.delete(m.id);
+                          if (v === true) next.add(c.key);
+                          else next.delete(c.key);
                           setIncluded(next);
                         }}
                       />
-                      <span className="tabular-nums">{formatMeasure(measurements.get(m.id)!)}</span>
-                      <span className="text-muted-foreground">{m.text || MARKUP_KIND_LABELS[m.kind]}</span>
+                      <span className="tabular-nums">{formatMeasure(c.yield.measurement)}</span>
+                      <span className="text-muted-foreground">
+                        {c.label}
+                        {c.own ? "" : ` · ${TRACE_FIGURE_LABELS[c.figure].toLowerCase()}`}
+                      </span>
                     </label>
                   </li>
                 ))}
@@ -1794,7 +2073,7 @@ function TakeoffDialog({
               onValueChange={(v) => {
                 setLineId(v);
                 setLeftOut(new Set());
-                if (v !== NEW_LINE && kind) setIncluded((prev) => new Set([...prev, ...behindHere(v, kind)]));
+                if (v !== NEW_LINE) setIncluded((prev) => new Set([...prev, ...behindHere(v, family)]));
               }}
             >
               <SelectTrigger className="w-full" id="to-line">
@@ -1881,8 +2160,8 @@ function TakeoffDialog({
   );
 }
 
-/** The line a measurement already stands behind, by its id — while the estimate still has it and it can take this unit; else a new line. */
-function pushedLineId(estimates: EstimateOption[], takeoff: NonNullable<MarkupView["takeoff"]>, lineUnit: string): string {
-  const line = estimates.find((e) => e.id === takeoff.estimateId)?.lines.find((l) => l.id === takeoff.lineId);
+/** The line a link already names, by its id — while the estimate still has it and it can take this unit; else a new line. */
+function pushedLineId(estimates: EstimateOption[], link: TakeoffLinkView, lineUnit: string): string {
+  const line = estimates.find((e) => e.id === link.estimateId)?.lines.find((l) => l.id === link.lineId);
   return line && unitAccepts(line.unit, lineUnit) ? line.id : NEW_LINE;
 }

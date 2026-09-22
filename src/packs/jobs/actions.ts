@@ -150,6 +150,7 @@ import {
   MARKUP_COLORS,
   MARKUP_KINDS,
   MARKUP_TEXT_MAX,
+  TRACE_FIGURES,
   SCALE_UNITS,
   BOND_STATUSES,
   WARRANTY_DECISIONS,
@@ -3700,6 +3701,8 @@ export async function updateMarkupAction(input: unknown) {
       geometry: markupGeometry.optional(),
       text: z.string().max(MARKUP_TEXT_MAX).optional(),
       color: z.enum(MARKUP_COLORS).optional(),
+      /** The figures a trace carries (ADR 0110); the ops read it tolerantly. */
+      figures: z.record(z.string(), z.unknown()).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the markup and try again." };
@@ -3795,7 +3798,9 @@ export async function pushTakeoffAction(input: unknown) {
       sheetId: z.string().uuid(),
       projectId: z.string().uuid(),
       estimateId: z.string().uuid(),
-      markupIds: z.array(z.string().uuid()).min(1).max(200),
+      markupIds: z.array(z.string().uuid()).max(200).default([]),
+      /** The traces by the figure each yields (ADR 0110); wins over `markupIds` when given. */
+      picks: z.array(z.object({ markupId: z.string().uuid(), figure: z.enum(TRACE_FIGURES) })).max(200).optional(),
       lineId: clearableUuid,
       newLine: z
         .object({ description: z.string().max(300), costCodeId: clearableUuid, unit: z.string().max(20).default("") })
@@ -3806,18 +3811,18 @@ export async function pushTakeoffAction(input: unknown) {
   if (!parsed.success) return { error: "Check the takeoff and try again." };
   try {
     const ctx = await drawingsGate();
-    const { sheetId, projectId, estimateId, markupIds, lineId, newLine } = parsed.data;
+    const { sheetId, projectId, estimateId, markupIds, picks, lineId, newLine } = parsed.data;
     const result = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const pushed = await pushTakeoff(tx, ctx, { estimateId, markupIds, lineId, newLine });
+        const pushed = await pushTakeoff(tx, ctx, { estimateId, markupIds, picks, lineId, newLine });
         await logAuditInTx(tx, {
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           action: "takeoff.pushed",
           targetType: "estimate_line",
           targetId: pushed.lineId,
-          meta: { projectId, estimateId, sheetId, markups: markupIds.length, kind: pushed.kind, quantityThousandths: pushed.quantityThousandths, unit: pushed.unit },
+          meta: { projectId, estimateId, sheetId, markups: picks?.length ?? markupIds.length, kind: pushed.kind, quantityThousandths: pushed.quantityThousandths, unit: pushed.unit },
         });
         return pushed;
       },
@@ -3843,24 +3848,26 @@ export async function standBehindAction(input: unknown) {
       projectId: z.string().uuid(),
       estimateId: z.string().uuid(),
       lineId: z.string().uuid(),
-      markupIds: z.array(z.string().uuid()).max(200),
+      markupIds: z.array(z.string().uuid()).max(200).default([]),
+      /** The traces by the figure each yields (ADR 0110); wins over `markupIds` when given. */
+      picks: z.array(z.object({ markupId: z.string().uuid(), figure: z.enum(TRACE_FIGURES) })).max(200).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the measurements and try again." };
   try {
     const ctx = await drawingsGate();
-    const { projectId, estimateId, lineId, markupIds } = parsed.data;
+    const { projectId, estimateId, lineId, markupIds, picks } = parsed.data;
     const result = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const stood = await standBehind(tx, ctx, { lineId, markupIds });
+        const stood = await standBehind(tx, ctx, { lineId, markupIds, picks });
         await logAuditInTx(tx, {
           tenantId: ctx.tenantId,
           actorClerkUserId: ctx.userId,
           action: "takeoff.stood_behind",
           targetType: "estimate_line",
           targetId: stood.lineId,
-          meta: { projectId, estimateId, markups: markupIds.length, kind: stood.kind, quantityThousandths: stood.quantityThousandths, unit: stood.unit },
+          meta: { projectId, estimateId, markups: picks?.length ?? markupIds.length, kind: stood.kind, quantityThousandths: stood.quantityThousandths, unit: stood.unit },
         });
         return stood;
       },
@@ -3875,11 +3882,21 @@ export async function standBehindAction(input: unknown) {
 }
 
 export async function unpushTakeoffAction(input: unknown) {
-  const parsed = z.object({ id: z.string().uuid(), sheetId: z.string().uuid(), projectId: z.string().uuid() }).safeParse(input);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      sheetId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      /** One link of the trace (ADR 0110); without them, every line it stands behind. */
+      lineId: z.string().uuid().optional(),
+      figure: z.enum(TRACE_FIGURES).optional(),
+    })
+    .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
   try {
     const ctx = await drawingsGate();
-    await withTenant(ctx.tenantId, (tx) => unpushTakeoff(tx, ctx, parsed.data.id), { role: ctx.role, userId: ctx.userId });
+    const { id, lineId, figure } = parsed.data;
+    await withTenant(ctx.tenantId, (tx) => unpushTakeoff(tx, ctx, { markupId: id, lineId, figure }), { role: ctx.role, userId: ctx.userId });
     revalidateSheet(parsed.data.projectId, parsed.data.sheetId);
     return { ok: true as const };
   } catch (err) {

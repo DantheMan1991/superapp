@@ -11,7 +11,7 @@ import { JobsError, type JobsCtx } from "./ops";
 import { getSheet, listSheets } from "./drawings-ops";
 import { listMarkups } from "./markups-ops";
 import { measurementsBehind, scaleOf } from "./takeoff-ops";
-import type { SheetScale } from "./takeoff-math";
+import { parseFigures, type SheetScale } from "./takeoff-math";
 import type { MarkupView } from "./components/sheet-viewer";
 import { isMarkupColor, isMarkupKind, PACK } from "./vocabulary";
 import {
@@ -176,8 +176,8 @@ export async function sheetForMeasuringAction(input: unknown) {
             : "",
           workItemId: r.markup.workItemId,
           punch: r.punch,
-          takeoff: r.takeoff,
-          pushedQuantityThousandths: r.markup.pushedQuantityThousandths,
+          takeoffs: r.takeoffs,
+          figures: parseFigures(r.markup.figures),
         },
       ];
     });

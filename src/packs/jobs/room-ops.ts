@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, isNotNull, max } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobRoom } from "@/db/schema";
+import type { JobRoom, MeasurementSource } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { measureSlug } from "./measure-math";
 import { recordMeasurement } from "./measure-ops";
@@ -203,6 +203,12 @@ export async function addRoomList(
   ctx: JobsCtx,
   projectId: string,
   parsed: readonly ParsedRoom[],
+  /**
+   * Where the areas came from, when the whole list came from one place — a
+   * schedule off the model (X14) says so on every room it measured, in the
+   * unit the schedule was in. A pasted list is typed, in `sf`.
+   */
+  areas: { unit?: string; source?: MeasurementSource; note?: string } = {},
 ): Promise<{ added: number; alreadyThere: number; withArea: number }> {
   requireWrite(ctx, "member");
   const before = new Set(
@@ -234,6 +240,9 @@ export async function addRoomList(
         projectId,
         roomId: room.id,
         valueThousandths: p.areaThousandths,
+        unit: areas.unit,
+        source: areas.source,
+        note: areas.note,
       });
       withArea += 1;
     }
@@ -296,7 +305,7 @@ export async function setRoomArea(
     roomId: string;
     valueThousandths: number;
     unit?: string;
-    source?: "measured" | "said" | "derived";
+    source?: MeasurementSource;
     note?: string;
     sheetId?: string | null;
     markupId?: string | null;

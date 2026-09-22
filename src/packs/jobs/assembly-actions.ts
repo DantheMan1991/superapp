@@ -66,8 +66,16 @@ const lineSchema = z.object({
   unit: z.string().trim().max(24).default(""),
   quantityThousandths: z.number().int().min(0).max(1_000_000_000_000),
   unitCostCents: z.number().int().min(0).max(1_000_000_000_000),
-  markupPpm: z.number().int().min(0).max(100_000_000),
-  unitPriceCents: z.number().int().min(0).max(1_000_000_000_000),
+  /**
+   * **UNSET IS NULL, NOT ZERO.** A markup of null takes the estimate's rate
+   * and a price of null is priced by markup; a ZERO is an explicit 0% and an
+   * explicit $0.00. The library screen coerced both to zero for a day, and
+   * every assembly it saved then dropped its lines at a price of nothing —
+   * found by the first takeoff off the model (X15), whose item came in with
+   * the client paying $0.00. Migration 0420 put those rows back to unset.
+   */
+  markupPpm: z.number().int().min(0).max(100_000_000).nullable(),
+  unitPriceCents: z.number().int().min(0).max(1_000_000_000_000).nullable(),
   costCode: z.string().trim().max(60).default(""),
 });
 
@@ -82,6 +90,8 @@ const bodySchema = z.object({
   /** As it is typed: "320", "1", "24.5". Read the way every quantity is. */
   drivingQuantity: z.string().trim().max(40),
   drivingUnit: z.string().trim().max(24).default(""),
+  /** What the model calls it (X15): the names a schedule uses for this thing. */
+  keys: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
   lines: z.array(lineSchema).min(1).max(200),
 });
 
@@ -94,6 +104,7 @@ function asInput(body: z.infer<typeof bodySchema>): SaveAssemblyInput {
     notes: body.notes,
     drivingQuantityThousandths: quantityStringToThousandths(body.drivingQuantity) ?? 0,
     drivingUnit: body.drivingUnit,
+    keys: body.keys,
     /** The order on screen IS the order; the ops re-spaces it by tens. */
     lines: body.lines.map((l, i) => ({ ...l, sortOrder: i })),
   };

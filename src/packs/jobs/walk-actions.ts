@@ -49,6 +49,13 @@ import { reckoningFor } from "./walk-reckoning-ops";
 import { measureLines, measureQuestionFor, readMeasureReply } from "./measure-math";
 import { parseRoomList, roomLines } from "./room-math";
 import { addRoomList, asRoomFacts } from "./room-ops";
+import { MAX_SCHEDULE_CHARS } from "./bim-schedule";
+import {
+  importSchedule,
+  previewSchedule,
+  type ScheduleImportResult,
+  type SchedulePreview,
+} from "./bim-schedule-ops";
 import { asTaken, recordMeasurement } from "./measure-ops";
 import {
   askNextMeasure,
@@ -2121,6 +2128,139 @@ export async function measureFromSheetAction(
       { role: ctx.role },
     );
     return await afterMeasuring(ctx, parsed.data.interviewId, where.outlineId, where.projectId);
+  } catch (err) {
+    let view: WalkView | null = null;
+    try {
+      view = await freshView(await gate(), parsed.data.interviewId);
+    } catch {
+      /* The message below is still worth sending. */
+    }
+    return { ...toResult(err), view };
+  }
+}
+
+/* ------------------------------------------------------------------------
+ * A SCHEDULE OFF THE MODEL (X14, ADR 0106).
+ *
+ * The founder's first answer on the first day of this layer: *they draw in
+ * Revit.* The perimeter, the roof area and every room with its floor area
+ * are in the model before anybody opens a PDF, and every modelling tool
+ * exports a schedule as a text file. So the measure-up takes one: the pure
+ * half reads it, the person says which column answers which measurement and
+ * whether to add the rooms, and the walk carries on from wherever it stood
+ * exactly as if the figures had been typed — because to the walk they were.
+ * ---------------------------------------------------------------------- */
+
+const bimTextSchema = z.object({
+  interviewId: z.string().uuid(),
+  text: z.string().min(1).max(MAX_SCHEDULE_CHARS),
+  fileName: z.string().trim().max(200).default(""),
+});
+
+/**
+ * What the file holds, before anything is written: the columns and their
+ * totals, the rooms it lists, and which measurement each column looks like.
+ */
+export async function previewBimScheduleAction(
+  input: unknown,
+): Promise<{ ok: true; preview: SchedulePreview } | { error: string }> {
+  const parsed = bimTextSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the file and try again." };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const where = await measuringContext(ctx, parsed.data.interviewId);
+    if (!where) return { error: "This walk has no job to measure." };
+    const preview = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        previewSchedule(
+          tx,
+          ctx.tenantId,
+          where.projectId,
+          where.outlineId,
+          parsed.data.text,
+          parsed.data.fileName,
+        ),
+      { role: ctx.role },
+    );
+    return { ok: true as const, preview };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const bimImportSchema = bimTextSchema.extend({
+  rooms: z.boolean(),
+  choices: z
+    .array(
+      z.object({
+        measureId: z.string().uuid(),
+        column: z.number().int().min(0).max(500).nullable(),
+        use: z.enum(["total", "each", "rows"]),
+      }),
+    )
+    .max(50),
+});
+
+/**
+ * **WRITE WHAT WAS CONFIRMED, THEN CARRY THE WALK ON.**
+ *
+ * The server reads the text again and honours only choices — which column,
+ * which measurement, whether to add the rooms — so nothing the browser held
+ * describes a row. Then the walk moves from wherever it stood: mid
+ * measure-up, `afterMeasuring` asks for the next figure the file did not
+ * carry, or the rooms, or the usual, or opens the first phase; on the rooms
+ * question with rooms just added, it is answered; anywhere else, the numbers
+ * are simply on the building and the screen reads them.
+ */
+export async function importBimScheduleAction(
+  input: unknown,
+): Promise<
+  (TurnOutcome & { imported: ScheduleImportResult }) | { error: string; view: WalkView | null }
+> {
+  const parsed = bimImportSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the file and try again.", view: null };
+  try {
+    const ctx = await gate();
+    await requireWalkGranted(ctx);
+    const where = await measuringContext(ctx, parsed.data.interviewId);
+    if (!where) {
+      return {
+        error: "This walk has no job to measure.",
+        view: await freshView(ctx, parsed.data.interviewId),
+      };
+    }
+    const imported = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        importSchedule(tx, ctx, {
+          projectId: where.projectId,
+          outlineId: where.outlineId,
+          text: parsed.data.text,
+          fileName: parsed.data.fileName,
+          rooms: parsed.data.rooms,
+          choices: parsed.data.choices,
+        }),
+      { role: ctx.role },
+    );
+
+    if (where.measuredAt === null && where.pendingMeasureId) {
+      const out = await afterMeasuring(ctx, parsed.data.interviewId, where.outlineId, where.projectId);
+      return { ...out, imported };
+    }
+    const roomsCameIn =
+      imported.rooms !== null && imported.rooms.added + imported.rooms.alreadyThere > 0;
+    if (where.measuredAt === null && where.roomsAskedAt !== null && roomsCameIn) {
+      const out = await answerRooms(ctx, parsed.data.interviewId, undefined);
+      if (out) return { ...out, imported };
+    }
+    return {
+      ok: true as const,
+      view: await freshView(ctx, parsed.data.interviewId),
+      finished: false,
+      imported,
+    };
   } catch (err) {
     let view: WalkView | null = null;
     try {

@@ -173,6 +173,204 @@ The permit set read again and saved: its three sheets came back at
 — 272×181 on the pane — while ASI 1's two sheets, never re-read, stayed
 compact with no picture. No migration, no seed.
 
+### 2026-09-21 — The takeoff off the model (`claude/the-schedule-off-the-model`, X15, [ADR 0107](../decisions/0107-a-takeoff-off-the-model-is-a-join-through-the-assembly-keyed-by-what-the-model-calls-it.md))
+
+The founder, an hour after X14 shipped: *"I'm really looking for way more
+than just room schedules here. Lumber takeoff, drywall etc from the model."*
+Right — the measure-up's numbers are what the walk asks for; the takeoff is
+what the estimate IS. So the same reader now feeds the ESTIMATE, through the
+assemblies, which were already parametric (ADR 0086) and only lacked the
+join.
+
+**The join** — `job_assembly_keys`: what the model calls each assembly, one
+row per name, unique per tenant on the reduced name so a name means one
+assembly and a re-mapping is a correction. Migrations 0418 + 0419 (RLS),
+applied dev + prod, 244 tables verified; the isolation suite has its case.
+Shown and edited on the assembly page under *What the model calls it*
+(`assembly-editor.tsx`), saved with the assembly (`setAssemblyKeys` replaces
+the list and moves a name typed on a second assembly; `rememberKey` upserts
+on the slug).
+
+**The reader** — `bim-takeoff.ts`, pure, 15 tests: `keyColumnOf` (*Family
+and Type*, *Material: Name*, *Type*, else the first word column that is not
+a number or a mark), `takeoffRows` (grouped by the reduced name, every
+quantity column added up, the count from a *Count* column or the rows,
+nameless rows counted and left out), `matchAssembly` (remembered by slug,
+else suggested when every significant word of the assembly's name is in the
+model's — *Wood stud* in *Basic Wall: Exterior - 2x6 Wood Stud*, never
+*Interior door, hung* in *Single-Flush: 36" x 80"*), `driverFor` (the row's
+figure in the assembly's dimension, *Length* before *Unconnected Height*,
+converted into its unit; the count for `ea` or per-nothing; null with
+`whyNoDriver` otherwise), `lineFromRow` and `offTheModel`.
+
+**The drop** — `bim-takeoff-ops.ts`: `previewTakeoff` (things with figures,
+each with the assemblies it could drive and the size it would be dropped
+at) and `takeoffItems` (each confirmed assembly through the SAME
+`linesForDrop` that *Add an assembly* uses, so the quantities scale and the
+codes resolve exactly as a drop does; plain lines by the figure chosen;
+refusals by name and reason; the memory written on confirmation). Nothing
+here writes an estimate line — the editor appends what comes back (ADR
+0082). `tests/jobs-bim-takeoff-ops.test.ts`: 10 sheets per 320 sf at 3,708
+sf is 115.875 sheets with the rate untouched, the name is remembered and
+the second preview maps itself, a per-lf assembly on a material takeoff is
+refused by name, and a name typed on a second assembly moves to it.
+
+**The editor** — a *From the model* button beside *Paste a takeoff* and
+*Add an assembly*, `bim-takeoff-dialog.tsx`, and `insertTakeoff` in the
+editor. `LineDraft` grew an optional `basis`/`basisDetail`, posted only when
+set, so a model-made line says *Drywall, hang and finish at 3,708 sf · off
+the model: Wall Schedule · Basic Wall: Interior - 2x4 Wood Stud · Area 3,708
+sf* and a typed line's basis is untouched; `estimateLineSchema` accepts the
+pair and `updateEstimate` already wrote them only when given. Both dialogs
+now share `schedule-input.tsx` — one UTF-16 decoder to keep right.
+
+**Not built, on purpose:** an assembly driven by two figures at once (per lf
+of 9' wall is how the founder already prices it); the takeoff opening the
+walk's phases; waste as a separate factor. And the honest limit, written in
+the guide: a schedule exported grouped WITHOUT totals shows one element's
+figure beside a count of many, and no software can tell that from a total —
+so the count sits beside every figure on the preview.
+
+### Driven
+
+On the dev branch, on the same test estimate (24-111 EST-1), with a
+*Drywall, hang and finish* assembly made on the library page — 10 sheets and
+320 sf of labour per 320 sf, $600 the lot — and the wall schedule pasted:
+
+| | |
+| --- | --- |
+| The preview | *2 things across 2 rows, named by Family and Type, 1 total row left out*; *Basic Wall: Interior - 2x4 Wood Stud · 22 in the schedule · Length 412 lf · Area 3,708 sf*; both rows on *— leave it out*, since nothing was remembered and no words matched |
+| The picks | Interior → *Drywall, hang and finish — at 3,708 sf* with *320 sf of it is $600.00* beside it and `remember` ticked; Exterior → *as a line, 248 lf*; the button read **Bring in 1 item and 1 line** |
+| The editor | the item with *Drywall, 1/2 in sheets 115.875 @ 12.00* and *Hang, tape and finish 3,708 @ 1.50*, the loose line *Basic Wall: Exterior - 2x6 Wood Stud 248 lf*, cost $6,952.50, autosaved; the toast *Added 1 item, 1 line, 1 name remembered off the model* |
+| The database | both assembly lines `basis = assembly` with the whole story in `basis_detail`, the loose line `basis = none` with its clause, and `job_assembly_keys` holding *Basic Wall: Interior - 2x4 Wood Stud → Drywall, hang and finish* |
+| The second paste | the Interior row came up already on *Drywall, hang and finish — at 3,708 sf* with the *remembered* chip, and the button read **Bring in 1 item** |
+
+**And the drive found a defect X10 had shipped.** The first item came in
+with the client paying **$0.00**: every line carried an explicit unit price
+of $0.00 and a markup of 0%. Not the takeoff's doing — the library screen's
+save mapped an UNSET markup and price to zero (`?? 0`), and the action's
+schema would not take a null, so every assembly edited on that page dropped
+its lines at a price of nothing, through *Add an assembly* too. **Every
+assembly line on both databases was affected — 5 of 5 on dev, 1 of 1 in
+production.** The schema and the screen now keep null, and migration 0420
+put the rows back to unset (an explicit $0.00 price on a line that costs
+something is not a thing anybody meant); the second drop priced at
+$6,952.50. Estimate lines dropped from a zeroed assembly BEFORE this carry
+the $0.00 price on the estimate itself and want a look — a no-charge line
+is a real thing on a bid, so those are not repaired blind.
+
+### 2026-09-21 — A schedule off the model (`claude/the-schedule-off-the-model`, X14, [ADR 0106](../decisions/0106-a-takeoff-can-be-read-off-the-models-own-schedule-and-the-boundary-is-rows.md))
+
+**The founder's first answer on the first day of this layer — *they draw in
+Revit* — finally has code behind it.** Every number the measure-up asks for is
+in the model before anybody opens a PDF, and every modelling tool exports a
+schedule as delimited text (*File → Export → Reports → Schedule* in Revit).
+So the measure-up takes one: drop the file or paste it, the preview says what
+it found, a person confirms which column answers which measurement, and the
+walk carries on from wherever it stood.
+
+**What it reads** — `bim-schedule.ts`, pure, 29 tests on fixtures shaped the
+way Revit actually writes them:
+
+- `parseSchedule` — the title on its own line, every cell quoted, the inch
+  mark Revit leaves before a closing quote (`"63' - 4""`) AND the properly
+  doubled form, group headers (a line with only its first cell), group
+  footers (`Level 1: 7`), the *Grand total* line, a grouped-headers line
+  above the real one, tab / semicolon / comma, CRLF. `decodeScheduleBytes`
+  reads the file's bytes first: **Revit writes UTF-16**, and read as UTF-8
+  that is a NUL between every letter and a parser that finds nothing.
+- `readQuantity` — `1,234 SF`, `245.32 ft²`, `63' - 4 1/2"`, `2743 mm`,
+  `1 234,50 m²`, `12 CY`; nothing for `<varies>`, `Not Placed`, `$1,200.00`,
+  `12%`. Thousandths, canonical units, feet-inches into feet.
+- `readColumns` — a quantity column is one whose rows agree on a unit;
+  **a room number parses as a figure and its total means nothing**, so
+  *Number*, *Mark*, *Level* and the like are excluded by header. A footer
+  that carries only figures under blank word cells is found here, because it
+  needs the columns known first — which is why this classifies twice.
+- `readRooms` — a name column plus a level column, an area column or a
+  title that says rooms; the level from its column or the group heading the
+  row sat under; the second *Bathroom* on a floor told apart by its number
+  rather than lost (ADR 0101's rule); *Not Placed* and *Redundant* left out
+  and named; *Not Enclosed* a room with no area; an *Area* column of bare
+  numbers still the area.
+- `suggestMeasures` — every significant word of the measurement's name in
+  the title or the header, same dimension: *Roof area* under *Area* in a
+  *Roof Schedule*, *Wall height* under *Unconnected Height* in a *Wall
+  Schedule*; NOT *Wall perimeter* under *Length*, because the pack does not
+  know those are the same thing and will not pretend to.
+- `figureFor` / `convertThousandths` — a total, the figure every row shares,
+  or the row count; converted only within a dimension; refused by name
+  across one. An outline unit the pack does not know refuses a stated unit
+  and passes a bare number.
+
+**Where it lands** — `bim-schedule-ops.ts`: `previewSchedule` (columns with
+totals, the rooms with *already there* flags, the outline's list with what
+the building already has, the suggestions) and `importSchedule` (rooms
+through `addRoomList`, figures through `recordMeasurement`, both
+`source = 'schedule'` with a note naming the schedule, the column and the
+rows). `addRoomList` grew an `areas` argument for the unit, source and note
+of a whole list. **Migration 0417 widens the source CHECK**; applied dev +
+prod, RLS verified at 243 tables, the CHECK proven in `pg_constraint` on
+both. `tests/jobs-bim-schedule-ops.test.ts` is the one place that proves a
+`schedule` row is accepted — CI applies every migration from zero and cannot
+tell.
+
+**How the walk takes it** — two actions in `walk-actions.ts`,
+`previewBimScheduleAction` and `importBimScheduleAction`. The import carries
+the walk on through the SAME continuations a typed answer uses: mid
+measure-up `afterMeasuring` (the next figure the file did not hold, then the
+rooms, then the usual, then the first phase); on the rooms question with
+rooms just added, `answerRooms`; anywhere else the numbers are on the
+building and the screen reads them. No second state machine. Three doors on
+the screen — beside *Measure it on a drawing*, beside the room list, and a
+small one in the side panel once the measure-up is over — all
+`BimScheduleDialog`, one `afterImport`. A figure off the model shows a table
+icon where a traced one shows a ruler.
+
+**Not built, on purpose** (each a reader or a consumer of the same table,
+never a rewrite, because the boundary is rows): an IFC reader; remembering
+which column answered which measurement per tenant; the join from type
+names to assemblies the dossier has described since X1 — the pilot's library
+holds ONE assembly, so there is nothing yet to join against; writing a
+figure under the column's own name when the outline has no measurement for
+it.
+
+**Trap this slice paid for:** `schedule-ops.ts` already existed — it is the
+CONSTRUCTION schedule, slice 12 — and a new file written under that name
+overwrote it. `tsc` said so within the minute (the job page lost
+`listPhases`), `git checkout --` put it back, and everything here is named
+`bim-schedule` so the two can never meet again. The Write tool says
+*updated* rather than *created* when a file is already there, and that one
+word is the whole warning.
+
+### Driven
+
+On the dev branch, on a job that had never been measured (24-111, *Lane
+drainage*), with the pilot's own `New build` outline — three declared
+measurements, standards on nine phases — and three schedules pasted in the
+shape Revit writes them:
+
+| | |
+| --- | --- |
+| Wall schedule (4 rows + grand total) | preview read *Length 128 lf across 4 rows · Area 1,152 sf · Unconnected Height 36 lf across 4 rows · 9 lf on every row* and *1 total row left out*; *Wall perimeter* picked by hand, *Wall height* found by its words; **the walk moved itself to *Roof area — how many sf?*, 1 to go** |
+| Roof schedule (2 rows + grand total, `6" / 12"` slopes) | *Area 1,824 sf* suggested against *Roof area* by its words, the slope column correctly not a figure; **the walk moved itself to the rooms question** |
+| Room schedule (8 rows, two group headings, two group footers, grand total) | *Add the rooms — 7 on 2 floors, 6 with an area*, *Read from Name, Level and Area*, *Line 13: Storage is not placed in the model*, the second *Bathroom* as *Bathroom 203*, *Mud room · no area*; **the walk answered the rooms question and stood at the usual gate** — nine standards across nine phases, one tap |
+| The side-panel door, past the measure-up | the wall schedule read again, *Wall height* replaced 36 lf with 9 lf, and the walk did not move |
+
+Three pastes, four figures, seven rooms, no typing. The measure-up that took
+fifteen typed answers on EST-4 took three.
+
+**And the drive found a defect the tests had not.** The words matched *Wall
+height* to *Unconnected Height*, the default took the column's TOTAL, and
+**36 lf went onto the building** for a wall that is 9' tall on every one of
+four rows. The pack cannot know whether a uniform column wants its total
+(four equal roof planes) or its figure (four equal wall heights), so
+`suggestedUse` now suggests the MEASUREMENT and not the figure for such a
+column, the row reads *looks like Wall height — the total, or the figure on
+every row?*, and the person chooses. A plausible wrong number is worse than a
+refusal; this one was on the screen within a minute of driving and invisible
+to every test until one was written for it.
+
 ### 2026-09-21 — Sheets you can see, in the order you read them (`claude/sheets-you-can-see`)
 
 The founder, with the Wright house set read in and on the screen: *"The
@@ -2281,7 +2479,8 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_measurements.room_id` | **The room a measurement is about**, null for the building itself. The unique rule became TWO PARTIAL indexes: keyed on the project `WHERE room_id IS NULL`, keyed on the room where it is not — a plain unique over the nullable column would treat every building-level NULL as distinct and let them duplicate silently. `ON CONFLICT` therefore has to name which index it means, which is why `recordMeasurement` reads as two cases. Cascade from the room: the area belonged to it. |
 | `job_estimate_interviews.rooms_asked_at` | **When the measure-up asked what rooms are in the building** (X8). Stamped when the question is PUT rather than answered — "asked and waiting" and "not asked yet" are otherwise the same three nulls, and the walk would ask twice or never. |
 | `job_estimate_outline_measures` | **What to measure before the questions start** (X7, ADR 0100): the name, the `unit` the answer lands in, the `kind` of takeoff tool it wants (length / area / count), `guidance` in the business's own words, and `required`. | Composite FK to the outline, **cascade** — it is the outline's list, beside the steps and the questions, and **owner work** to edit for the same reason the steps are. CHECK: name present, kind on the list. Unique per `(outline, name)`. The test for belonging on it is whether MORE THAN ONE phase reads the number. |
-| `job_measurements` | **A number about the BUILDING** (X7, ADR 0100): name, `slug`, unit, `value_thousandths`, `source` (measured / said / derived), a note, and `passed_at` for *not on this job*. `sheet_id` / `markup_id` when it was traced. | Hangs off the **PROJECT**, not the estimate and not the walk — a perimeter does not change between revisions, so two walks and three revisions read one row. **Unique on `(tenant, project, slug)`**, which is what makes the name the identity and makes re-measuring a correction. CHECK: name and slug present, source on the list, and **a value OR a pass, never neither**. The two composite FKs are `ON DELETE SET NULL ("sheet_id")` / `("markup_id")` in **PG 15's column-list form** — the bare one drizzle-kit emits can never fire, because it would null `tenant_id`; the trace can go and the number stays, since it was true when it was taken. |
+| `job_assembly_keys` | **What the model calls an assembly** (X15, ADR 0107): the name a schedule off the model uses for a thing — `Basic Wall: Interior - 2x4 Wood Stud`, `Gypsum Wall Board` — and the assembly it means. `key` as written, `key_slug` reduced. | Composite FK to the assembly, **cascade** — the names go with it. **Unique per `(tenant, key_slug)`**: a name means ONE assembly per business, so confirming a different one later is a correction written on the slug, never a second row; the same name is free for the next business. CHECK: key and slug present. Written by the takeoff dialog on confirmation (`rememberKey`) and by the assembly page (`setAssemblyKeys`, which replaces the list and moves a name typed on a second assembly). |
+| `job_measurements` | **A number about the BUILDING** (X7, ADR 0100): name, `slug`, unit, `value_thousandths`, `source` (measured / said / derived / **schedule** — read off a schedule exported from the model, X14, ADR 0106), a note, and `passed_at` for *not on this job*. `sheet_id` / `markup_id` when it was traced. | Hangs off the **PROJECT**, not the estimate and not the walk — a perimeter does not change between revisions, so two walks and three revisions read one row. **Unique on `(tenant, project, slug)`**, which is what makes the name the identity and makes re-measuring a correction. CHECK: name and slug present, source on the list, and **a value OR a pass, never neither**. The two composite FKs are `ON DELETE SET NULL ("sheet_id")` / `("markup_id")` in **PG 15's column-list form** — the bare one drizzle-kit emits can never fire, because it would null `tenant_id`; the trace can go and the number stays, since it was true when it was taken. |
 | `job_estimate_interviews.pending_measure_id` / `.measured_at` | The measurement being asked for right now (so the answer lands on the row whose id was on screen, never on one the model inferred), and **when the walk stopped measuring and started asking**. `measured_at` is STAMPED, not derived: deriving it from "is the list answered" would drop every walk in progress back into measuring the moment somebody added a measurement to the outline. |
 | `job_bid_packages` | **One scope being priced** (X3, ADR 0098): what it is, the cost code by its DIGITS, the scope a subcontractor reads, when numbers are wanted by, open or closed. | Cascade from the project. Hung on the JOB, not an estimate, because a business asks for a number once and may price two revisions with it. CHECK: title present, status on the list. Behind the interview's grant in application code, not in a policy. |
 | `job_bid_invitations` | **One subcontractor asked, and what they said**: their own token, its expiry, views, and the reply — a number or a decline, with the name they typed and an IP hash. `is_awarded` for the one the business is going with. | Cascade from the package; **RESTRICT to the party** — a sub who has been asked for a number is kept. `token_hash` GLOBALLY unique with no tenant prefix (the public lookup has no tenant to scope by), token under AES-GCM so the link can be copied again. Unique per `(package, party)`: asking twice is one ask. **At most one award**, by a partial index. CHECK: **a reply is whole or absent** (ADR 0085's shape), and **`not is_awarded or amount_cents is not null`** — you cannot award a number nobody gave. |
@@ -2357,6 +2556,25 @@ ordering only bites when two new tables reference each other in one file.
   turn's prompt, which is the whole point of the slice. The drawings open over
   the walk through `SheetViewer`'s one optional `measuringFor` prop — not a
   second viewer.
+- `src/packs/jobs/bim-schedule.ts` + `bim-schedule-ops.ts` +
+  `components/bim-schedule-dialog.tsx` + the two `*BimScheduleAction`s in
+  `walk-actions.ts` — **a schedule off the model** (X14, ADR 0106). The pure
+  half turns a Revit-shaped export into a table and reads columns, rooms and
+  suggestions off the TABLE, so nothing past `parseSchedule` knows a vendor;
+  the ops half lands rooms through `addRoomList` and figures through
+  `recordMeasurement` as `source = 'schedule'`; the actions carry the walk on
+  through `afterMeasuring` / `answerRooms`. **Not `schedule-ops.ts`** — that
+  is the construction schedule, and a file by that name was overwritten once.
+- `src/packs/jobs/bim-takeoff.ts` + `bim-takeoff-ops.ts` + `bim-takeoff-actions.ts`
+  + `components/bim-takeoff-dialog.tsx` + `components/schedule-input.tsx` +
+  `insertTakeoff` in `estimate-editor.tsx` — **the takeoff off the model**
+  (X15, ADR 0107). The reader groups a schedule by the column that names
+  things and adds every figure up per name; the join is `job_assembly_keys`
+  (`listAssemblyKeys` / `keysOf` / `rememberKey` / `setAssemblyKeys`, in
+  `assembly-ops.ts`); the drop goes through the same `linesForDrop` as *Add
+  an assembly*, and the editor appends the items. `driverFor` is where the
+  care is: the row's figure in the ASSEMBLY's dimension, *Length* before
+  *Unconnected Height*, converted into its unit, or a refusal in words.
 
 - `src/packs/jobs/bonding-ops.ts` + `bonding-math.ts` +
   `components/bond-form.tsx` — surety bonds and the line behind them
@@ -2877,10 +3095,11 @@ ordering only bites when two new tables reference each other in one file.
   subcontractors, which the *Bidding it out* answer implies and which nothing
   in the pack does today (a commitment is the subcontract after you have bought
   it, and SES production access is still denied, so a request would reach only
-  a verified address); **quantities from a Revit schedule**, which is the
-  founder's own drawing tool and turns a takeoff into a join when the type
-  names carry the assembly keys; and **a takeoff opened inline** from a
-  question. Nothing in X1 touches the estimate editor, which is the claim of a
+  a verified address); **quantities from a Revit schedule** — **built
+  2026-09-21 as X14 (ADR 0106)**: a schedule exported from the model becomes
+  measurements and rooms; the join from type names to assemblies stays open
+  until there is a library to join against; and **a takeoff opened inline**
+  from a question. Nothing in X1 touches the estimate editor, which is the claim of a
   layer and what makes the pilot safe.
 - ~~**THE ESTIMATE SCREEN MAKES THE PAGE SCROLL SIDEWAYS.**~~ — **closed
   2026-09-16 (E3a, ADR 0081)**, and the cause was not the table's width:

@@ -6,7 +6,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { PageHeader } from "@/components/app/page-header";
-import { getAssembly } from "@/packs/jobs/assembly-ops";
+import { getAssembly, keysOf } from "@/packs/jobs/assembly-ops";
 import { thousandthsToQuantityString } from "@/packs/jobs/billing-math";
 import { PACK } from "@/packs/jobs/vocabulary";
 import { AssemblyEditor } from "@/packs/jobs/components/assembly-editor";
@@ -25,7 +25,10 @@ export default async function AssemblyPage({
 
   const found = await withTenant(
     ctx.tenant.id,
-    (tx) => getAssembly(tx, ctx.tenant.id, id),
+    async (tx) => {
+      const one = await getAssembly(tx, ctx.tenant.id, id);
+      return one ? { ...one, keys: await keysOf(tx, ctx.tenant.id, id) } : null;
+    },
     { role: ctx.role },
   );
   if (!found) notFound();
@@ -55,6 +58,7 @@ export default async function AssemblyPage({
         initialUnit={found.assembly.drivingUnit}
         initialLineShape={asLineShape(found.assembly.lineShape)}
         initialIsAllowance={found.assembly.isAllowance}
+        initialKeys={found.keys}
         initialLines={found.lines.map(toEditable)}
         canWrite={allowsWrite(ctx.role, "member")}
         symbol={ctx.tenant.currencySymbol ?? null}

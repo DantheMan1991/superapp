@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -60,6 +60,7 @@ export function AssemblyEditor({
   initialUnit,
   initialLineShape,
   initialIsAllowance,
+  initialKeys,
   initialLines,
   canWrite,
   symbol,
@@ -73,6 +74,8 @@ export function AssemblyEditor({
   initialUnit: string;
   initialLineShape: AssemblyLineShape;
   initialIsAllowance: boolean;
+  /** What the model calls it (X15). */
+  initialKeys: string[];
   initialLines: EditableLine[];
   canWrite: boolean;
   symbol: string | null;
@@ -86,6 +89,8 @@ export function AssemblyEditor({
   const [unit, setUnit] = useState(initialUnit);
   const [lineShape, setLineShape] = useState<AssemblyLineShape>(initialLineShape);
   const [isAllowance, setIsAllowance] = useState(initialIsAllowance);
+  const [keys, setKeys] = useState<string[]>(initialKeys);
+  const [newKey, setNewKey] = useState("");
   const [lines, setLines] = useState<EditableLine[]>(
     initialLines.length > 0 ? initialLines : [BLANK],
   );
@@ -120,6 +125,7 @@ export function AssemblyEditor({
           drivingUnit: unit,
           lineShape,
           isAllowance,
+          keys,
           lines: real.map((l) => ({
             description: l.description,
             clientDescription: l.clientDescription,
@@ -127,8 +133,9 @@ export function AssemblyEditor({
             unit: l.unit,
             quantityThousandths: quantityStringToThousandths(l.quantity) ?? 0,
             unitCostCents: parseMoneyToCents(l.unitCost) ?? 0,
-            markupPpm: l.markupPpm ?? 0,
-            unitPriceCents: l.unitPriceCents ?? 0,
+            /** Null stays null: unset is not zero (see the action's schema). */
+            markupPpm: l.markupPpm,
+            unitPriceCents: l.unitPriceCents,
             costCode: l.costCode,
           })),
         });
@@ -283,6 +290,68 @@ export function AssemblyEditor({
               </span>
             </span>
           </label>
+
+          {/*
+            WHAT THE MODEL CALLS IT (X15, ADR 0107). A takeoff off the model
+            names a thing by its type; these are the names that mean THIS
+            assembly, so the next takeoff maps itself. Confirming a match in
+            the takeoff dialog adds one here too.
+          */}
+          <div className="mt-4 border-t pt-4">
+            <Label htmlFor="new-key" className="text-xs">
+              What the model calls it
+            </Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              The names a schedule off the model uses for this thing —{" "}
+              <em>Basic Wall: Interior - 2x4 Wood Stud</em>, <em>Gypsum Wall Board</em>. A takeoff
+              that meets one of these drops this assembly in without asking.
+            </p>
+            {keys.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {keys.map((k) => (
+                  <li
+                    key={k}
+                    className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs"
+                  >
+                    {k}
+                    {canWrite && (
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={`Forget ${k}`}
+                        onClick={() => setKeys((was) => was.filter((x) => x !== k))}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canWrite && (
+              <form
+                className="mt-2 flex items-center gap-2 sm:max-w-md"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const k = newKey.trim();
+                  if (k === "" || keys.some((x) => x.toLowerCase() === k.toLowerCase())) return;
+                  setKeys((was) => [...was, k]);
+                  setNewKey("");
+                }}
+              >
+                <Input
+                  id="new-key"
+                  value={newKey}
+                  maxLength={200}
+                  placeholder="Basic Wall: Interior - 2x4 Wood Stud"
+                  onChange={(e) => setNewKey(e.target.value)}
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={newKey.trim() === ""}>
+                  Add
+                </Button>
+              </form>
+            )}
+          </div>
         </div>
       </Panel>
 

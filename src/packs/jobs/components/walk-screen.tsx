@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, CornerDownLeft, Receipt, Ruler, SkipForward } from "lucide-react";
+import { Check, CornerDownLeft, FileSpreadsheet, Receipt, Ruler, SkipForward } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import type { Reckoning } from "../walk-reckoning";
 import { StepCard, WalkRail, WalkReckoning } from "./walk-reckoning-panel";
 import { MeasureOnADrawing } from "./measure-on-a-drawing";
 import { RoomsDialog } from "./rooms-dialog";
+import { BimScheduleDialog } from "./bim-schedule-dialog";
 
 /** A line the walk has worked out but nobody has accepted yet. */
 interface ProposedRow {
@@ -275,6 +276,19 @@ export function WalkScreen({
    * work is. The answer box takes a figure, the drawings are one click
    * away, and the phase rail is beside the point until this is done.
    */
+  /**
+   * **A SCHEDULE OFF THE MODEL LANDS HERE** (X14), whichever door it came
+   * through: the view is the server's, the echo is stale, and the walk may
+   * have moved on several questions at once.
+   */
+  function afterImport(next: WalkView | null, finished: boolean) {
+    if (next) setView(next);
+    setEchoed(null);
+    refreshReckoning();
+    if (finished) toast.success("That is every question. See what is left below.");
+    router.refresh();
+  }
+
   const measuring = view.measuring.ask !== null;
   /** Either half of the measure-up: the phase rail is beside the point. */
   const settingUp = measuring || view.measuring.askingRooms;
@@ -498,6 +512,9 @@ export function WalkScreen({
                     }
                   />
                   {view.measuring.askingRooms && (
+                    <BimScheduleDialog interviewId={view.interviewId} onDone={afterImport} />
+                  )}
+                  {view.measuring.askingRooms && (
                     <span className="text-xs text-muted-foreground">
                       or paste them straight into the box above — one a line.
                     </span>
@@ -538,6 +555,7 @@ export function WalkScreen({
                       router.refresh();
                     }}
                   />
+                  <BimScheduleDialog interviewId={view.interviewId} onDone={afterImport} />
                   <span className="text-xs text-muted-foreground">
                     or type it — 248, 24 x 40 and 38&apos;-6&quot; all read.
                   </span>
@@ -718,6 +736,12 @@ export function WalkScreen({
                           aria-label="off a drawing"
                         />
                       )}
+                      {m.source === "schedule" && (
+                        <FileSpreadsheet
+                          className="size-3 shrink-0 self-center text-muted-foreground"
+                          aria-label="off the model"
+                        />
+                      )}
                     </span>
                   </li>
                 ))}
@@ -771,6 +795,21 @@ export function WalkScreen({
                 ))}
               </ul>
             </>
+          )}
+
+          {/**
+            * **THE MODEL IS STILL THERE AFTER THE MEASURE-UP** (X14). A
+            * second estimate on a re-drawn house, or a number typed wrong
+            * on the first pass, is one file away from being right.
+            */}
+          {!settingUp && (
+            <div className="mt-4">
+              <BimScheduleDialog
+                interviewId={view.interviewId}
+                onDone={afterImport}
+                size="xs"
+              />
+            </div>
           )}
         </Panel>
       </div>

@@ -39,6 +39,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardPaste,
+  FileSpreadsheet,
   Copy,
   CornerDownLeft,
   Eye,
@@ -90,6 +91,8 @@ import {
   revokeEstimateShareAction,
   updateEstimateAction,
 } from "../actions";
+import { BimTakeoffDialog } from "./bim-takeoff-dialog";
+import type { TakeoffResult } from "../bim-takeoff-actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
@@ -305,6 +308,13 @@ interface LineDraft {
   unitCost: string;
   markup: string;
   unitPrice: string;
+  /**
+   * Where the figures came from, when the editor knows (X15): a line an
+   * assembly made off the model. Undefined on a typed line, and the payload
+   * leaves the basis alone — the ops only write one when told to.
+   */
+  basis?: string;
+  basisDetail?: string;
 }
 
 let nextLineKey = 0;
@@ -884,6 +894,7 @@ export function EstimateEditor({
   const [asmUnit, setAsmUnit] = useState("");
   const [asmNotes, setAsmNotes] = useState("");
   const [dropOpen, setDropOpen] = useState(false);
+  const [takeoffOpen, setTakeoffOpen] = useState(false);
   const [dropId, setDropId] = useState("");
   const [dropQty, setDropQty] = useState("");
 
@@ -991,6 +1002,83 @@ export function EstimateEditor({
       setDropId("");
       setDropQty("");
     });
+  }
+
+  /**
+   * THE TAKEOFF OFF THE MODEL LANDS HERE (X15, ADR 0107). Each assembly the
+   * person confirmed is a new item with its lines, exactly as a dropped one
+   * arrives; each plain line is loose, priced from memory when it has one.
+   * Every line says where its figure came from, because a quantity nobody
+   * typed has to be accounted for out loud.
+   */
+  function insertTakeoff(result: TakeoffResult) {
+    const newGroups: GroupDraft[] = [];
+    const newLines: LineDraft[] = [];
+    const stamp = Date.now();
+    result.items.forEach((item, i) => {
+      const key = `new-model-${stamp}-${i}`;
+      newGroups.push({
+        key,
+        id: null,
+        name: item.name,
+        clientNote: item.clientNote,
+        section: "",
+        showLines: true,
+        isAllowance: item.isAllowance,
+        priceMode: "rollup",
+        fixedPrice: "",
+      });
+      for (const l of item.lines) {
+        newLines.push({
+          ...emptyLine(key),
+          costCodeId: l.costCodeId ?? NONE,
+          description: l.description,
+          clientDescription: l.clientDescription,
+          clientVisible: l.clientVisible,
+          unit: l.unit,
+          quantity:
+            l.quantityThousandths === 1000 ? "" : thousandthsToQuantityString(l.quantityThousandths),
+          unitCost: l.unitCostCents === 0 ? "" : (l.unitCostCents / 100).toFixed(2),
+          markup: l.markupPpm === null ? "" : (l.markupPpm / 10_000).toString(),
+          unitPrice: l.unitPriceCents === null ? "" : (l.unitPriceCents / 100).toFixed(2),
+          basis: "assembly",
+          basisDetail: item.basisDetail,
+        });
+      }
+    });
+    let priced = 0;
+    for (const l of result.loose) {
+      const remembered = fillFromMemory(priceBook, { description: l.description, unitCostCents: 0 });
+      if (remembered) priced += 1;
+      newLines.push({
+        ...draftOf(
+          {
+            description: l.description,
+            quantityThousandths: l.quantityThousandths,
+            unit: l.unit || (remembered?.unit ?? ""),
+            unitCostCents: remembered?.unitCostCents ?? 0,
+          },
+          "",
+        ),
+        basis: remembered ? "memory" : "none",
+        basisDetail: remembered
+          ? `your last price, on ${remembered.projectNumber} · ${l.basisDetail}`
+          : l.basisDetail,
+      });
+    }
+    if (newGroups.length > 0) setGroups((prev) => [...prev, ...newGroups]);
+    if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
+    const uncoded = result.items.reduce((n, item) => n + item.uncoded, 0);
+    if (uncoded > 0) {
+      toast.message(
+        `${uncoded} ${uncoded === 1 ? "line has" : "lines have"} no code on this job — pick one.`,
+      );
+    }
+    if (priced > 0) {
+      toast.message(
+        `${priced} ${priced === 1 ? "line" : "lines"} priced from what you charged last time. Check them — a price can be a year old.`,
+      );
+    }
   }
 
   /* ------------------------------------------------ the keyboard grid (E3c) */
@@ -1236,6 +1324,7 @@ export function EstimateEditor({
                   unitCostCents: l.unitCost,
                   markupPercent: l.markup,
                   unitPriceCents: l.unitPrice,
+                  ...(l.basis !== undefined ? { basis: l.basis, basisDetail: l.basisDetail ?? "" } : {}),
                 })),
             }),
       };
@@ -2649,6 +2738,13 @@ export function EstimateEditor({
                           <Package className="size-[15px]" /> Add an assembly
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setTakeoffOpen(true)}
+                        className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-4 text-[13px] font-medium transition-colors hover:bg-muted"
+                      >
+                        <FileSpreadsheet className="size-[15px]" /> From the model
+                      </button>
                     </div>
                     {entryError !== null ? (
                       <p className="text-xs text-destructive">{entryError}</p>
@@ -2986,6 +3082,15 @@ export function EstimateEditor({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* The takeoff off the model (X15, ADR 0107). */}
+      <BimTakeoffDialog
+        projectId={projectId}
+        open={takeoffOpen}
+        onOpenChange={setTakeoffOpen}
+        onDone={insertTakeoff}
+        symbol={symbol}
+      />
 
       {/* Save this item as an assembly (E6, ADR 0086). */}
       <Dialog open={saveFor !== null} onOpenChange={(o) => !o && setSaveFor(null)}>

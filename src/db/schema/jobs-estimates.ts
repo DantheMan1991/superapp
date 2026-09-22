@@ -643,9 +643,57 @@ export const jobAssemblyLines = pgTable(
   ],
 );
 
+/**
+ * WHAT THE MODEL CALLS AN ASSEMBLY (X15, ADR 0107).
+ *
+ * The founder draws in Revit, and a schedule off the model names every wall,
+ * floor and framing member by its TYPE — `Basic Wall: Exterior - 2x6 Wood
+ * Stud`, `Gypsum Wall Board`, `2x10`. An assembly is the business's own name
+ * for the same thing, priced once. This table is the join between the two:
+ * one row per name the model uses, pointing at the assembly it means, so the
+ * second takeoff off the same model maps itself.
+ *
+ * **A NAME MEANS ONE THING PER BUSINESS.** `key_slug` is unique per tenant,
+ * so a key cannot point at two assemblies and a re-mapping is a correction,
+ * not a second row. The key is kept as written for the screen; the slug is
+ * the identity.
+ *
+ * Nothing here is a Revit format: the key is whatever text the schedule's
+ * naming column carried, and a spreadsheet somebody typed joins the same way.
+ */
+export const jobAssemblyKeys = pgTable(
+  "job_assembly_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    assemblyId: uuid("assembly_id").notNull(),
+    /** As the model wrote it: "Basic Wall: Exterior - 2x6 Wood Stud". */
+    key: text("key").notNull(),
+    /** The key reduced to its identity. Unique per tenant. */
+    keySlug: text("key_slug").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("job_assembly_keys_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("job_assembly_keys_tenant_slug_idx").on(t.tenantId, t.keySlug),
+    index("job_assembly_keys_tenant_assembly_idx").on(t.tenantId, t.assemblyId),
+    /** A key belongs to its assembly and goes with it. */
+    foreignKey({
+      name: "job_assembly_keys_assembly_fk",
+      columns: [t.tenantId, t.assemblyId],
+      foreignColumns: [jobAssemblies.tenantId, jobAssemblies.id],
+    }).onDelete("cascade"),
+    check("job_assembly_keys_key_present", sql`length(btrim(${t.key})) > 0`),
+    check("job_assembly_keys_slug_present", sql`length(btrim(${t.keySlug})) > 0`),
+  ],
+);
+
 export type JobEstimate = typeof jobEstimates.$inferSelect;
 export type JobEstimateGroup = typeof jobEstimateGroups.$inferSelect;
 export type JobEstimateLine = typeof jobEstimateLines.$inferSelect;
 export type JobEstimateShare = typeof jobEstimateShares.$inferSelect;
 export type JobAssembly = typeof jobAssemblies.$inferSelect;
 export type JobAssemblyLine = typeof jobAssemblyLines.$inferSelect;
+export type JobAssemblyKey = typeof jobAssemblyKeys.$inferSelect;

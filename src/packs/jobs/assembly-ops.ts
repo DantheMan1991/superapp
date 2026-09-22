@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { AssemblyLineShape, JobAssembly, JobAssemblyLine } from "@/db/schema";
+import type { AssemblyLineShape, JobAssembly, JobAssemblyKey, JobAssemblyLine } from "@/db/schema";
 import { violatedUniqueIndex } from "@/lib/db-errors";
 import {
   explodeAssembly,
@@ -10,6 +10,7 @@ import {
   type ExplodedLine,
 } from "./assembly-math";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
+import { keySlug } from "./bim-takeoff";
 
 /**
  * THE ASSEMBLY LIBRARY (E6, ADR 0086) — saved items, and the items they make.
@@ -93,6 +94,8 @@ export interface SaveAssemblyInput {
   lineShape?: AssemblyLineShape;
   /** Every item this makes is an allowance (X12). Left out it stays as it is. */
   isAllowance?: boolean;
+  /** What the model calls it (X15, ADR 0107). Left out, the keys stay as they are. */
+  keys?: readonly string[];
   lines: readonly AssemblyLine[];
 }
 
@@ -161,6 +164,7 @@ export async function saveItemAsAssembly(
       sortOrder: (i + 1) * 10,
     })),
   );
+  if (input.keys) await setAssemblyKeys(tx, ctx, assembly.id, input.keys);
   return assembly;
 }
 
@@ -257,6 +261,7 @@ export async function updateAssembly(
       sortOrder: (i + 1) * 10,
     })),
   );
+  if (input.keys) await setAssemblyKeys(tx, ctx, id, input.keys);
   return rows[0];
 }
 
@@ -313,4 +318,100 @@ export async function linesForDrop(
     assembly: found.assembly,
     lines: exploded.map((l) => ({ ...l, costCodeId: resolveCostCode(l.costCode, codes) })),
   };
+}
+
+/* ------------------------------------------------------------------------
+ * WHAT THE MODEL CALLS IT (X15, ADR 0107).
+ *
+ * A schedule off the model names a thing by its type — `Basic Wall: Exterior
+ * - 2x6 Wood Stud`, `Gypsum Wall Board`, `2x10` — and an assembly is what
+ * the business builds that thing out of. These rows are the join, one per
+ * name, pointing at the assembly it means. A name means ONE assembly per
+ * business (`key_slug` is unique per tenant), so confirming a different one
+ * later is a correction, not a second row.
+ * ---------------------------------------------------------------------- */
+
+export async function listAssemblyKeys(tx: Tx, tenantId: string): Promise<JobAssemblyKey[]> {
+  return tx
+    .select()
+    .from(schema.jobAssemblyKeys)
+    .where(eq(schema.jobAssemblyKeys.tenantId, tenantId))
+    .orderBy(asc(schema.jobAssemblyKeys.key));
+}
+
+/** The names the model has used for one assembly, as they were written. */
+export async function keysOf(tx: Tx, tenantId: string, assemblyId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ key: schema.jobAssemblyKeys.key })
+    .from(schema.jobAssemblyKeys)
+    .where(
+      and(
+        eq(schema.jobAssemblyKeys.tenantId, tenantId),
+        eq(schema.jobAssemblyKeys.assemblyId, assemblyId),
+      ),
+    )
+    .orderBy(asc(schema.jobAssemblyKeys.key));
+  return rows.map((r) => r.key);
+}
+
+/**
+ * This name means this assembly. Written on the unique slug, so a name that
+ * pointed at another assembly moves rather than failing — the person just
+ * said what it means.
+ */
+export async function rememberKey(
+  tx: Tx,
+  ctx: JobsCtx,
+  assemblyId: string,
+  key: string,
+): Promise<void> {
+  requireWrite(ctx, "member");
+  const text = key.trim();
+  const slug = keySlug(text);
+  if (slug === "") throw new JobsError("INVALID_VALUE", "a name needs some words in it");
+  await tx
+    .insert(schema.jobAssemblyKeys)
+    .values({ tenantId: ctx.tenantId, assemblyId, key: text, keySlug: slug })
+    .onConflictDoUpdate({
+      target: [schema.jobAssemblyKeys.tenantId, schema.jobAssemblyKeys.keySlug],
+      set: { assemblyId, key: text },
+    });
+}
+
+/**
+ * The whole list for one assembly, as the library screen hands it back:
+ * names no longer on it are dropped, the rest are written — and a name that
+ * belonged to another assembly comes across, which is what typing it here
+ * means.
+ */
+export async function setAssemblyKeys(
+  tx: Tx,
+  ctx: JobsCtx,
+  assemblyId: string,
+  keys: readonly string[],
+): Promise<void> {
+  requireWrite(ctx, "member");
+  const wanted = new Map<string, string>();
+  for (const k of keys) {
+    const slug = keySlug(k);
+    if (slug !== "" && !wanted.has(slug)) wanted.set(slug, k.trim());
+  }
+  const current = await tx
+    .select({ id: schema.jobAssemblyKeys.id, keySlug: schema.jobAssemblyKeys.keySlug })
+    .from(schema.jobAssemblyKeys)
+    .where(
+      and(
+        eq(schema.jobAssemblyKeys.tenantId, ctx.tenantId),
+        eq(schema.jobAssemblyKeys.assemblyId, assemblyId),
+      ),
+    );
+  const gone = current.filter((c) => !wanted.has(c.keySlug)).map((c) => c.id);
+  if (gone.length > 0) {
+    await tx
+      .delete(schema.jobAssemblyKeys)
+      .where(
+        and(eq(schema.jobAssemblyKeys.tenantId, ctx.tenantId), inArray(schema.jobAssemblyKeys.id, gone)),
+      );
+  }
+  for (const text of wanted.values()) await rememberKey(tx, ctx, assemblyId, text);
 }

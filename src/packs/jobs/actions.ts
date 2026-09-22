@@ -2647,6 +2647,13 @@ const estimateLineSchema = z.object({
   /** An explicit price per unit; blank means priced by markup. */
   unitPriceCents: moneyToCents,
   notes: z.string().trim().max(1000).optional(),
+  /**
+   * Where a line's figures came from, when the editor knows (X15): a line
+   * an assembly made off the model says so. Left out, a line's basis is
+   * untouched — the editor posts none for a typed line.
+   */
+  basis: z.enum(["", "assembly", "memory", "said", "sub", "none"]).optional(),
+  basisDetail: z.string().trim().max(400).optional(),
 });
 
 const estimateSchema = z.object({
@@ -2721,7 +2728,7 @@ function estimateLines(
       unit: l.unit,
       quantityThousandths: l.quantity ?? 1000,
       unitCostCents: l.unitCostCents ?? 0,
-      markupPpm: l.markupPercent,
+      markupPpm: l.markupPercent, basis: l.basis, basisDetail: l.basisDetail,
       unitPriceCents: l.unitPriceCents,
       notes: l.notes,
     }));

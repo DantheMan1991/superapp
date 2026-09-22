@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, FileSpreadsheet, Upload } from "lucide-react";
+import { AlertTriangle, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,8 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { decodeScheduleBytes } from "../bim-schedule";
+import { ScheduleInput } from "./schedule-input";
 import type { SchedulePreview } from "../bim-schedule-ops";
 import { importBimScheduleAction, previewBimScheduleAction } from "../walk-actions";
 import type { WalkView } from "../walk-ops";
@@ -30,10 +29,9 @@ import type { WalkView } from "../walk-ops";
  * The words in a header are a suggestion, never a decision, because a wrong
  * measurement multiplies through every line that reads it.
  *
- * The file is read in the browser only to become text — UTF-16, which Revit
- * writes, would otherwise arrive as a NUL between every letter — and the
- * server reads that text for the preview and again for the write. Nothing
- * this component holds describes a row.
+ * The file becomes text in `ScheduleInput`, the one decoder the measure-up
+ * and the takeoff share, and the server reads that text for the preview and
+ * again for the write. Nothing this component holds describes a row.
  */
 
 const SELECT =
@@ -60,7 +58,6 @@ export function BimScheduleDialog({
   const [rowsPick, setRowsPick] = useState("");
   const [addRooms, setAddRooms] = useState(true);
   const [pending, startTransition] = useTransition();
-  const fileInput = useRef<HTMLInputElement>(null);
 
   function reset() {
     setText("");
@@ -97,19 +94,6 @@ export function BimScheduleDialog({
         toast.error("That did not get through. Try again.");
       }
     });
-  }
-
-  async function takeFile(file: File) {
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const decoded = decodeScheduleBytes(bytes);
-      setText(decoded);
-      setFileName(file.name);
-      setPreview(null);
-      look(decoded, file.name);
-    } catch {
-      toast.error("That file could not be read.");
-    }
   }
 
   const choices: { measureId: string; column: number | null; use: "total" | "each" | "rows" }[] =
@@ -195,57 +179,22 @@ export function BimScheduleDialog({
           </DialogHeader>
 
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".txt,.csv,.tsv,text/plain,text/csv,text/tab-separated-values"
-                className="hidden"
-                aria-label="The schedule file"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void takeFile(file);
-                  e.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={pending}
-                onClick={() => fileInput.current?.click()}
-              >
-                <Upload className="mr-1.5 size-4" /> Choose the file
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                {fileName !== "" ? fileName : "or paste it below"}
-              </span>
-            </div>
-
-            <Textarea
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
+            <ScheduleInput
+              text={text}
+              fileName={fileName}
+              pending={pending}
+              showRead={preview === null}
+              onChange={(next, name, read) => {
+                setText(next);
+                setFileName(name);
                 setPreview(null);
+                if (read) look(next, name);
               }}
-              rows={5}
-              className="font-mono text-xs"
-              maxLength={500_000}
-              aria-label="The schedule, pasted"
+              onRead={() => look(text, fileName)}
               placeholder={
                 '"Room Schedule"\n"Number"\t"Name"\t"Level"\t"Area"\n"101"\t"Kitchen"\t"Level 1"\t"310 SF"'
               }
             />
-            {!preview && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={pending || text.trim() === ""}
-                onClick={() => look(text, fileName)}
-              >
-                {pending ? "Reading…" : "Read it"}
-              </Button>
-            )}
 
             {preview && (
               <div className="space-y-4 rounded-md border p-3 text-sm">

@@ -2100,6 +2100,98 @@ d("jobs tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, theirs[0].id)));
   });
 
+  it("cannot read another tenant's ASSEMBLY KEYS; a name means one assembly per tenant; a key on another tenant's assembly is unrepresentable; and the keys go with the assembly", async () => {
+    const seeded = await withSystem(async (tx) => {
+      const a = await tx
+        .insert(schema.jobAssemblies)
+        .values({ tenantId: tenantA, name: "Drywall, hang and finish" })
+        .returning();
+      const k = await tx
+        .insert(schema.jobAssemblyKeys)
+        .values({ tenantId: tenantA, assemblyId: a[0].id, key: "Gypsum Wall Board", keySlug: "gypsum wall board" })
+        .returning();
+      const b = await tx
+        .insert(schema.jobAssemblies)
+        .values({ tenantId: tenantB, name: "Drywall, hang and finish" })
+        .returning();
+      return { assemblyId: a[0].id, keyId: k[0].id, theirsId: b[0].id };
+    });
+
+    // Tenant B sees nothing of it and changes nothing of it.
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobAssemblyKeys).where(eq(schema.jobAssemblyKeys.id, seeded.keyId)),
+      changed: await tx
+        .update(schema.jobAssemblyKeys)
+        .set({ key: "theirs" })
+        .where(eq(schema.jobAssemblyKeys.id, seeded.keyId))
+        .returning(),
+    }));
+    expect(seen.rows).toEqual([]);
+    expect(seen.changed).toEqual([]);
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.jobAssemblyKeys).where(eq(schema.jobAssemblyKeys.id, seeded.keyId)),
+    );
+    expect(mine).toHaveLength(1);
+
+    /**
+     * **A NAME MEANS ONE ASSEMBLY PER TENANT.** The model calling a thing
+     * `Gypsum Wall Board` cannot mean two assemblies to one business — a
+     * re-mapping is a correction, written on the slug. And the same name is
+     * free for the next business, which will map it to its own.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblyKeys).values({
+          tenantId: tenantA,
+          assemblyId: seeded.assemblyId,
+          key: "GYPSUM wall-board",
+          keySlug: "gypsum wall board",
+        }),
+      ),
+    ).rejects.toThrow();
+    const theirs = await withSystem((tx) =>
+      tx
+        .insert(schema.jobAssemblyKeys)
+        .values({ tenantId: tenantB, assemblyId: seeded.theirsId, key: "Gypsum Wall Board", keySlug: "gypsum wall board" })
+        .returning(),
+    );
+    expect(theirs).toHaveLength(1);
+
+    // A key on another tenant's assembly is unrepresentable.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblyKeys).values({
+          tenantId: tenantA,
+          assemblyId: seeded.theirsId,
+          key: "x",
+          keySlug: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+    // And a blank key is not a key.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.jobAssemblyKeys).values({
+          tenantId: tenantA,
+          assemblyId: seeded.assemblyId,
+          key: "  ",
+          keySlug: "  ",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // The keys go with the assembly.
+    await withSystem((tx) =>
+      tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, seeded.assemblyId)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx.select().from(schema.jobAssemblyKeys).where(eq(schema.jobAssemblyKeys.id, seeded.keyId)),
+      ),
+    ).toEqual([]);
+    await withSystem((tx) => tx.delete(schema.jobAssemblies).where(eq(schema.jobAssemblies.id, seeded.theirsId)));
+  });
+
   it("cannot read or change another tenant's ESTIMATE OUTLINES; a step and a question hang off this tenant's rows; the name is unique per tenant; there is one default or none; a choice's options and its kind cannot disagree; and the whole tree goes together", async () => {
     const seeded = await withSystem(async (tx) => {
       const o = await tx

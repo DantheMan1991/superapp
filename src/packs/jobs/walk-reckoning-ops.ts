@@ -7,6 +7,8 @@ import type { WalkAnswer, WalkStep } from "./walk-math";
 import { reckonWalk, type Reckoning, type StepBidFacts, type StepFacts } from "./walk-reckoning";
 import { roomsWithNothingPriced } from "./room-math";
 import { asRoomFacts, listRooms } from "./room-ops";
+import { coverageOf } from "./walk-coverage";
+import { assemblyNamesOf, onEstimateOf } from "./walk-coverage-ops";
 
 /**
  * THE READS BEHIND THE RECKONING (X4, ADR 0098).
@@ -175,10 +177,13 @@ export async function reckoningFor(
   },
   now: Date = new Date(),
 ): Promise<Reckoning> {
-  const [applied, bids, rooms, descriptions] = await Promise.all([
+  const [applied, bids, rooms, onEstimate, assemblyNames, descriptions] = await Promise.all([
     appliedByStep(tx, tenantId, input.interviewId),
     bidsByCode(tx, tenantId, input.projectId, now),
     listRooms(tx, tenantId, input.projectId),
+    /** What the estimate already has that is not this walk's (X17). */
+    onEstimateOf(tx, tenantId, input.interviewId, input.estimateId),
+    assemblyNamesOf(tx, tenantId),
     /**
      * **EVERY line on the estimate, not just the ones the walk wrote.** A
      * room covered by a line somebody typed by hand is covered, and a check
@@ -199,12 +204,17 @@ export async function reckoningFor(
   for (const step of input.steps) {
     const a = applied.get(step.id);
     const bid = bids.get(codeKey(step.costCode)) ?? null;
-    if (!a && !bid) continue;
+    const cov = coverageOf(step, onEstimate, assemblyNames);
+    if (!a && !bid && !cov) continue;
     facts.set(step.id, {
       appliedLines: a?.appliedLines ?? 0,
       appliedCents: a?.appliedCents ?? 0,
       zeroLines: a?.zeroLines ?? 0,
       bid,
+      onEstimateLines: cov?.lines.length ?? 0,
+      onEstimateCents: cov?.costCents ?? 0,
+      onEstimateZero: cov?.unpriced ?? 0,
+      onEstimateFrom: cov?.from ?? "",
     });
   }
 

@@ -232,9 +232,10 @@ missing, but nothing has to be measured twice.
 
 ## Then it agrees the usual
 
-The last thing before the first phase, and only when your outline has
-standards on it (*Usually*, on a question — see
-[Estimate outlines](estimate-outlines.md)).
+The last thing before the first phase, and only when there is something to
+take as read: standards on your outline (*Usually*, on a question — see
+[Estimate outlines](estimate-outlines.md)), or phases the estimate already
+has lines for.
 
 It lists what it is about to take as read, grouped so it is short enough to
 actually read:
@@ -243,11 +244,33 @@ actually read:
 >
 > - Who is doing this one? In-house — Cast-in-place concrete, Site work and excavation, Drywall
 >
+> And these phases are already on the estimate, so I will move past them:
+>
+> - Drywall — $6,952.50 in 2 lines, off the model
+> - Roofing — $4,100.00 in 1 line
+>
 > Right for this one? Anything you say no to, I will ask you about as we go.
 
 {button:That's right|outline} takes them, phase by phase, as the walk reaches
 each one. {button:Ask me everything|outline} takes none of them on this bid
 and asks every question as usual.
+
+**A phase the estimate already has.** When you brought the takeoff in off
+the model, typed an item by hand, or walked this estimate before, some phases
+already have lines. A phase's lines are the ones on its cost code, or in the
+item made by the assembly the phase is pinned to — never a guess from the
+words. The gate names each such phase with what is on it, how many lines and
+where they came from (*off the model* when the takeoff made them). With
+{button:That's right|outline}, a covered phase's questions are settled as it
+opens — every one except a question marked *always ask*, which is asked
+whatever the estimate holds — each marked *passed — already on the estimate*
+in *What you have said*, and the walk moves past the phase without pricing it
+again. With {button:Ask me everything|outline} the questions are asked, but
+the phase still ends in the money it already has rather than a second set of
+lines: no button here ever prices the drywall twice. On the rail the phase
+reads *2 lines already on the estimate, off the model* with its amount; lines
+nobody has priced yet read *no prices* instead, and the phase stays a hole
+until they are.
 
 **It never takes one quietly.** Each answer it settles this way is marked
 {badge:your usual} where you can see it — in *What you have said* and in the

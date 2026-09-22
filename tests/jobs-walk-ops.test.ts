@@ -14,9 +14,12 @@ import {
   recordAnswers,
   reopenQuestion,
   startWalk,
+  settleCovered,
 } from "../src/packs/jobs/walk-ops";
 import { applyProposal, listProposal, proposeLines } from "../src/packs/jobs/walk-lines-ops";
 import { stepIsCovered } from "../src/packs/jobs/walk-math";
+import { coverageOf } from "../src/packs/jobs/walk-coverage";
+import { reckoningFor } from "../src/packs/jobs/walk-reckoning-ops";
 import { JobsError, type JobsCtx } from "../src/packs/jobs/ops";
 
 /**
@@ -120,6 +123,77 @@ d("walking an estimate: the write path", () => {
         },
       ]),
     );
+
+  it("A PHASE THE ESTIMATE ALREADY HAS is seen, settled once the gate agreed, and reckoned as priced (X17)", async () => {
+    const interviewId = await aWalk();
+    const first = (await run((tx) => getWalk(tx, tenantId, interviewId)))!;
+    const estimateId = first.interview.estimateId;
+    /** An item named after the assembly the Drywall step is pinned to, with a line off the model. */
+    await run(async (tx) => {
+      const asm = await tx
+        .insert(schema.jobAssemblies)
+        .values({ tenantId, name: "Drywall, hang and finish" })
+        .returning();
+      await tx
+        .update(schema.jobEstimateOutlineSteps)
+        .set({ assemblyId: asm[0].id })
+        .where(eq(schema.jobEstimateOutlineSteps.id, stepIds[1]));
+      const g = await tx
+        .insert(schema.jobEstimateGroups)
+        .values({ tenantId, estimateId, name: "Drywall, hang and finish" })
+        .returning();
+      await tx.insert(schema.jobEstimateLines).values({
+        tenantId,
+        estimateId,
+        groupId: g[0].id,
+        description: "Hang, tape and finish",
+        unit: "sf",
+        quantityThousandths: 3_708_000,
+        unitCostCents: 150,
+        basis: "assembly",
+        basisDetail: "Drywall, hang and finish at 3,708 sf · off the model: Wall Schedule",
+      });
+    });
+
+    const walk = (await run((tx) => getWalk(tx, tenantId, interviewId)))!;
+    expect(walk.onEstimate.map((l) => [l.groupName, l.costCents])).toEqual([
+      ["Drywall, hang and finish", 556_200],
+    ]);
+    const drywall = walk.steps[1];
+    expect(coverageOf(walk.steps[0], walk.onEstimate, walk.assemblyNames)).toBeNull();
+    const cov = coverageOf(drywall, walk.onEstimate, walk.assemblyNames);
+    expect(cov?.costCents).toBe(556_200);
+    expect(cov?.from).toBe("off the model");
+
+    /** Nothing is settled until the gate agreed, and then every question but a must-ask. */
+    const answers = asWalkAnswers(walk.answers);
+    expect(await run((tx) => settleCovered(tx, ctx, interviewId, drywall, answers, null, cov, "$"))).toBe(0);
+    expect(await run((tx) => settleCovered(tx, ctx, interviewId, drywall, answers, true, cov, "$"))).toBe(1);
+    const after = (await run((tx) => getWalk(tx, tenantId, interviewId)))!;
+    expect(after.answers.filter((a) => a.stepId === stepIds[1]).map((a) => [a.skipped, a.skipReason])).toEqual([
+      [true, "already on the estimate — $5,562.00 in 1 line, off the model"],
+    ]);
+    /** And again settles nothing: it reads what is outstanding. */
+    expect(
+      await run((tx) => settleCovered(tx, ctx, interviewId, drywall, asWalkAnswers(after.answers), true, cov, "$")),
+    ).toBe(0);
+
+    const reckoning = await run((tx) =>
+      reckoningFor(tx, tenantId, {
+        interviewId,
+        projectId,
+        estimateId,
+        steps: after.steps,
+        answers: asWalkAnswers(after.answers),
+      }),
+    );
+    const step = reckoning.steps.find((s) => s.stepId === stepIds[1])!;
+    expect([step.standing, step.amountCents, step.detail]).toEqual([
+      "priced",
+      556_200,
+      "1 line already on the estimate, off the model",
+    ]);
+  });
 
   it("A PERSON PICKS A FINISHED WALK BACK UP; the walk itself cannot", async () => {
     const interviewId = await aWalk();

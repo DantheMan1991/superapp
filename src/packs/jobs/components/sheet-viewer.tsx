@@ -42,7 +42,7 @@ import {
 } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
 import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
-import { STANDARD_SCALES, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, type Measurement, type SheetScale } from "../takeoff-math";
+import { STANDARD_SCALES, driftedSince, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, unitAccepts, type Measurement, type SheetScale } from "../takeoff-math";
 import {
   MARKUP_COLORS,
   MARKUP_COLOR_HEX,
@@ -78,7 +78,7 @@ export interface MarkupView {
   workItemId: string | null;
   punch: { title: string; done: boolean; dueOn: string | null } | null;
   /** The estimate line a measurement was pushed onto, as it stands now (ADR 0074). */
-  takeoff: { estimateId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
+  takeoff: { estimateId: string; lineId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
   pushedQuantityThousandths: number | null;
 }
 
@@ -1033,8 +1033,8 @@ function MarkupRowView({
   const [armed, setArmed] = useState(false);
   const hex = MARKUP_COLOR_HEX[m.color];
   const measuring = isMeasureKind(m.kind);
-  const drifted =
-    measuring && m.takeoff && m.pushedQuantityThousandths !== null && measurement !== null && Math.abs(toThousandths(measurement.quantity) - m.pushedQuantityThousandths) > Math.max(5, m.pushedQuantityThousandths * 0.005);
+  /** Against what THIS measurement pushed — its own share of the line, so a second one on the same line does not read as drifted the moment after. */
+  const drifted = measuring && m.takeoff !== null && driftedSince(m.pushedQuantityThousandths, measurement);
 
   function toggleDone(done: boolean) {
     const itemId = m.workItemId;
@@ -1567,7 +1567,11 @@ function TakeoffDialog({
     setIncluded(new Set([markup.id]));
     setDescription(markup.text || MARKUP_KIND_LABELS[markup.kind]);
     setEstimateId(markup.takeoff?.estimateId ?? estimates[0]?.id ?? NONE);
-    setLineId(markup.takeoff ? findLineId(estimates, markup.takeoff.estimateId, markup.takeoff.lineDescription) : NEW_LINE);
+    setLineId(
+      markup.takeoff
+        ? pushedLineId(estimates, markup.takeoff, isMeasureKind(markup.kind) ? takeoffUnitFor(markup.kind, scale?.unit ?? "") : "")
+        : NEW_LINE,
+    );
   }
   const kind = markup && isMeasureKind(markup.kind) ? markup.kind : null;
   const siblings = kind ? markups.filter((m) => m.kind === kind && measurements.get(m.id)) : [];
@@ -1679,11 +1683,16 @@ function TakeoffDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NEW_LINE}>A new line</SelectItem>
-                {(estimate?.lines ?? []).map((l) => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.description} · {thousandthsToQuantityString(l.quantityThousandths)} {l.unit}
-                  </SelectItem>
-                ))}
+                {(estimate?.lines ?? []).map((l) => {
+                  /** A line priced in another unit is shown and cannot be picked: the quantity would be wrong in a way nothing downstream can see. */
+                  const takes = unitAccepts(l.unit, lineUnit);
+                  return (
+                    <SelectItem key={l.id} value={l.id} disabled={!takes}>
+                      {l.description} · {thousandthsToQuantityString(l.quantityThousandths)} {l.unit}
+                      {takes ? "" : ` · priced per ${l.unit.trim()}, cannot take ${lineUnit}`}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>
@@ -1722,7 +1731,8 @@ function TakeoffDialog({
   );
 }
 
-function findLineId(estimates: EstimateOption[], estimateId: string, description: string): string {
-  const line = estimates.find((e) => e.id === estimateId)?.lines.find((l) => l.description === description);
-  return line?.id ?? NEW_LINE;
+/** The line a measurement already stands behind, by its id — while the estimate still has it and it can take this unit; else a new line. */
+function pushedLineId(estimates: EstimateOption[], takeoff: NonNullable<MarkupView["takeoff"]>, lineUnit: string): string {
+  const line = estimates.find((e) => e.id === takeoff.estimateId)?.lines.find((l) => l.id === takeoff.lineId);
+  return line && unitAccepts(line.unit, lineUnit) ? line.id : NEW_LINE;
 }

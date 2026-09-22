@@ -126,6 +126,63 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-22 — What a measurement pushed is its own share (`claude/takeoff-measured-since`)
+
+Two defects in the takeoff (9c, [ADR 0074](../decisions/0074-a-measurement-is-a-markup-with-a-quantity-the-scale-is-the-sheets-and-a-takeoff-is-a-quantity-pushed-onto-an-estimate-line.md)),
+both found by clicking the tool during the founder's improvement pass of the
+drawings takeoff, both invisible to the suite — whose 9c drive had noted *"not
+driven: two measurements added up"*.
+
+**"Measured since" lied on every push of more than one measurement.**
+`pushTakeoff` stamped the line's TOTAL into `pushed_quantity_thousandths` on
+every markup in the push, and the row's chip compared each markup's OWN
+quantity against it — so two areas pushed together (59 + 52.2 sf) both read
+*→ EST-2 · Flooring, kitchen · 111.198 sf · measured since* the moment after,
+with nothing re-measured. The column now holds the quantity THIS measurement
+contributed — its own share — and the comparison is `driftedSince` in
+`takeoff-math.ts`, pure and tested with the bug's own numbers; the ops
+scenario asserts both shares after a two-area push. The line's total is what
+it was; only what each measurement remembers has changed.
+
+**A push onto an existing line ignored the line's unit.** The line kept its
+own unit whatever the measurement was, so an area in square feet could set
+the quantity on a line priced per linear foot, per square yard or per lump
+sum with no conversion and no refusal — a plausible wrong number that prints
+on the proposal. `unitAccepts` (pure): a blank unit adopts the measurement's,
+the same word however spelled keeps it (`sf`, `sq ft`, `sq. ft.`, `square
+feet`), anything else is REFUSED by name — *Baseboard is priced per lf and
+this measures 93.5 sq ft; pick a line priced per sf, or a new line* — a new
+`JobsError` code, `UNIT_MISMATCH`. The same family is refused too, on
+purpose: `sq` is a roofing square to one business and a square yard to the
+next, so a conversion that guessed would be the same wrong number;
+converting the unambiguous ones (sf → sy, m → lf) is an open item. The
+dialog lists such lines greyed out with the reason, and a new line asked for
+in another unit refuses as well.
+
+**And one small one on the way past:** the dialog preselected the line a
+measurement stood behind by matching its DESCRIPTION, so two lines with the
+same words picked the wrong one. The view carries the line's id now
+(`takeoff.lineId`) and preselects by it, falling back to *A new line* when
+that line can no longer take the unit.
+
+**No migration.** The column's meaning changed, not its shape, and every row
+a single-measurement push ever wrote already holds its own share (for one
+measurement the share IS the total). A row a multi-measurement push wrote
+before this holds the total and reads as drifted until it is pushed again,
+which is the one thing a re-push corrects.
+
+**Driven** on the dev branch's Hilltop Farm 24-109, sheet A-101, on this
+worktree's own server. A second area (52.2 sq ft) drawn beside 9c's (59 sq ft),
+*Takeoff* on it with both ticked onto EST-2's *Flooring, kitchen*: both rows
+read `→ EST-2 · Flooring, kitchen · 111.198 sf` with **no** *measured since*,
+where the code before this read *measured since* on both the moment after. The
+*Line* list showed *Footing concrete · 1 cy · priced per cy, cannot take sf* and
+the three `ls` lines greyed out, the blank-unit lines and *Slab on grade · 1 sf*
+open to pick. *Takeoff* on the 59 sq ft row then opened with *Flooring, kitchen
+· 111.198 sf* already picked — by id now — and pushing it alone put the line
+back to 59.026 sf; the second area was rubbed out, so the worked example is as
+it was.
+
 ### 2026-09-21 — The picture is the card (`claude/bigger-thumbnails`)
 
 The founder, with pictures on his set at last: *"there is a fair amount of
@@ -2488,7 +2545,7 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
-| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and what it pushed. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
+| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and the quantity THIS measurement contributed to it (`pushed_quantity_thousandths` — its own share, never the line's total, so two pushed together each watch their own). | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
 | `job_back_charges` | Money the business spent that was the subcontractor's (ADR 0077), kept back from their next application: a number per order, what was paid for, the amount (always > 0), the day it went out, the cost code it landed on, the warranty claim it came from, and the application it rides while it rides one. | Cascade from the commitment; **SET NULL (column-list form) from `job_cost_codes`, `job_warranty_claims` AND `job_sub_applications`**. UNIQUE (commitment, number). CHECK: number > 0, amount > 0, description present and ≤ 300, status in (`open`, `void`), and `void` implies no application — the one impossible state. Where it stands is never stored. |
 | `job_bonds` | A surety bond (ADR 0078): the kind (OPEN taxonomy, format-checked), the surety (a party), the penal sum, the premium and the code it belongs on, the contract it names when there is one, effective / expiry / released dates, and `requested` \| `issued` \| `released` \| `void`. | Cascade from the project; **SET NULL (column-list form) from `job_contracts` and `job_cost_codes`**; no `onDelete` to the party. CHECK: kind format, penal sum > 0, `coalesce(premium, 0) >= 0`, a bond in force carries its effective date, `(status = 'released') = (released_on is not null)`, expiry not before effective. Where it stands is never stored. |
@@ -3034,7 +3091,9 @@ ordering only bites when two new tables reference each other in one file.
   markup on a photo, burning markups into a PDF to send, telling the pinned
   trade (the digest and Mail are the seams); and from the takeoff, a scale
   read from the PDF's own metadata, an opening deducted from an area, a
-  volume, a running total across sheets, and the reverse link from an
+  volume, a running total across sheets, a quantity converted into a line's
+  own unit (sf → sy, m → lf — today a line priced in another unit is refused
+  by name, `unitAccepts`), and the reverse link from an
   estimate line back to the sheets that fed it. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is

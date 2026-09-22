@@ -137,7 +137,7 @@ export interface MarkupRow {
   /** The pin's punch item as Work has it now, while it exists. */
   punch: { title: string; done: boolean; dueOn: string | null } | null;
   /** The estimate line a measurement was pushed onto, as the estimate has it now, while the line exists (ADR 0074). */
-  takeoff: { estimateId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
+  takeoff: { estimateId: string; lineId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
 }
 
 /** Everything drawn on one issue of a sheet, oldest first, with each pin's punch item as it stands. */
@@ -174,6 +174,7 @@ export async function listMarkups(tx: Tx, tenantId: string, sheetId: string): Pr
       r.markup.estimateLineId && r.lineDescription !== null && r.estimateId !== null
         ? {
             estimateId: r.estimateId,
+            lineId: r.markup.estimateLineId,
             estimateNumber: r.estimateNumber ?? "",
             estimateStatus: r.estimateStatus ?? "",
             lineDescription: r.lineDescription,

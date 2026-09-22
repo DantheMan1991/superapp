@@ -7,12 +7,14 @@ import { getSheet } from "./drawings-ops";
 import { getMarkup } from "./markups-ops";
 import { parsePoints } from "./markups-math";
 import {
+  formatMeasure,
   measure,
   scaleFromKnownLength,
   scaleFromStandard,
   sumMeasurements,
   takeoffUnitFor,
   toThousandths,
+  unitAccepts,
   type Measurement,
   type SheetScale,
 } from "./takeoff-math";
@@ -131,8 +133,12 @@ export interface TakeoffResult {
  * they need one, on a sheet of the estimate's job; the estimate must not be
  * accepted (its money is the agreement). The line's quantity BECOMES the
  * total — a push is a statement, not an increment — and each measurement
- * remembers the line and what it pushed, so the page can say when the
- * drawing has moved on from the estimate.
+ * remembers the line and the quantity IT contributed to the total, so the
+ * page can say when this measurement has moved on from what it pushed.
+ *
+ * The line's unit is the measurement's, or blank: an area cannot be set on a
+ * line priced per linear foot or per square yard (`unitAccepts`), because the
+ * quantity would be wrong in a way nothing downstream can see.
  */
 export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Promise<TakeoffResult> {
   requireWrite(ctx, "member");
@@ -157,12 +163,12 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
     .from(schema.jobSheets)
     .where(and(eq(schema.jobSheets.tenantId, ctx.tenantId), inArray(schema.jobSheets.id, sheetIds)));
   const sheetById = new Map(sheets.map((s) => [s.id, s]));
-  const rows: { kind: MeasureKind; measurement: Measurement | null }[] = [];
+  const rows: { id: string; kind: MeasureKind; measurement: Measurement | null }[] = [];
   for (const m of markups) {
     if (!isMeasureKind(m.kind)) throw new JobsError("INVALID_KIND", "only a length, an area or a count carries a quantity");
     if (m.projectId !== est.projectId) throw new JobsError("WRONG_PROJECT", "that measurement is on another job's sheet");
     const sheet = sheetById.get(m.sheetId);
-    rows.push({ kind: m.kind, measurement: measurementOf(m, sheet ? scaleOf(sheet) : null) });
+    rows.push({ id: m.id, kind: m.kind, measurement: measurementOf(m, sheet ? scaleOf(sheet) : null) });
   }
   let summed: ReturnType<typeof sumMeasurements>;
   try {
@@ -182,6 +188,12 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
       .where(and(eq(schema.jobEstimateLines.tenantId, ctx.tenantId), eq(schema.jobEstimateLines.id, input.lineId)))
       .limit(1);
     if (line.length === 0 || line[0].estimateId !== est.id) throw new JobsError("NOT_FOUND", "that line is not on this estimate");
+    if (!unitAccepts(line[0].unit, unit)) {
+      throw new JobsError(
+        "UNIT_MISMATCH",
+        `${line[0].description} is priced per ${line[0].unit.trim()} and this measures ${formatMeasure(summed.total)}; pick a line priced per ${unit}, or a new line`,
+      );
+    }
     await tx
       .update(schema.jobEstimateLines)
       .set({ quantityThousandths, unit: line[0].unit.trim() === "" ? unit : line[0].unit, updatedAt: new Date() })
@@ -191,6 +203,8 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
     const description = input.newLine.description.trim();
     if (description === "") throw new JobsError("INVALID_VALUE", "a new line needs saying what it is");
     if (description.length > 300) throw new JobsError("INVALID_VALUE", "a line's description is at most 300 characters");
+    const given = input.newLine.unit?.trim() ?? "";
+    if (!unitAccepts(given, unit)) throw new JobsError("UNIT_MISMATCH", `a line priced per ${given} cannot take ${formatMeasure(summed.total)}; its unit is ${unit}`);
     const last = await tx
       .select({ top: max(schema.jobEstimateLines.sortOrder) })
       .from(schema.jobEstimateLines)
@@ -212,10 +226,14 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   } else {
     throw new JobsError("INVALID_VALUE", "say which line the quantity goes on, or describe a new one");
   }
-  await tx
-    .update(schema.jobSheetMarkups)
-    .set({ estimateLineId: lineId, pushedQuantityThousandths: quantityThousandths, updatedAt: new Date() })
-    .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), inArray(schema.jobSheetMarkups.id, ids)));
+  // Each measurement remembers the line and ITS OWN quantity — never the line's total, or a
+  // second measurement pushed onto the same line would read as drifted the moment after.
+  for (const r of rows) {
+    await tx
+      .update(schema.jobSheetMarkups)
+      .set({ estimateLineId: lineId, pushedQuantityThousandths: toThousandths(r.measurement!.quantity), updatedAt: new Date() })
+      .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), eq(schema.jobSheetMarkups.id, r.id)));
+  }
   // Measurements that fed this line before and were not in this push no longer stand behind its quantity.
   await tx
     .update(schema.jobSheetMarkups)

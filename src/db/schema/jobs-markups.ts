@@ -44,8 +44,10 @@ export const jobSheetMarkups = pgTable(
     workItemId: uuid("work_item_id"),
     /**
      * THE TAKEOFF (ADR 0074): the estimate line a measurement's quantity was
-     * pushed onto, while the line exists, and the quantity that was pushed —
-     * so the page can say when the measurement has drifted from the line.
+     * pushed onto, while the line exists, and the quantity THIS measurement
+     * contributed to it — its own, never the line's total (two pushed
+     * together each hold their own share) — so the page can say when this
+     * measurement has drifted from what it pushed.
      */
     estimateLineId: uuid("estimate_line_id"),
     pushedQuantityThousandths: bigint("pushed_quantity_thousandths", { mode: "number" }),

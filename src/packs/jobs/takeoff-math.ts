@@ -175,6 +175,74 @@ export function toThousandths(quantity: number): number {
 }
 
 /**
+ * THE LINE'S UNIT MUST BE THE MEASUREMENT'S, OR NOTHING.
+ *
+ * A push sets a quantity and the line's unit price does the rest, so an area
+ * landing on a line priced per linear foot, per square yard or per lump sum
+ * is a plausible wrong number that goes out in a proposal — the class this
+ * pack refuses on sight. The trade spells one unit several ways (`sf`,
+ * `sq ft`, `sq. ft.`, `square feet`), so a unit is reduced to the takeoff's
+ * own word first; anything else is refused by name rather than converted,
+ * because `sq` is a roofing square to one business and a square yard to the
+ * next, and a conversion that guessed would be the same wrong number.
+ */
+const UNIT_WORDS: Record<string, string> = {
+  lf: "lf",
+  "lin ft": "lf",
+  linft: "lf",
+  lnft: "lf",
+  ft: "lf",
+  feet: "lf",
+  foot: "lf",
+  "linear feet": "lf",
+  "linear foot": "lf",
+  "lineal feet": "lf",
+  sf: "sf",
+  sqft: "sf",
+  "sq ft": "sf",
+  "square feet": "sf",
+  "square foot": "sf",
+  ea: "ea",
+  each: "ea",
+  m: "m",
+  lm: "m",
+  metre: "m",
+  metres: "m",
+  meter: "m",
+  meters: "m",
+  m2: "m2",
+  "m²": "m2",
+  sqm: "m2",
+  "sq m": "m2",
+  "square metres": "m2",
+  "square meters": "m2",
+};
+
+/** A unit as the trade writes it, reduced to the takeoff's word for it when it is one of those — else itself, lower-cased and trimmed. */
+export function normaliseUnit(unit: string): string {
+  const reduced = unit.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+  return UNIT_WORDS[reduced] ?? reduced;
+}
+
+/** Whether a line in this unit can take a quantity in the takeoff's unit: blank adopts it, the same word however spelled keeps it, anything else refuses. */
+export function unitAccepts(lineUnit: string, takeoffUnit: string): boolean {
+  const line = normaliseUnit(lineUnit);
+  return line === "" || line === normaliseUnit(takeoffUnit);
+}
+
+/**
+ * Whether a measurement has moved on from what IT pushed: its quantity now
+ * against the quantity it contributed to the line — its own, never the
+ * line's total, or two measurements pushed together would both read as
+ * drifted the moment after. Half a percent of slack, five thousandths on
+ * anything smaller than one. The scale set again is what moves it.
+ */
+export function driftedSince(pushedThousandths: number | null, now: Measurement | null): boolean {
+  if (pushedThousandths === null || now === null) return false;
+  return Math.abs(toThousandths(now.quantity) - pushedThousandths) > Math.max(5, pushedThousandths * 0.005);
+}
+
+/**
  * Several measurements onto one line: they must be the same kind of thing.
  * Two rooms' floors add up; a floor and a wall length do not.
  */

@@ -707,6 +707,37 @@ export function isScaleUnit(v: string): v is ScaleUnit {
 }
 /** A measurement has at most this many points; a wall has fewer corners. */
 export const MEASURE_POINTS_MAX = 500;
+/**
+ * The figures a trace yields (ADR 0110): its own kind, and the ones the trade
+ * derives from it — the run around an area, the wall a length stands with a
+ * height, the roof an area pitches to, the volume it fills with a depth.
+ * Mirrors `job_estimate_line_traces_figure_valid`.
+ */
+export const TRACE_FIGURES = ["length", "area", "count", "perimeter", "wall", "roof", "volume"] as const;
+export type TraceFigure = (typeof TRACE_FIGURES)[number];
+export function isTraceFigure(v: string): v is TraceFigure {
+  return (TRACE_FIGURES as readonly string[]).includes(v);
+}
+/** What kind of quantity a figure is: a perimeter is a length, a wall and a roof are areas, a volume is its own. */
+export type FigureFamily = MeasureKind | "volume";
+export const FIGURE_FAMILY: Record<TraceFigure, FigureFamily> = {
+  length: "length",
+  area: "area",
+  count: "count",
+  perimeter: "length",
+  wall: "area",
+  roof: "area",
+  volume: "volume",
+};
+export const TRACE_FIGURE_LABELS: Record<TraceFigure, string> = {
+  length: "Length",
+  area: "Area",
+  count: "Count",
+  perimeter: "Around it",
+  wall: "As a wall",
+  roof: "As a roof",
+  volume: "As a volume",
+};
 export function isMarkupKind(v: string): v is MarkupKind {
   return (MARKUP_KINDS as readonly string[]).includes(v);
 }

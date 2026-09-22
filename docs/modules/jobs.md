@@ -127,6 +127,102 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-22 — A trace yields the figures the trade derives from it (`claude/the-figures-a-trace-yields`, [ADR 0110](../decisions/0110-a-trace-yields-the-figures-the-trade-derives-from-it-and-each-can-stand-behind-a-line-of-its-own.md))
+
+Step 3 of the drawings-takeoff pass — the arithmetic the trade does every
+day, agreed by mockup: an opening cut out of an area, the run around it, a
+wall's area from its length and a height, a roof's area from a plan and a
+pitch, a volume from an area and a depth. Two things stood in the way: a
+trace came to ONE number, and the link to an estimate line lived ON the
+trace (`estimate_line_id`), so one trace could stand behind one line — the
+room behind the flooring OR the baseboard, never both. A trace that yields
+five figures and can lend only one defeats the point.
+
+**The figures a trace carries** — `job_sheet_markups.figures` (jsonb,
+migration 0421): `{ height: { value, unit } }` on a length, `{ pitch: { rise }
+}`, `{ depth: { value, unit } }` and `{ deducts: [[points]] }` on an area,
+**kept as typed, in the unit typed** (`9 ft`, `4 in`, `100 mm`), because the
+estimator's own number is what the working should read back; `parseFigures`
+reads them tolerantly on both sides and drops what it does not recognise.
+**Nothing derived is stored**: `yieldsOf` works every figure out when read,
+through the scale — an area's NET area (*93.5 sq ft less 3.7 sq ft in 1
+opening*), the run around it, the roof at 6:12 (× 1.118), the volume (89.8 sq
+ft × 4 in = 1.1 cy; metric in m³), a length's wall (11 ft × 9 ft) — so a scale
+set again corrects all of them at once, exactly as it corrects the area
+(ADR 0074's rule, kept). Every figure has a FAMILY (`FIGURE_FAMILY`: a
+perimeter is a length, a wall and a roof are areas, a volume its own), and a
+line's unit calls for one: `cy`/`m3` now call for a volume, so **a cy line
+gets its ruler back**.
+
+**Each figure stands behind a line of its own** — `job_estimate_line_traces`
+(migrations 0421 + 0422 with RLS and the backfill of every existing link):
+one row per (line, trace, figure) with that figure's own share, unique on the
+three, cascading from the line and from the trace. `measuredSet` takes
+`picks` of `{ markupId, figure }` (the old id-only shape still means the
+trace's own figure), checks every one is a figure the trace actually yields —
+*North wall cannot stand as a volume: only an area fills a volume*, *it has
+no depth typed on it* — and one family between them; `linkMeasurements`
+upserts the set and deletes the line's others; `measurementsBehind` reads by
+figure; `listMarkups` hands each trace its LIST of links (`takeoffs`), with a
+second query. The two columns the link lived in stay on the markup,
+unwritten and unread — a drop goes out after its deploy.
+
+**On the screen.** A trace's row reads its other figures on a second line —
+*around it 39 ft · as a roof 100.4 sq ft · as a volume 1.1 cy*, the working
+on hover — and an area with openings draws them as holes (evenodd) with a
+dashed edge and reads net. **Cut an opening** on an area's row is a fourth
+measuring tool: tap around the opening, Finish, and it goes onto that
+trace's `deducts` through `updateMarkup`. The **Edit** dialog carries
+*Height* (ft | m) on a length, *Pitch* (: 12) and *Depth* (in | mm) on an area,
+and *Keep the N openings*. The **Takeoff** dialog asks *What goes* when a
+trace yields more than one figure, lists every figure on the sheet of that
+family as a tick (*Bedroom 2 · around it 39 ft* beside *North wall 11 ft*),
+keeps the other sheets' picks by figure, and a trace's chips are one per
+link, each with its figure named when it is not the trace's own and its own
+drift. The **Measure** dialog (ADR 0109) offers every figure of the line's
+family — *behind the line* for a trace's own figure, *as a wall 99 sq ft* for
+a derived one — and its blank-unit picker gained *Volume · cy*; a trace
+drawn while a baseboard line is measuring ticks its RUN, not its area.
+
+**Tests.** Pure: every figure in the database's list with a family;
+`parseFigures` tolerance; the one-room yields (93.5 → 89.76 net, 39 ft around,
+roof × 1.118, 1.108 cy, a height in metres converted); a metric slab in m³;
+`cy`/`m3` in every spelling. Ops: one room behind four lines by four figures
+and a wall behind the drywall by its wall (89,760 sf · 39,000 lf · 99,000 sf ·
+1,108 cy · 100,355 sf), refusals by name, families never mixing, the id-only
+shape, the reverse link by figure, one link let go, the opening taken back
+out drifting every figure on the room, and the trace rubbed out taking its
+links; the two older scenarios pass on the new table unchanged in meaning.
+Isolation: the table (cross-tenant, FKs, both CHECKs, the unique index,
+both cascades) and the `figures` CHECK.
+
+**Migrations 0421 and 0422** — applied to dev and verified at 245 tables,
+then, on the founder's say-so later the same day (the auto-mode classifier
+had refused the production run unasked), applied to PRODUCTION with
+`npm run db:migrate` and verified with `npm run db:verify-rls`: 245 tables,
+RLS enabled and forced everywhere. Read back from production: the table with
+both policies, the `figures` column defaulting to `{}`, and the backfill
+carrying every existing link (2 of 2). The backfill is `ON CONFLICT DO
+NOTHING`, so a second run after the deploy is safe and catches a push made
+in the window between.
+
+**Driven** on the dev branch's Hilltop Farm 24-109, on this worktree's own
+server. On A-101 the kitchen area read *59 sq ft · around it 32.5 ft* before
+anything was typed; the pencil with *Pitch 6* and *Depth 4 in* gave *around
+it 32.5 ft · as a roof 66 sq ft · as a volume 0.7 cy*, each working on hover.
+*Cut an opening* → four taps inside the room → *4 points · 1.5 sq ft* →
+Finish: the row read *57.6 sq ft · 59 sq ft less 1.5 sq ft in 1 opening · as
+a roof 64.4 sq ft*, the hole drew dashed, and the flooring chip said
+*measured since*. *Takeoff* on it opened with *What goes: Area · 57.6 sq ft —
+59 sq ft less 1.5 sq ft in 1 opening*, the roof figure listed beneath as a
+second tick, and *Set the quantity* put *57.569 sf* on the flooring line,
+the drift gone. On EST-2 the `cy` line *Footing concrete* carried a ruler;
+its dialog opened A-101 with *as a volume 0.7 cy* on the kitchen area, ticked
+it, read *So far A-101 0.711 cy*, and **Use 0.711 cy on the line** landed
+with the chip *A-101* and *Saved*. Not driven: a height on a length (the
+pure and ops tests carry it), a metric sheet, and *Keep the openings*
+unticked; the worked example was put back afterwards.
+
 ### 2026-09-22 — A line is measured from where it is priced (`claude/measure-from-the-line`, [ADR 0109](../decisions/0109-a-line-is-measured-from-where-it-is-priced-and-what-stands-behind-it-follows-it-across-sheets.md))
 
 Step 2 of the drawings-takeoff pass, agreed by mockup: the founder's *"I need
@@ -2725,7 +2821,8 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
-| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, the estimate line it was pushed onto while the line exists (`estimate_line_id`) and the quantity THIS measurement contributed to it (`pushed_quantity_thousandths` — its own share, never the line's total, so two pushed together each watch their own). | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
+| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, and, since ADR 0110, `figures` (jsonb, an object by CHECK): what the trade typed onto the trace — a height on a length, a pitch, a depth and the openings cut out of an area — kept as typed and read tolerantly by `parseFigures`; every derived figure is worked out when read. `estimate_line_id` / `pushed_quantity_thousandths` were the takeoff's first link (ADR 0074): **superseded by `job_estimate_line_traces`, unwritten and unread since ADR 0110**, to be dropped by a later migration. |
+| `job_estimate_line_traces` | **What stands behind an estimate line** (ADR 0110): one row per (line, trace, figure) — the room's area behind the flooring, its perimeter behind the baseboard, its volume behind the slab — with `share_thousandths`, what THAT figure of THAT trace came to when it was pushed. Read by `measurementsBehind` (the reverse link) and `listMarkups` (the chips). | Composite FKs, both **cascade**: a line taken off the estimate takes its links, a trace rubbed out takes its links; the line keeps its quantity either way. **Unique per `(tenant, line, trace, figure)`**: one figure of one trace stands behind one line once, and the same figure may stand behind another line. CHECK: figure in the seven, share ≥ 0. FORCE RLS, member-wide. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
 | `job_back_charges` | Money the business spent that was the subcontractor's (ADR 0077), kept back from their next application: a number per order, what was paid for, the amount (always > 0), the day it went out, the cost code it landed on, the warranty claim it came from, and the application it rides while it rides one. | Cascade from the commitment; **SET NULL (column-list form) from `job_cost_codes`, `job_warranty_claims` AND `job_sub_applications`**. UNIQUE (commitment, number). CHECK: number > 0, amount > 0, description present and ≤ 300, status in (`open`, `void`), and `void` implies no application — the one impossible state. Where it stands is never stored. |
 | `job_bonds` | A surety bond (ADR 0078): the kind (OPEN taxonomy, format-checked), the surety (a party), the penal sum, the premium and the code it belongs on, the contract it names when there is one, effective / expiry / released dates, and `requested` \| `issued` \| `released` \| `void`. | Cascade from the project; **SET NULL (column-list form) from `job_contracts` and `job_cost_codes`**; no `onDelete` to the party. CHECK: kind format, penal sum > 0, `coalesce(premium, 0) >= 0`, a bond in force carries its effective date, `(status = 'released') = (released_on is not null)`, expiry not before effective. Where it stands is never stored. |
@@ -2901,10 +2998,14 @@ ordering only bites when two new tables reference each other in one file.
   (ADR 0074): `setSheetScale` from a known dimension or a standard,
   `measure` through the scale (pure, shared with the viewer), `pushTakeoff`
   onto an estimate line as a statement of the total. **And the line's side
-  (ADR 0109)**: `measuredSet` (one set of traces across sheets, one kind, one
-  unit), `standBehind` (the link only, each trace's own share),
-  `measurementsBehind` (the reverse link, read per line and per sheet),
-  `unitAccepts` / `measureKindForUnit` / `driftedSince` (pure).
+  (ADR 0109)**: `measuredSet` (one set of figures across sheets, one family,
+  one unit), `standBehind` (the link only, each figure's own share),
+  `measurementsBehind` (the reverse link, read per line, per sheet and per
+  figure), `unitAccepts` / `measureKindForUnit` / `driftedSince` (pure).
+  **And the figures a trace yields (ADR 0110)**: `parseFigures`, `yieldsOf` /
+  `yieldFor` (net area, perimeter, wall, roof, volume, each with its working),
+  `pitchFactor`, `whyNoYield`, `familyOf`; `yieldsOfMarkup` on the ops side;
+  the link table `job_estimate_line_traces` and `TracePickInput`.
 - `src/packs/jobs/components/measure-line-dialog.tsx` — the drawings opened
   FOR an estimate line (ADR 0109): the sheets with what stands behind the line
   on each, the viewer in its `forLine` mode, the total across sheets, *Use*.
@@ -3278,15 +3379,19 @@ ordering only bites when two new tables reference each other in one file.
   draw again), a freehand pen, carrying markups onto a reissue by choice, a
   markup on a photo, burning markups into a PDF to send, telling the pinned
   trade (the digest and Mail are the seams); and from the takeoff, a scale
-  read from the PDF's own metadata, an opening deducted from an area, a
-  volume, ~~a running total across sheets~~ and ~~the reverse link from an
-  estimate line back to the sheets that fed it~~ — **both built 2026-09-22
-  (ADR 0109): a line is measured from where it is priced, and what stands
-  behind it follows it across sheets** — and a quantity converted into a
-  line's own unit (sf → sy, m → lf — today a line priced in another unit is
-  refused by name, `unitAccepts`). Still open there: a trace shared by two
-  lines (a wall's length behind the plate AND the baseboard), and the walk
-  opening a sheet for a phase's line. A scanned set's
+  read from the PDF's own metadata, ~~an opening deducted from an area, a
+  volume~~, ~~a running total across sheets~~ and ~~the reverse link from an
+  estimate line back to the sheets that fed it~~ — **all built 2026-09-22
+  (ADRs 0109 and 0110): a line is measured from where it is priced, what
+  stands behind it follows it across sheets, and a trace yields its net
+  area, the run around it, a wall, a roof and a volume, each able to stand
+  behind a line of its own** — and a quantity converted into a line's own
+  unit (sf → sy, m → lf — today a line priced in another unit is refused by
+  name, `unitAccepts`). Still open there: clipping an opening to its area
+  (today the net is the plain difference), a pitch in degrees, openings on a
+  length, the walk opening a sheet for a phase's line, and the DROP of
+  `estimate_line_id` / `pushed_quantity_thousandths` off the markups once
+  ADR 0110 has deployed. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is
   filed as a `drawing`.

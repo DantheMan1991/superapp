@@ -14,7 +14,7 @@ import { getSheet, listSheets } from "@/packs/jobs/drawings-ops";
 import { disciplineLabel } from "@/packs/jobs/drawings-math";
 import { listMarkups, markupCounts } from "@/packs/jobs/markups-ops";
 import { measurementsBehind, scaleOf } from "@/packs/jobs/takeoff-ops";
-import type { LineMeasurements } from "@/packs/jobs/takeoff-math";
+import { parseFigures, type LineMeasurements } from "@/packs/jobs/takeoff-math";
 import { listEstimates } from "@/packs/jobs/estimating-ops";
 import { getProject as getProjectRow, listCostCodes } from "@/packs/jobs/ops";
 import { SheetViewer, type MarkupView } from "@/packs/jobs/components/sheet-viewer";
@@ -90,8 +90,8 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
         createdBy: r.markup.createdByClerkUserId ? (names.get(r.markup.createdByClerkUserId) ?? "") : "",
         workItemId: r.markup.workItemId,
         punch: r.punch,
-        takeoff: r.takeoff,
-        pushedQuantityThousandths: r.markup.pushedQuantityThousandths,
+        takeoffs: r.takeoffs,
+        figures: parseFigures(r.markup.figures),
       },
     ];
   });

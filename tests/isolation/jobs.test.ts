@@ -3402,6 +3402,81 @@ d("jobs tables (RLS)", () => {
       await tx.delete(schema.documents).where(inArray(schema.documents.id, [docA, docB]));
     });
   });
+  it("cannot read or change another tenant's LINE TRACES; a link hangs off this tenant's line and this tenant's trace; the figure and the share are checked and one figure of one trace stands behind one line once; a link goes with its line and with its trace; and a trace's figures must be an object (ADR 0110)", async () => {
+    const ring = [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }];
+    const side = async (tenant: string, project: string, contract: string, tag: string) =>
+      withSystem(async (tx) => {
+        const doc = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId: tenant,
+            origin: "dms",
+            blobPathname: `docs/${tenant}/files/${STAMP}-traces-${tag}.pdf`,
+            fileName: `traces-${tag}.pdf`,
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+            sha256: `${STAMP}-${tenant}-traces-${tag}`,
+            effectiveVisibility: "members",
+          })
+          .returning();
+        const set = await tx.insert(schema.jobDrawingSets).values({ tenantId: tenant, projectId: project, name: `Trace set ${tag}`, issuedOn: "2026-06-01" }).returning();
+        const sheet = await tx.insert(schema.jobSheets).values({ tenantId: tenant, projectId: project, setId: set[0].id, documentId: doc[0].id, pageNumber: 1, sheetNumber: "T-101" }).returning();
+        const trace = await tx
+          .insert(schema.jobSheetMarkups)
+          .values({ tenantId: tenant, projectId: project, sheetId: sheet[0].id, kind: "area", geometry: { points: ring }, figures: { pitch: { rise: 6 } } })
+          .returning();
+        const est = await tx
+          .insert(schema.jobEstimates)
+          .values({ tenantId: tenant, projectId: project, contractId: contract, number: `EST-ISO-TR-${tag}`, title: "Traced", markupPpm: 150_000, overheadPpm: 100_000, profitPpm: 100_000 })
+          .returning();
+        const line = await tx.insert(schema.jobEstimateLines).values({ tenantId: tenant, estimateId: est[0].id, description: "Flooring", unit: "sf", sortOrder: 10 }).returning();
+        return { docId: doc[0].id, setId: set[0].id, sheetId: sheet[0].id, traceId: trace[0].id, estimateId: est[0].id, lineId: line[0].id };
+      });
+    const a = await side(tenantA, projectA, contractA, "a");
+    const b = await side(tenantB, projectB, contractB, "b");
+    const base = { tenantId: tenantA, lineId: a.lineId, markupId: a.traceId, figure: "area", shareThousandths: 93_500 } as const;
+    const linkId = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobEstimateLineTraces).values(base).returning();
+      return r[0].id;
+    });
+    const seen = await asOtherTenant(async (tx) => ({
+      rows: await tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.id, linkId)),
+      changed: await tx.update(schema.jobEstimateLineTraces).set({ shareThousandths: 1 }).where(eq(schema.jobEstimateLineTraces.id, linkId)).returning(),
+    }));
+    expect([seen.rows, seen.changed]).toEqual([[], []]);
+    expect(await asStaff((tx) => tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.id, linkId)))).toHaveLength(1);
+    // Tenant B's line or trace under tenant A's row: unrepresentable.
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimateLineTraces).values({ ...base, lineId: b.lineId }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimateLineTraces).values({ ...base, markupId: b.traceId }))).rejects.toThrow();
+    // The CHECKs, and one figure of one trace behind one line once.
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimateLineTraces).values({ ...base, figure: "girth" }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimateLineTraces).values({ ...base, figure: "perimeter", shareThousandths: -1 }))).rejects.toThrow();
+    await expect(withSystem((tx) => tx.insert(schema.jobEstimateLineTraces).values(base))).rejects.toThrow();
+    // The same trace by another figure, and behind another line, are both fine: one room feeds the flooring AND the baseboard.
+    const baseboard = await withSystem(async (tx) => {
+      const r = await tx.insert(schema.jobEstimateLines).values({ tenantId: tenantA, estimateId: a.estimateId, description: "Baseboard", unit: "lf", sortOrder: 20 }).returning();
+      await tx.insert(schema.jobEstimateLineTraces).values({ ...base, lineId: r[0].id, figure: "perimeter", shareThousandths: 39_000 });
+      await tx.insert(schema.jobEstimateLineTraces).values({ ...base, lineId: r[0].id, figure: "area" });
+      return r[0].id;
+    });
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.markupId, a.traceId)))).toHaveLength(3);
+    // A trace's figures must be an object.
+    await expect(
+      withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ tenantId: tenantA, projectId: projectA, sheetId: a.sheetId, kind: "area", geometry: { points: ring }, figures: [1, 2] })),
+    ).rejects.toThrow();
+    // A link goes with its line, and with its trace; the other side is left standing.
+    await withSystem((tx) => tx.delete(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, baseboard)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.lineId, baseboard)))).toEqual([]);
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.id, linkId)))).toHaveLength(1);
+    await withSystem((tx) => tx.delete(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, a.traceId)));
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLineTraces).where(eq(schema.jobEstimateLineTraces.markupId, a.traceId)))).toEqual([]);
+    expect(await withSystem((tx) => tx.select().from(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, a.lineId)))).toHaveLength(1);
+    await withSystem(async (tx) => {
+      await tx.delete(schema.jobEstimates).where(inArray(schema.jobEstimates.id, [a.estimateId, b.estimateId]));
+      await tx.delete(schema.jobDrawingSets).where(inArray(schema.jobDrawingSets.id, [a.setId, b.setId]));
+      await tx.delete(schema.documents).where(inArray(schema.documents.id, [a.docId, b.docId]));
+    });
+  });
   it("cannot read or change another tenant's MARKUPS; a markup hangs off this tenant's job, sheet and punch item; the kind, the colour, the words and the shape are checked; a punch item cleared sets the pin's key null and nothing else; the markups go with the sheet and with the job", async () => {
     const docA = await withSystem(async (tx) => {
       const r = await tx

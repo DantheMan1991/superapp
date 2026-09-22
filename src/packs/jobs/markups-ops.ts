@@ -6,7 +6,8 @@ import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { getSheet } from "./drawings-ops";
 import { addPunchItem } from "./field-ops";
 import { parseGeometry, type MarkupGeometry } from "./markups-math";
-import { MARKUP_TEXT_MAX, isMarkupColor, isMarkupKind, type MarkupColor, type MarkupKind } from "./vocabulary";
+import { parseFigures } from "./takeoff-math";
+import { MARKUP_TEXT_MAX, isMarkupColor, isMarkupKind, isMeasureKind, isTraceFigure, type MarkupColor, type MarkupKind, type TraceFigure } from "./vocabulary";
 
 /**
  * Markups on a sheet (ADR 0073): clouds, arrows, notes and pins over one
@@ -100,7 +101,7 @@ export async function updateMarkup(
   tx: Tx,
   ctx: JobsCtx,
   id: string,
-  patch: { geometry?: unknown; text?: string; color?: string; version?: number },
+  patch: { geometry?: unknown; text?: string; color?: string; version?: number; figures?: unknown },
 ): Promise<JobSheetMarkup> {
   requireWrite(ctx, "member");
   const current = await getMarkup(tx, ctx.tenantId, id);
@@ -110,12 +111,15 @@ export async function updateMarkup(
   }
   const kind = current.kind as MarkupKind;
   if (patch.color !== undefined && !isMarkupColor(patch.color)) throw new JobsError("INVALID_VALUE", "pick one of the five colours");
+  // The figures a trace carries (ADR 0110): read tolerantly, and only a length or an area has any.
+  if (patch.figures !== undefined && !isMeasureKind(kind)) throw new JobsError("INVALID_KIND", "only a length or an area carries figures");
   const rows = await tx
     .update(schema.jobSheetMarkups)
     .set({
       geometry: patch.geometry !== undefined ? shape(kind, patch.geometry) : current.geometry,
       text: patch.text !== undefined ? words(kind, patch.text) : current.text,
       color: patch.color ?? current.color,
+      figures: patch.figures !== undefined ? parseFigures(patch.figures) : current.figures,
       version: current.version + 1,
       updatedAt: new Date(),
     })
@@ -132,15 +136,29 @@ export async function deleteMarkup(tx: Tx, ctx: JobsCtx, id: string): Promise<vo
   await tx.delete(schema.jobSheetMarkups).where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), eq(schema.jobSheetMarkups.id, id)));
 }
 
+/** One line a trace stands behind, by one of its figures, as the estimate has the line now (ADR 0110). */
+export interface TakeoffLink {
+  lineId: string;
+  figure: TraceFigure;
+  /** What this figure of this trace came to when it was pushed, in thousandths of the line's unit. */
+  shareThousandths: number;
+  estimateId: string;
+  estimateNumber: string;
+  estimateStatus: string;
+  lineDescription: string;
+  lineUnit: string;
+  lineQuantityThousandths: number;
+}
+
 export interface MarkupRow {
   markup: JobSheetMarkup;
   /** The pin's punch item as Work has it now, while it exists. */
   punch: { title: string; done: boolean; dueOn: string | null } | null;
-  /** The estimate line a measurement was pushed onto, as the estimate has it now, while the line exists (ADR 0074). */
-  takeoff: { estimateId: string; lineId: string; estimateNumber: string; estimateStatus: string; lineDescription: string; lineUnit: string; lineQuantityThousandths: number } | null;
+  /** Every estimate line a measurement stands behind, by which of its figures, as the estimate has them now (ADR 0074, 0110). */
+  takeoffs: TakeoffLink[];
 }
 
-/** Everything drawn on one issue of a sheet, oldest first, with each pin's punch item as it stands. */
+/** Everything drawn on one issue of a sheet, oldest first, with each pin's punch item and each trace's lines as they stand. */
 export async function listMarkups(tx: Tx, tenantId: string, sheetId: string): Promise<MarkupRow[]> {
   const rows = await tx
     .select({
@@ -148,40 +166,63 @@ export async function listMarkups(tx: Tx, tenantId: string, sheetId: string): Pr
       punchTitle: schema.workItems.title,
       punchClosedAt: schema.workItems.closedAt,
       punchDueOn: schema.workItems.dueOn,
-      lineDescription: schema.jobEstimateLines.description,
-      lineUnit: schema.jobEstimateLines.unit,
-      lineQuantityThousandths: schema.jobEstimateLines.quantityThousandths,
-      estimateId: schema.jobEstimates.id,
-      estimateNumber: schema.jobEstimates.number,
-      estimateStatus: schema.jobEstimates.status,
     })
     .from(schema.jobSheetMarkups)
     .leftJoin(schema.workItems, and(eq(schema.workItems.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.workItems.id, schema.jobSheetMarkups.workItemId)))
-    .leftJoin(
-      schema.jobEstimateLines,
-      and(eq(schema.jobEstimateLines.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.jobEstimateLines.id, schema.jobSheetMarkups.estimateLineId)),
-    )
-    .leftJoin(schema.jobEstimates, and(eq(schema.jobEstimates.tenantId, schema.jobEstimateLines.tenantId), eq(schema.jobEstimates.id, schema.jobEstimateLines.estimateId)))
     .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobSheetMarkups.sheetId, sheetId)))
     .orderBy(asc(schema.jobSheetMarkups.createdAt), asc(schema.jobSheetMarkups.id));
+  const links = new Map<string, TakeoffLink[]>();
+  if (rows.length > 0) {
+    const traced = await tx
+      .select({
+        trace: schema.jobEstimateLineTraces,
+        lineDescription: schema.jobEstimateLines.description,
+        lineUnit: schema.jobEstimateLines.unit,
+        lineQuantityThousandths: schema.jobEstimateLines.quantityThousandths,
+        estimateId: schema.jobEstimates.id,
+        estimateNumber: schema.jobEstimates.number,
+        estimateStatus: schema.jobEstimates.status,
+      })
+      .from(schema.jobEstimateLineTraces)
+      .innerJoin(
+        schema.jobEstimateLines,
+        and(eq(schema.jobEstimateLines.tenantId, schema.jobEstimateLineTraces.tenantId), eq(schema.jobEstimateLines.id, schema.jobEstimateLineTraces.lineId)),
+      )
+      .innerJoin(schema.jobEstimates, and(eq(schema.jobEstimates.tenantId, schema.jobEstimateLines.tenantId), eq(schema.jobEstimates.id, schema.jobEstimateLines.estimateId)))
+      .where(
+        and(
+          eq(schema.jobEstimateLineTraces.tenantId, tenantId),
+          inArray(
+            schema.jobEstimateLineTraces.markupId,
+            rows.map((r) => r.markup.id),
+          ),
+        ),
+      )
+      .orderBy(asc(schema.jobEstimateLineTraces.createdAt));
+    for (const t of traced) {
+      if (!isTraceFigure(t.trace.figure)) continue;
+      const list = links.get(t.trace.markupId) ?? [];
+      list.push({
+        lineId: t.trace.lineId,
+        figure: t.trace.figure,
+        shareThousandths: t.trace.shareThousandths,
+        estimateId: t.estimateId,
+        estimateNumber: t.estimateNumber,
+        estimateStatus: t.estimateStatus,
+        lineDescription: t.lineDescription,
+        lineUnit: t.lineUnit,
+        lineQuantityThousandths: t.lineQuantityThousandths,
+      });
+      links.set(t.trace.markupId, list);
+    }
+  }
   return rows.map((r) => ({
     markup: r.markup,
     punch:
       r.markup.workItemId && r.punchTitle !== null
         ? { title: r.punchTitle, done: r.punchClosedAt !== null, dueOn: r.punchDueOn ?? null }
         : null,
-    takeoff:
-      r.markup.estimateLineId && r.lineDescription !== null && r.estimateId !== null
-        ? {
-            estimateId: r.estimateId,
-            lineId: r.markup.estimateLineId,
-            estimateNumber: r.estimateNumber ?? "",
-            estimateStatus: r.estimateStatus ?? "",
-            lineDescription: r.lineDescription,
-            lineUnit: r.lineUnit ?? "",
-            lineQuantityThousandths: r.lineQuantityThousandths ?? 0,
-          }
-        : null,
+    takeoffs: links.get(r.markup.id) ?? [],
   }));
 }
 

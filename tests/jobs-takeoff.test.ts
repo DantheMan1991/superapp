@@ -11,7 +11,9 @@ import {
   measure,
   measureKindForUnit,
   normaliseUnit,
+  parseFigures,
   pathPoints,
+  pitchFactor,
   polygonPoints,
   scaleFromKnownLength,
   scaleFromStandard,
@@ -21,10 +23,11 @@ import {
   takeoffUnitFor,
   toThousandths,
   unitAccepts,
+  yieldsOf,
   type LineMeasurements,
   type SheetScale,
 } from "../src/packs/jobs/takeoff-math";
-import { MARKUP_KINDS, MEASURE_KINDS, MEASURE_POINTS_MAX, SCALE_UNITS, isMeasureKind, isScaleUnit } from "../src/packs/jobs/vocabulary";
+import { FIGURE_FAMILY, MARKUP_KINDS, MEASURE_KINDS, MEASURE_POINTS_MAX, SCALE_UNITS, TRACE_FIGURES, isMeasureKind, isScaleUnit } from "../src/packs/jobs/vocabulary";
 
 /**
  * The arithmetic of a takeoff (ADR 0074), pure: the sheet's scale, a
@@ -222,8 +225,8 @@ describe("the takeoff", () => {
     expect(["lf", "ft", "m", "lin. ft."].map(measureKindForUnit)).toEqual(["length", "length", "length", "length"]);
     expect(["ea", "Each"].map(measureKindForUnit)).toEqual(["count", "count"]);
     expect(["", "  "].map(measureKindForUnit)).toEqual(["ask", "ask"]);
-    /** A lump sum, concrete by the yard, carpet by the square yard: no drawing yields these, and the ruler says so rather than guessing. */
-    expect(["ls", "cy", "sy", "hr"].map(measureKindForUnit)).toEqual([null, null, null, null]);
+    /** A lump sum, carpet by the square yard, an hour: no drawing yields these, and the ruler says so rather than guessing. Concrete by the yard is a volume — an area with a depth (ADR 0110). */
+    expect(["ls", "cy", "sy", "hr"].map(measureKindForUnit)).toEqual([null, "volume", null, null]);
     expect(sheetsBehind({ sheets: [{ sheetNumber: "A-101" }, { sheetNumber: "A-102" }] } as unknown as Pick<LineMeasurements, "sheets">)).toBe("A-101, A-102");
   });
 
@@ -241,5 +244,86 @@ describe("the takeoff", () => {
     expect(driftedSince(500, { quantity: 0.506, unit: "ft" })).toBe(true);
     expect(driftedSince(3_000, { quantity: 3.006, unit: "each" })).toBe(false);
     expect(driftedSince(3_000, { quantity: 3.02, unit: "each" })).toBe(true);
+  });
+});
+
+describe("the figures a trace yields (ADR 0110)", () => {
+  /** Eighteen points to the foot on a landscape letter page: a quarter of the width is eleven feet. */
+  const scale: SheetScale = { pointsPerUnit: 18, unit: "ft", pageWidthPt: LETTER.w, pageHeightPt: LETTER.h };
+  const room = { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] };
+  const wall = { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }] };
+  const opening = [{ x: 0.3, y: 0.3 }, { x: 0.35, y: 0.3 }, { x: 0.35, y: 0.35 }, { x: 0.3, y: 0.35 }];
+
+  it("names every figure in the database's list and gives each a family", () => {
+    const SQL0421 = readFileSync("drizzle/0421_classy_sabra.sql", "utf8");
+    for (const f of TRACE_FIGURES) expect(SQL0421).toContain(`'${f}'`);
+    expect(Object.keys(FIGURE_FAMILY).sort()).toEqual([...TRACE_FIGURES].sort());
+    expect([FIGURE_FAMILY.perimeter, FIGURE_FAMILY.wall, FIGURE_FAMILY.roof, FIGURE_FAMILY.volume]).toEqual(["length", "area", "area", "volume"]);
+  });
+
+  it("reads what was typed onto a trace tolerantly, keeping the unit typed and dropping what it does not recognise", () => {
+    expect(parseFigures(null)).toEqual({});
+    expect(parseFigures([1, 2])).toEqual({});
+    expect(parseFigures({ height: { value: 9, unit: "ft" }, pitch: { rise: 6 }, depth: { value: 4, unit: "in" }, deducts: [opening] })).toEqual({
+      height: { value: 9, unit: "ft" },
+      pitch: { rise: 6 },
+      depth: { value: 4, unit: "in" },
+      deducts: [opening],
+    });
+    /** A height of nothing, a pitch of "steep", a depth in furlongs, an opening of two points: none of them is a figure. */
+    expect(parseFigures({ height: { value: 0, unit: "ft" }, pitch: { rise: "steep" }, depth: { value: 4, unit: "furlong" }, deducts: [opening.slice(0, 2)], tomorrow: 1 })).toEqual({});
+    expect(parseFigures({ deducts: [opening, [{ x: 2, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 1 }]] })).toEqual({ deducts: [opening] });
+  });
+
+  it("yields, from one room traced once, its net area, the run around it, a roof and a volume — and from a wall's length, the wall it stands", () => {
+    const plain = yieldsOf("area", room, {}, scale);
+    expect(plain.map((y) => [y.figure, y.measurement.unit, Number(y.measurement.quantity.toFixed(3)), y.working])).toEqual([
+      ["area", "sq ft", 93.5, ""],
+      ["perimeter", "ft", 39, "around it"],
+    ]);
+    const full = yieldsOf("area", room, { pitch: { rise: 6 }, depth: { value: 4, unit: "in" }, deducts: [opening] }, scale);
+    expect(full.map((y) => y.figure)).toEqual(["area", "perimeter", "roof", "volume"]);
+    /** The opening is 2.2 by 1.7 feet: 3.74 sq ft off 93.5. */
+    expect(full[0].measurement.quantity).toBeCloseTo(89.76, 6);
+    expect(full[0].working).toBe("93.5 sq ft less 3.7 sq ft in 1 opening");
+    expect(full[1].measurement.quantity).toBeCloseTo(39, 9);
+    expect(full[2].measurement.quantity).toBeCloseTo(89.76 * pitchFactor(6), 6);
+    expect(full[2].working).toBe("89.8 sq ft of plan at 6:12");
+    /** 89.76 sq ft four inches deep is 29.92 cubic feet, 1.108 cubic yards. */
+    expect(full[3].measurement).toEqual({ quantity: expect.closeTo((89.76 * 4) / 12 / 27, 6), unit: "cy" });
+    expect(full[3].working).toBe("89.8 sq ft × 4 in");
+    const run = yieldsOf("length", wall, { height: { value: 9, unit: "ft" } }, scale);
+    expect(run.map((y) => [y.figure, y.measurement.unit, y.measurement.quantity, y.working])).toEqual([
+      ["length", "ft", 11, ""],
+      ["wall", "sq ft", 99, "11 ft × 9 ft"],
+    ]);
+    /** A height typed in metres on a sheet in feet is converted, never taken as feet. */
+    expect(yieldsOf("length", wall, { height: { value: 3, unit: "m" } }, scale)[1].measurement.quantity).toBeCloseTo(11 * 3 / 0.3048, 6);
+    /** A count yields its count and nothing else; a length or an area with no scale yields nothing. */
+    expect(yieldsOf("count", { points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }] }, {}, null).map((y) => [y.figure, y.measurement.quantity])).toEqual([["count", 2]]);
+    expect(yieldsOf("area", room, { pitch: { rise: 6 } }, null)).toEqual([]);
+  });
+
+  it("fills a metric volume in cubic metres from a depth in millimetres", () => {
+    const metric: SheetScale = { pointsPerUnit: 10, unit: "m", pageWidthPt: 1000, pageHeightPt: 1000 };
+    const slab = { points: [{ x: 0, y: 0 }, { x: 0.1, y: 0 }, { x: 0.1, y: 0.1 }, { x: 0, y: 0.1 }] };
+    const ys = yieldsOf("area", slab, { depth: { value: 100, unit: "mm" } }, metric);
+    expect(ys.map((y) => [y.figure, y.measurement.unit, Number(y.measurement.quantity.toFixed(6))])).toEqual([
+      ["area", "m²", 100],
+      ["perimeter", "m", 40],
+      ["volume", "m³", 10],
+    ]);
+    expect(pitchFactor(0)).toBe(1);
+    expect(pitchFactor(12)).toBeCloseTo(Math.SQRT2, 12);
+  });
+
+  it("prices a volume by the yard: cy and m3 are units a drawing yields, in every spelling", () => {
+    expect(["cy", "cu. yd.", "cubic yards", "yd3"].map(normaliseUnit)).toEqual(["cy", "cy", "cy", "cy"]);
+    expect(["m3", "m³", "cu m", "cubic metres"].map(normaliseUnit)).toEqual(["m3", "m3", "m3", "m3"]);
+    expect(["cy", "m3"].map(measureKindForUnit)).toEqual(["volume", "volume"]);
+    expect([takeoffUnitFor("volume", ""), takeoffUnitFor("volume", "ft"), takeoffUnitFor("volume", "m")]).toEqual(["cy", "cy", "m3"]);
+    expect(unitAccepts("cu yd", "cy")).toBe(true);
+    expect(unitAccepts("cy", "sf")).toBe(false);
+    expect(() => sumMeasurements([{ kind: "volume", measurement: { quantity: 1, unit: "cy" } }, { kind: "area", measurement: { quantity: 1, unit: "sq ft" } }])).toThrow("cannot go onto one line together");
   });
 });

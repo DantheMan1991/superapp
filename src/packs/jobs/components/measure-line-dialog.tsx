@@ -23,13 +23,27 @@ import { standBehindAction } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
 import { parsePoints } from "../markups-math";
 import {
-  measure,
   measureKindForUnit,
   takeoffUnitFor,
   toThousandths,
+  yieldsOf,
   type LineMeasurements,
 } from "../takeoff-math";
-import { isMeasureKind, MARKUP_KIND_LABELS, MEASURE_KINDS, type MeasureKind } from "../vocabulary";
+import { FIGURE_FAMILY, isMeasureKind, type FigureFamily, type TraceFigure } from "../vocabulary";
+
+/** How a drawing can measure a line whose unit says nothing: the four families and the unit each lands in. */
+const FAMILIES: Array<{ family: FigureFamily; label: string }> = [
+  { family: "length", label: "Length" },
+  { family: "area", label: "Area" },
+  { family: "count", label: "Count" },
+  { family: "volume", label: "Volume" },
+];
+
+const keyOf = (markupId: string, figure: TraceFigure) => `${markupId}:${figure}`;
+const pickOf = (key: string): { markupId: string; figure: TraceFigure } => {
+  const at = key.lastIndexOf(":");
+  return { markupId: key.slice(0, at), figure: key.slice(at + 1) as TraceFigure };
+};
 
 /**
  * MEASURED FROM WHERE IT IS PRICED (ADR 0109).
@@ -40,14 +54,17 @@ import { isMeasureKind, MARKUP_KIND_LABELS, MEASURE_KINDS, type MeasureKind } fr
  * lands on that item. Here the estimate line is the thing being priced, so
  * the ruler sits on the line, and this dialog is the drawings opened FOR it.
  *
- * ── THE SET FOLLOWS THE LINE ACROSS SHEETS ──────────────────────────────────
+ * ── THE SET FOLLOWS THE LINE ACROSS SHEETS, AND ACROSS FIGURES ──────────────
  *
- * What stands behind the line is a set of traces on any of the job's sheets,
- * seeded from what stands behind it today. Each sheet lists what it holds;
- * inside a sheet the traces of the line's kind carry a tick, and a trace
- * drawn in here is ticked the moment it is saved. The footer adds the set up
- * across sheets, and *Use* writes the LINK only — the editor sets the line's
- * quantity from what comes back (ADR 0082: the editor holds the estimate).
+ * What stands behind the line is a set of FIGURES of traces on any of the
+ * job's sheets (ADR 0110): a room's area for the flooring, the run around it
+ * for the baseboard, a wall's length times its height for the drywall, an
+ * area with a depth for the concrete. Seeded from what stands behind the line
+ * today. Each sheet lists what it holds; inside a sheet every figure of the
+ * line's family carries a tick, and a trace drawn in here is ticked the moment
+ * it is saved. The footer adds the set up across sheets, and *Use* writes the
+ * LINK only — the editor sets the line's quantity from what comes back (ADR
+ * 0082: the editor holds the estimate).
  *
  * ── THE SAME VIEWER ─────────────────────────────────────────────────────────
  *
@@ -80,21 +97,21 @@ export function MeasureLineDialog({
   onClose: () => void;
 }) {
   const fixedKind = measureKindForUnit(line.unit);
-  /** A blank unit takes the kind from what is behind the line, else asks. */
-  const [kind, setKind] = useState<MeasureKind | null>(
+  /** A blank unit takes the family from what is behind the line, else asks. */
+  const [kind, setKind] = useState<FigureFamily | null>(
     fixedKind === "ask" || fixedKind === null ? (behind?.kind ?? null) : fixedKind,
   );
   const [sheets, setSheets] = useState<MeasurableSheet[] | null>(null);
   const [sheet, setSheet] = useState<MeasurableSheetView | null>(null);
   const [opening, setOpening] = useState(false);
   const [saving, startSaving] = useTransition();
-  /** Which traces stand behind the line, by sheet — seeded from what does today. */
+  /** Which figures of which traces stand behind the line, by sheet (`markupId:figure`) — seeded from what does today. */
   const [selected, setSelected] = useState<Map<string, Set<string>>>(() => {
     const seed = new Map<string, Set<string>>();
-    for (const s of behind?.sheets ?? []) seed.set(s.sheetId, new Set(s.markupIds));
+    for (const s of behind?.sheets ?? []) seed.set(s.sheetId, new Set(s.picks.map((p) => keyOf(p.markupId, p.figure))));
     return seed;
   });
-  /** Each trace's quantity in thousandths, learned when its sheet is opened or it is drawn. */
+  /** Each figure's quantity in thousandths, learned when its sheet is opened or it is drawn. */
   const [quantities, setQuantities] = useState<Map<string, number>>(new Map());
   const kicked = useRef(false);
 
@@ -130,9 +147,10 @@ export function MeasureLineDialog({
         setQuantities((prev) => {
           const next = new Map(prev);
           for (const m of r.view.markups) {
-            if (!isMeasureKind(m.kind) || m.kind !== kind) continue;
-            const q = measure(m.kind, parsePoints(m.kind, m.geometry), r.view.scale);
-            if (q) next.set(m.id, toThousandths(q.quantity));
+            if (!isMeasureKind(m.kind)) continue;
+            for (const y of yieldsOf(m.kind, parsePoints(m.kind, m.geometry), m.figures, r.view.scale)) {
+              if (FIGURE_FAMILY[y.figure] === kind) next.set(keyOf(m.id, y.figure), toThousandths(y.measurement.quantity));
+            }
           }
           return next;
         });
@@ -141,13 +159,14 @@ export function MeasureLineDialog({
       .finally(() => setOpening(false));
   }
 
-  function toggle(sheetId: string, markupId: string, on: boolean, quantityThousandths: number) {
-    setQuantities((prev) => new Map(prev).set(markupId, quantityThousandths));
+  function toggle(sheetId: string, markupId: string, figure: TraceFigure, on: boolean, quantityThousandths: number) {
+    const key = keyOf(markupId, figure);
+    setQuantities((prev) => new Map(prev).set(key, quantityThousandths));
     setSelected((prev) => {
       const next = new Map(prev);
       const set = new Set(next.get(sheetId) ?? []);
-      if (on) set.add(markupId);
-      else set.delete(markupId);
+      if (on) set.add(key);
+      else set.delete(key);
       if (set.size === 0) next.delete(sheetId);
       else next.set(sheetId, set);
       return next;
@@ -185,9 +204,9 @@ export function MeasureLineDialog({
 
   function use() {
     startSaving(async () => {
-      const markupIds = [...selected.values()].flatMap((ids) => [...ids]);
+      const picks = [...selected.values()].flatMap((keys) => [...keys].map(pickOf));
       try {
-        const result = await standBehindAction({ projectId, estimateId, lineId: line.id, markupIds });
+        const result = await standBehindAction({ projectId, estimateId, lineId: line.id, picks });
         if ("error" in result) {
           toast.error(result.error);
           return;
@@ -216,7 +235,7 @@ export function MeasureLineDialog({
           </DialogTitle>
           <DialogDescription>
             {fixedKind === null
-              ? `This line is priced per ${line.unit.trim()}; a drawing measures lf, sf or ea. Change the unit, or type the quantity.`
+              ? `This line is priced per ${line.unit.trim()}; a drawing measures lf, sf, ea or cy. Change the unit, or type the quantity.`
               : !kind
                 ? "How does a drawing measure this line?"
                 : sheet
@@ -227,10 +246,10 @@ export function MeasureLineDialog({
 
         {fixedKind !== null && !kind && (
           <div className="flex flex-wrap gap-2">
-            {MEASURE_KINDS.map((k) => (
-              <Button key={k} type="button" variant="outline" size="sm" onClick={() => setKind(k)}>
-                {MARKUP_KIND_LABELS[k]}
-                <span className="ml-1 text-muted-foreground">· {takeoffUnitFor(k, "")}</span>
+            {FAMILIES.map((f) => (
+              <Button key={f.family} type="button" variant="outline" size="sm" onClick={() => setKind(f.family)}>
+                {f.label}
+                <span className="ml-1 text-muted-foreground">· {takeoffUnitFor(f.family, "")}</span>
               </Button>
             ))}
           </div>
@@ -251,10 +270,10 @@ export function MeasureLineDialog({
             codes={[]}
             onChanged={() => pick(sheet.sheetId)}
             forLine={{
-              kind,
+              family: kind,
               description: line.description.trim() || "this line",
               selected: selected.get(sheet.sheetId) ?? new Set<string>(),
-              onToggle: (markupId, on, q) => toggle(sheet.sheetId, markupId, on, q),
+              onToggle: (markupId, figure, on, q) => toggle(sheet.sheetId, markupId, figure, on, q),
               busy: saving,
             }}
           />
@@ -279,7 +298,7 @@ export function MeasureLineDialog({
                     </span>
                     {here !== null && ids && (
                       <span className="ml-auto text-xs tabular-nums">
-                        {qty(here)} <span className="text-muted-foreground">· {ids.size} {ids.size === 1 ? "trace" : "traces"} behind this line</span>
+                        {qty(here)} <span className="text-muted-foreground">· {ids.size} {ids.size === 1 ? "figure" : "figures"} behind this line</span>
                       </span>
                     )}
                   </button>

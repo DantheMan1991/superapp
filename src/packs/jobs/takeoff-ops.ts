@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray, max, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, max } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobSheet, JobSheetMarkup } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
@@ -8,20 +8,36 @@ import { getMarkup } from "./markups-ops";
 import { parsePoints } from "./markups-math";
 import {
   driftedSince,
+  familyOf,
   formatMeasure,
   measure,
+  parseFigures,
   scaleFromKnownLength,
   scaleFromStandard,
   sumMeasurements,
   takeoffUnitFor,
   toThousandths,
   unitAccepts,
+  whyNoYield,
+  yieldFor,
+  yieldsOf,
   type LineMeasurements,
   type Measurement,
   type SheetScale,
   type SheetShare,
+  type Yield,
 } from "./takeoff-math";
-import { isMeasureKind, isScaleUnit, type MeasureKind, type ScaleUnit } from "./vocabulary";
+import {
+  MARKUP_KIND_LABELS,
+  TRACE_FIGURE_LABELS,
+  isMeasureKind,
+  isScaleUnit,
+  isTraceFigure,
+  type FigureFamily,
+  type MeasureKind,
+  type ScaleUnit,
+  type TraceFigure,
+} from "./vocabulary";
 
 /**
  * The takeoff (ADR 0074): the scale is the sheet's, a measurement is a
@@ -111,35 +127,53 @@ export function measurementOf(markup: Pick<JobSheetMarkup, "kind" | "geometry">,
   return measure(markup.kind, parsePoints(markup.kind, markup.geometry), scale);
 }
 
+/** Everything one trace yields under the sheet's scale (ADR 0110) — its own figure and the ones typed onto it. */
+export function yieldsOfMarkup(markup: Pick<JobSheetMarkup, "kind" | "geometry" | "figures">, scale: SheetScale | null): Yield[] {
+  if (!isMeasureKind(markup.kind)) return [];
+  return yieldsOf(markup.kind, parsePoints(markup.kind, markup.geometry), parseFigures(markup.figures), scale);
+}
+
 // ----------------------------------------------------- a set of measurements
 
-/** One measurement of a set, with what it comes to under its own sheet's scale. */
+/** One figure of one trace, with what it comes to under its own sheet's scale. */
 interface MeasuredRow {
   id: string;
   sheetId: string;
   kind: MeasureKind;
+  figure: TraceFigure;
   measurement: Measurement | null;
 }
 
 interface MeasuredSet {
   rows: MeasuredRow[];
   summed: ReturnType<typeof sumMeasurements>;
-  /** The unit the trade prices by: lf, sf, ea; m, m2. */
+  /** The unit the trade prices by: lf, sf, ea, cy; m, m2, m3. */
   unit: string;
   quantityThousandths: number;
 }
 
+/** A trace named for a push or a claim: by its own kind unless a figure it yields is named (ADR 0110). */
+export interface TracePickInput {
+  markupId: string;
+  figure?: TraceFigure;
+}
+
+/** The old shape (ids alone) and the new (id and figure), as one list. */
+function picksOf(input: { markupIds?: readonly string[]; picks?: readonly TracePickInput[] }): TracePickInput[] {
+  return input.picks ? [...input.picks] : (input.markupIds ?? []).map((markupId) => ({ markupId }));
+}
+
 /**
- * The measurements named, checked as ONE SET: every one a length, an area or a
- * count on a sheet of this job, one kind of thing between them (two floors add
- * up, a floor and a wall do not), each under a scale when it needs one. What a
- * push onto a line and a line's claim both start from — and it may span
- * sheets: the downstairs floor on A-101 and the upstairs on A-102 are one
- * flooring line (ADR 0109).
+ * The figures named, checked as ONE SET: every one a figure a trace on this
+ * job's sheets actually yields, one family of thing between them (two floors
+ * add up, a floor and a wall do not; the run around a room is a length like
+ * any other), each under a scale when it needs one. What a push onto a line
+ * and a line's claim both start from — across sheets (ADR 0109), and across
+ * the figures one trace yields (ADR 0110).
  */
-async function measuredSet(tx: Tx, tenantId: string, projectId: string, markupIds: readonly string[]): Promise<MeasuredSet> {
-  if (markupIds.length === 0) throw new JobsError("INVALID_VALUE", "pick at least one measurement");
-  const ids = [...new Set(markupIds)];
+async function measuredSet(tx: Tx, tenantId: string, projectId: string, picks: readonly TracePickInput[]): Promise<MeasuredSet> {
+  if (picks.length === 0) throw new JobsError("INVALID_VALUE", "pick at least one measurement");
+  const ids = [...new Set(picks.map((p) => p.markupId))];
   const markups = await tx
     .select()
     .from(schema.jobSheetMarkups)
@@ -151,55 +185,79 @@ async function measuredSet(tx: Tx, tenantId: string, projectId: string, markupId
     .from(schema.jobSheets)
     .where(and(eq(schema.jobSheets.tenantId, tenantId), inArray(schema.jobSheets.id, sheetIds)));
   const sheetById = new Map(sheets.map((s) => [s.id, s]));
+  const byId = new Map(markups.map((m) => [m.id, m]));
   const rows: MeasuredRow[] = [];
-  for (const m of markups) {
+  const seen = new Set<string>();
+  for (const p of picks) {
+    const m = byId.get(p.markupId);
+    if (!m) throw new JobsError("NOT_FOUND", "a measurement is missing");
     if (!isMeasureKind(m.kind)) throw new JobsError("INVALID_KIND", "only a length, an area or a count carries a quantity");
     if (m.projectId !== projectId) throw new JobsError("WRONG_PROJECT", "that measurement is on another job's sheet");
+    const figure: TraceFigure = p.figure ?? m.kind;
+    const key = `${m.id}:${figure}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const sheet = sheetById.get(m.sheetId);
-    rows.push({ id: m.id, sheetId: m.sheetId, kind: m.kind, measurement: measurementOf(m, sheet ? scaleOf(sheet) : null) });
+    const scale = sheet ? scaleOf(sheet) : null;
+    const figures = parseFigures(m.figures);
+    const found = yieldFor(m.kind, parsePoints(m.kind, m.geometry), figures, scale, figure);
+    // No scale on a length or an area is the sum's refusal below, in its own words; anything else is this trace's.
+    if (!found && (m.kind === "count" || scale)) {
+      throw new JobsError(
+        "INVALID_VALUE",
+        `${m.text.trim() || MARKUP_KIND_LABELS[m.kind]} cannot stand as ${TRACE_FIGURE_LABELS[figure].toLowerCase()}: ${whyNoYield(m.kind, figure, figures, scale)}`,
+      );
+    }
+    rows.push({ id: m.id, sheetId: m.sheetId, kind: m.kind, figure, measurement: found?.measurement ?? null });
   }
   let summed: ReturnType<typeof sumMeasurements>;
   try {
-    summed = sumMeasurements(rows);
+    summed = sumMeasurements(rows.map((r) => ({ kind: familyOf(r.figure), measurement: r.measurement })));
   } catch (err) {
     throw new JobsError("INVALID_VALUE", err instanceof Error ? err.message : "these cannot be pushed together");
   }
-  const scaleUnit: ScaleUnit | "" = summed.total.unit === "m" || summed.total.unit === "m²" ? "m" : summed.total.unit === "each" ? "" : "ft";
+  const scaleUnit: ScaleUnit | "" =
+    summed.total.unit === "m" || summed.total.unit === "m²" || summed.total.unit === "m³" ? "m" : summed.total.unit === "each" ? "" : "ft";
   return { rows, summed, unit: takeoffUnitFor(summed.kind, scaleUnit), quantityThousandths: toThousandths(summed.total.quantity) };
 }
 
 /**
- * These measurements stand behind the line from now on, each remembering ITS
- * OWN quantity — never the line's total, or a second one on the same line
- * would read as drifted the moment after — and the line's others no longer
- * do. An empty set lets every one of them go.
+ * These figures stand behind the line from now on — one row per trace and
+ * figure in `job_estimate_line_traces`, each remembering ITS OWN share, never
+ * the line's total, or a second one on the same line would read as drifted
+ * the moment after — and the line's others no longer do. An empty set lets
+ * every one of them go.
  */
 async function linkMeasurements(tx: Tx, tenantId: string, lineId: string, rows: readonly MeasuredRow[]): Promise<void> {
-  const now = new Date();
-  for (const r of rows) {
-    await tx
-      .update(schema.jobSheetMarkups)
-      .set({ estimateLineId: lineId, pushedQuantityThousandths: toThousandths(r.measurement!.quantity), updatedAt: now })
-      .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobSheetMarkups.id, r.id)));
+  const existing = await tx
+    .select({ id: schema.jobEstimateLineTraces.id, markupId: schema.jobEstimateLineTraces.markupId, figure: schema.jobEstimateLineTraces.figure })
+    .from(schema.jobEstimateLineTraces)
+    .where(and(eq(schema.jobEstimateLineTraces.tenantId, tenantId), eq(schema.jobEstimateLineTraces.lineId, lineId)));
+  const keep = new Set(rows.map((r) => `${r.id}:${r.figure}`));
+  const gone = existing.filter((e) => !keep.has(`${e.markupId}:${e.figure}`)).map((e) => e.id);
+  if (gone.length > 0) {
+    await tx.delete(schema.jobEstimateLineTraces).where(and(eq(schema.jobEstimateLineTraces.tenantId, tenantId), inArray(schema.jobEstimateLineTraces.id, gone)));
   }
-  const kept = rows.map((r) => r.id);
-  await tx
-    .update(schema.jobSheetMarkups)
-    .set({ estimateLineId: null, pushedQuantityThousandths: null, updatedAt: now })
-    .where(
-      and(
-        eq(schema.jobSheetMarkups.tenantId, tenantId),
-        eq(schema.jobSheetMarkups.estimateLineId, lineId),
-        ...(kept.length > 0 ? [notInArray(schema.jobSheetMarkups.id, kept)] : []),
-      ),
-    );
+  for (const r of rows) {
+    const shareThousandths = toThousandths(r.measurement!.quantity);
+    await tx
+      .insert(schema.jobEstimateLineTraces)
+      .values({ tenantId, lineId, markupId: r.id, figure: r.figure, shareThousandths })
+      .onConflictDoUpdate({
+        target: [schema.jobEstimateLineTraces.tenantId, schema.jobEstimateLineTraces.lineId, schema.jobEstimateLineTraces.markupId, schema.jobEstimateLineTraces.figure],
+        set: { shareThousandths },
+      });
+  }
 }
 
 // ------------------------------------------------------------- the takeoff
 
 export interface TakeoffInput {
   estimateId: string;
-  markupIds: string[];
+  /** The traces, by their own kind… */
+  markupIds?: string[];
+  /** …or by a figure each yields (ADR 0110). Either list; `picks` wins when both are given. */
+  picks?: TracePickInput[];
   /** An existing line of the estimate to set the quantity on… */
   lineId?: string | null;
   /** …or a new line, described. Its unit is the measurement's unless given. */
@@ -210,7 +268,7 @@ export interface TakeoffResult {
   lineId: string;
   quantityThousandths: number;
   unit: string;
-  kind: MeasureKind;
+  kind: FigureFamily;
   measurement: Measurement;
 }
 
@@ -237,7 +295,7 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   if (estimate.length === 0) throw new JobsError("NOT_FOUND", `estimate ${input.estimateId} not found`);
   const est = estimate[0];
   if (est.status === "accepted") throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${est.number} was accepted; its quantities are the agreement`);
-  const { rows, summed, unit, quantityThousandths } = await measuredSet(tx, ctx.tenantId, est.projectId, input.markupIds);
+  const { rows, summed, unit, quantityThousandths } = await measuredSet(tx, ctx.tenantId, est.projectId, picksOf(input));
 
   let lineId: string;
   if (input.lineId) {
@@ -294,15 +352,26 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   return { lineId, quantityThousandths, unit, kind: summed.kind, measurement: summed.total };
 }
 
-/** A measurement no longer standing behind a line: the line keeps its quantity, the drawing stops claiming it. */
-export async function unpushTakeoff(tx: Tx, ctx: JobsCtx, markupId: string): Promise<void> {
+/**
+ * A measurement no longer standing behind a line: the line keeps its quantity,
+ * the drawing stops claiming it. A trace alone lets go of every line it stands
+ * behind; a line and a figure with it let go of that one link (ADR 0110).
+ */
+export async function unpushTakeoff(tx: Tx, ctx: JobsCtx, target: string | { markupId: string; lineId?: string; figure?: TraceFigure }): Promise<void> {
   requireWrite(ctx, "member");
-  const markup = await getMarkup(tx, ctx.tenantId, markupId);
-  if (!markup) throw new JobsError("NOT_FOUND", `markup ${markupId} not found`);
+  const t = typeof target === "string" ? { markupId: target } : target;
+  const markup = await getMarkup(tx, ctx.tenantId, t.markupId);
+  if (!markup) throw new JobsError("NOT_FOUND", `markup ${t.markupId} not found`);
   await tx
-    .update(schema.jobSheetMarkups)
-    .set({ estimateLineId: null, pushedQuantityThousandths: null, updatedAt: new Date() })
-    .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), eq(schema.jobSheetMarkups.id, markupId)));
+    .delete(schema.jobEstimateLineTraces)
+    .where(
+      and(
+        eq(schema.jobEstimateLineTraces.tenantId, ctx.tenantId),
+        eq(schema.jobEstimateLineTraces.markupId, t.markupId),
+        ...(t.lineId ? [eq(schema.jobEstimateLineTraces.lineId, t.lineId)] : []),
+        ...(t.figure ? [eq(schema.jobEstimateLineTraces.figure, t.figure)] : []),
+      ),
+    );
 }
 
 // ------------------------------------------------- what stands behind a line
@@ -324,14 +393,18 @@ export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: s
     .limit(1);
   if (est.length === 0) return out;
   const rows = await tx
-    .select({ markup: schema.jobSheetMarkups })
-    .from(schema.jobSheetMarkups)
+    .select({ trace: schema.jobEstimateLineTraces, markup: schema.jobSheetMarkups })
+    .from(schema.jobEstimateLineTraces)
+    .innerJoin(
+      schema.jobSheetMarkups,
+      and(eq(schema.jobSheetMarkups.tenantId, schema.jobEstimateLineTraces.tenantId), eq(schema.jobSheetMarkups.id, schema.jobEstimateLineTraces.markupId)),
+    )
     .innerJoin(
       schema.jobEstimateLines,
-      and(eq(schema.jobEstimateLines.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.jobEstimateLines.id, schema.jobSheetMarkups.estimateLineId)),
+      and(eq(schema.jobEstimateLines.tenantId, schema.jobEstimateLineTraces.tenantId), eq(schema.jobEstimateLines.id, schema.jobEstimateLineTraces.lineId)),
     )
-    .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobEstimateLines.estimateId, estimateId)))
-    .orderBy(asc(schema.jobSheetMarkups.createdAt), asc(schema.jobSheetMarkups.id));
+    .where(and(eq(schema.jobEstimateLineTraces.tenantId, tenantId), eq(schema.jobEstimateLines.estimateId, estimateId)))
+    .orderBy(asc(schema.jobSheetMarkups.createdAt), asc(schema.jobSheetMarkups.id), asc(schema.jobEstimateLineTraces.figure));
   if (rows.length === 0) return out;
   const sheets = await listSheets(tx, tenantId, est[0].projectId);
   const order = new Map(sheets.map((s, i) => [s.sheet.id, i]));
@@ -339,19 +412,20 @@ export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: s
   const add = (target: { nowThousandths: number | null }, nowT: number | null) => {
     target.nowThousandths = target.nowThousandths === null || nowT === null ? null : target.nowThousandths + nowT;
   };
-  for (const { markup: m } of rows) {
-    if (!isMeasureKind(m.kind) || !m.estimateLineId) continue;
+  for (const { trace: t, markup: m } of rows) {
+    if (!isMeasureKind(m.kind) || !isTraceFigure(t.figure)) continue;
     const sheet = byId.get(m.sheetId);
     if (!sheet) continue;
     const scale = scaleOf(sheet.sheet);
-    const now = measurementOf(m, scale);
+    const now = yieldFor(m.kind, parsePoints(m.kind, m.geometry), parseFigures(m.figures), scale, t.figure)?.measurement ?? null;
     const nowT = now ? toThousandths(now.quantity) : null;
-    const share = m.pushedQuantityThousandths ?? 0;
-    const drifted = driftedSince(m.pushedQuantityThousandths, now);
-    const line: LineMeasurements = out.get(m.estimateLineId) ?? {
-      lineId: m.estimateLineId,
-      kind: m.kind,
-      unit: takeoffUnitFor(m.kind, scale?.unit ?? ""),
+    const share = t.shareThousandths;
+    const drifted = driftedSince(share, now);
+    const family = familyOf(t.figure);
+    const line: LineMeasurements = out.get(t.lineId) ?? {
+      lineId: t.lineId,
+      kind: family,
+      unit: takeoffUnitFor(family, scale?.unit ?? ""),
       traces: 0,
       shareThousandths: 0,
       nowThousandths: 0,
@@ -360,10 +434,10 @@ export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: s
     };
     let s: SheetShare | undefined = line.sheets.find((x) => x.sheetId === m.sheetId);
     if (!s) {
-      s = { sheetId: m.sheetId, sheetNumber: sheet.sheet.sheetNumber, setName: sheet.setName, isCurrent: sheet.isCurrent, traces: 0, shareThousandths: 0, nowThousandths: 0, drifted: false, markupIds: [] };
+      s = { sheetId: m.sheetId, sheetNumber: sheet.sheet.sheetNumber, setName: sheet.setName, isCurrent: sheet.isCurrent, traces: 0, shareThousandths: 0, nowThousandths: 0, drifted: false, picks: [] };
       line.sheets.push(s);
     }
-    s.markupIds.push(m.id);
+    s.picks.push({ markupId: m.id, figure: t.figure });
     s.traces += 1;
     s.shareThousandths += share;
     add(s, nowT);
@@ -372,7 +446,7 @@ export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: s
     line.shareThousandths += share;
     add(line, nowT);
     line.drifted = line.drifted || drifted;
-    out.set(m.estimateLineId, line);
+    out.set(t.lineId, line);
   }
   for (const line of out.values()) line.sheets.sort((a, b) => (order.get(a.sheetId) ?? 0) - (order.get(b.sheetId) ?? 0));
   return out;
@@ -380,8 +454,10 @@ export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: s
 
 export interface StandBehindInput {
   lineId: string;
-  /** Every measurement that stands behind the line from now on, on any sheet of the job; empty lets them all go. */
-  markupIds: string[];
+  /** Every trace that stands behind the line from now on, by its own kind, on any sheet of the job… */
+  markupIds?: string[];
+  /** …or by the figure each yields (ADR 0110). Either list; empty lets them all go. */
+  picks?: TracePickInput[];
 }
 
 export interface StandBehindResult {
@@ -389,7 +465,7 @@ export interface StandBehindResult {
   /** What the line should now say, in thousandths of `unit` — 0 with nothing behind it. */
   quantityThousandths: number;
   unit: string;
-  kind: MeasureKind | null;
+  kind: FigureFamily | null;
   behind: LineMeasurements | null;
 }
 
@@ -418,11 +494,12 @@ export async function standBehind(tx: Tx, ctx: JobsCtx, input: StandBehindInput)
   if (found.length === 0) throw new JobsError("NOT_FOUND", `estimate line ${input.lineId} not found`);
   const { line, estimate } = found[0];
   if (estimate.status === "accepted") throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${estimate.number} was accepted; its quantities are the agreement`);
-  if (input.markupIds.length === 0) {
+  const picks = picksOf(input);
+  if (picks.length === 0) {
     await linkMeasurements(tx, ctx.tenantId, line.id, []);
     return { lineId: line.id, quantityThousandths: 0, unit: line.unit, kind: null, behind: null };
   }
-  const set = await measuredSet(tx, ctx.tenantId, estimate.projectId, input.markupIds);
+  const set = await measuredSet(tx, ctx.tenantId, estimate.projectId, picks);
   if (!unitAccepts(line.unit, set.unit)) {
     throw new JobsError(
       "UNIT_MISMATCH",

@@ -1,3 +1,5 @@
+import { normaliseUnit } from "./takeoff-math";
+
 /**
  * WHAT THIS BUSINESS CHARGED FOR THIS LINE LAST TIME (E4a).
  *
@@ -75,6 +77,19 @@ export function recall(book: PriceBook, description: string): RememberedPrice | 
   return book.get(key) ?? null;
 }
 
+/**
+ * A REMEMBERED PRICE IS PER ITS UNIT. `Flooring` at 4.20/sf is not a price
+ * for 500 sy of flooring, and a lump remembered with no unit is not a rate at
+ * all; either, put on a line in another unit, is a wrong number nothing
+ * downstream can see. So a line that already knows its unit takes a memory
+ * only in that unit, however either is spelled (`sq. ft.` is `sf`); a line
+ * with no unit yet takes any memory and adopts its unit, as it always did.
+ */
+export function fitsUnit(remembered: RememberedPrice, unit: string): boolean {
+  const line = normaliseUnit(unit);
+  return line === "" || normaliseUnit(remembered.unit) === line;
+}
+
 /* ------------------------------------------------------------ the sentence */
 
 /** Whole days between two `YYYY-MM-DD` dates. UTC has no daylight saving. */
@@ -119,13 +134,16 @@ export function priceHint(remembered: RememberedPrice, money: string, today: str
 
 /**
  * The price a line should take, which is the remembered one ONLY when nothing
- * was typed. Returns null when the line already has a price or has no memory,
- * so a caller can count what it filled and say so.
+ * was typed and — once the line knows its unit — only a memory in that unit
+ * (`fitsUnit`). Returns null when the line already has a price, has no memory,
+ * or has one per another unit, so a caller can count what it filled and say so.
  */
 export function fillFromMemory(
   book: PriceBook,
-  line: { description: string; unitCostCents: number },
+  line: { description: string; unitCostCents: number; unit?: string },
 ): RememberedPrice | null {
   if (line.unitCostCents !== 0) return null;
-  return recall(book, line.description);
+  const remembered = recall(book, line.description);
+  if (remembered === null) return null;
+  return line.unit === undefined || fitsUnit(remembered, line.unit) ? remembered : null;
 }

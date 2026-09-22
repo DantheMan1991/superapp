@@ -127,6 +127,95 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-22 — The takeoff finishes what it starts (`claude/the-takeoff-finishes-what-it-starts`)
+
+Step 4 of the drawings-takeoff pass: the rough edges the review left once
+the arithmetic was in — each small, each a thing the estimator had to fix
+by hand after every push.
+
+**A line the takeoff makes is priced from memory (E4a, on a drawing).** A
+new line came in with its quantity and a blank price, and the estimator
+went to the estimate to type what they had typed the last nine times.
+`pushTakeoff`'s new-line path now fills the blank from the price book
+(`priceBookRows` → `fillFromMemory`), the pasted takeoff's rule kept: the
+line's `basis` reads `memory`, its `basis_detail` *your last price, on
+24-108*, the result carries `priced` and the toast says *Priced from memory
+— $4.20/sf · 24-108 · 3 weeks ago. Check it: a price can be a year old.*
+An existing line's price is its own; a push onto one says nothing.
+
+**A remembered price is per its unit** — `fitsUnit` in `price-memory.ts`,
+and the one rule this PR adds to the memory everywhere it fills a blank.
+*Flooring* at 4.20/sf is not a price for 500 sy of flooring, and a lump
+remembered with no unit is not a rate at all; either, put on a line in
+another unit, is a wrong number nothing downstream can see — the class of
+defect the memory was built to avoid ("a wrong price offered confidently is
+worse than no price"). Until now the entry bar, the paste preview and the
+walk all applied a memory whatever the line's unit. Now a line that knows
+its unit takes a memory only in that unit, however either is spelled
+(`normaliseUnit`: `sq. ft.` is `sf`); a line with no unit yet adopts the
+memory's, as before. The entry bar's hint hides for a memory that does not
+fit, so Tab cannot take it. `fillFromMemory` grew an optional `unit`; the
+walk's `walk-lines-math` checks `fitsUnit` before it prices from memory.
+
+**The Takeoff dialog aims at the estimate this sheet already feeds**
+(`estimateFedBy`, pure): the estimate of the last link drawn on the sheet,
+else the only open one, else the first. It had defaulted to `estimates[0]`
+— the wrong one whenever the job had two — and every push from the second
+sheet onwards began by changing the select.
+
+**The tool line is always there.** It appeared when a tool was picked and
+pushed the sheet down under the finger about to draw; now it is rendered
+whenever the sheet can be drawn on, `min-h-7`, reading *Pick a tool to draw
+or measure; drag to move about, pinch or ctrl+wheel to zoom* until one is.
+
+**The quantity fits its cell.** `175.826` is seven characters and the
+quantity input was 54px in a 92px track shared with the unit: thousandths
+were clipped on every measured line. The input is 66px, the unit 40px, the
+track 112px (116px at `@5xl`); the description track gives the 20px up.
+
+**A pitch in degrees** as well as rise per 12 — the step-3 open item that
+cost least: `Pitch = { rise } | { degrees }` kept as typed, `pitchFactorOf`
+(1/cos θ; 45° is √2, as 12:12 is), `formatPitch` in the working (*of plan
+at 30°*), `PITCH_DEGREES_MAX` 85 because a roof steeper than that is a
+wall, and a select beside the box on the pencil. No migration: `figures` is
+jsonb read tolerantly, and a `{ degrees }` written by this version reads as
+no pitch to an older one rather than a wrong one.
+
+Tests: `fitsUnit`/`fillFromMemory` with a unit (pure); the pitch in degrees,
+its factor, its working and `estimateFedBy` (pure); and an ops scenario that
+prices a new line from a memory per the same unit however spelled (`tile` →
+*Tile* at 4.20 per `sq. ft.`), leaves a per-`sy` memory and a lump blank
+and says so, and leaves an existing line's price alone.
+
+**Driven** on the dev branch's Hilltop Farm 24-109, on this worktree's own
+server (port 3001). A-101 with no tool picked read *Pick a tool to draw or
+measure; drag to move about, pinch or ctrl+wheel to zoom* on a 28px line and
+the sheet's box sat at 762px from the top; *Area* picked, the line read *Tap
+around the room, corner by corner, then Finish. Esc goes back to moving
+about.* and the box stayed at 762; Esc, 762 again. The pencil on the kitchen
+area offered *: 12 | degrees*; *degrees* and *30* saved as `{ pitch: {
+degrees: 30 } }` and the row read *as a roof 68.2 sq ft · 59 sq ft of plan
+at 30°* (59.026 / cos 30°). *Takeoff* on that row opened on **EST-2** with
+FIVE open estimates in the select (EST-6 first by number) — the one the sheet
+already feeds, where `estimates[0]` would have said EST-6. With *4.20* typed
+as the unit cost of *Flooring, kitchen* on EST-2, a new line typed as
+*flooring, kitchen* came in at **4.20/sf** and the toast read *59.026 sf onto
+EST-2 — Priced from memory — $4.20/sf · 24-109 · 6 days ago. Check it: a
+price can be a year old.* (six days: a memory's date is the line's
+`created_at`, not the day the price was typed); the trace then carried two
+chips and the estimate showed line 12.3 at 59.026 sf × 4.20. The quantity
+input for *59.026* measured 70px client, 70px scroll — nothing clipped —
+where it had read *5*. The worked example was put back: line 12.3 removed,
+the 4.20 cleared, the pitch cleared.
+
+**Trap on the way:** after the dev server was restarted the pane's first
+load of the sheet ran a STALE client bundle (its HMR socket does not connect
+in the pane), so a saved `{ degrees: 30 }` read back in the pencil but the
+row showed no roof — the server-rendered HTML had it, the client's `yieldsOf`
+did not. A second full navigation fixed it. Fetch the page's HTML and grep it
+before believing a row; see [[dev-server-misses-a-route]] for the other
+fresh-server trap.
+
 ### 2026-09-22 — A trace yields the figures the trade derives from it (`claude/the-figures-a-trace-yields`, [ADR 0110](../decisions/0110-a-trace-yields-the-figures-the-trade-derives-from-it-and-each-can-stand-behind-a-line-of-its-own.md))
 
 Step 3 of the drawings-takeoff pass — the arithmetic the trade does every
@@ -3388,8 +3477,8 @@ ordering only bites when two new tables reference each other in one file.
   behind a line of its own** — and a quantity converted into a line's own
   unit (sf → sy, m → lf — today a line priced in another unit is refused by
   name, `unitAccepts`). Still open there: clipping an opening to its area
-  (today the net is the plain difference), a pitch in degrees, openings on a
-  length, the walk opening a sheet for a phase's line, and the DROP of
+  (today the net is the plain difference), openings on a length, the walk
+  opening a sheet for a phase's line, and the DROP of
   `estimate_line_id` / `pushed_quantity_thousandths` off the markups once
   ADR 0110 has deployed. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a

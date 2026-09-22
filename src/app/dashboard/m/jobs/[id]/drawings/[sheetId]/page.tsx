@@ -198,6 +198,7 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
           scale={scaleOf(sheet)}
           estimates={openEstimates}
           codes={codeOptions}
+          currencySymbol={ctx.tenant.currencySymbol}
         />
       </Panel>
 

@@ -5,6 +5,8 @@ import type { JobSheet, JobSheetMarkup } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { getSheet, listSheets } from "./drawings-ops";
 import { getMarkup } from "./markups-ops";
+import { priceBookRows } from "./estimating-ops";
+import { fillFromMemory, priceBookFrom, type RememberedPrice } from "./price-memory";
 import { parsePoints } from "./markups-math";
 import {
   driftedSince,
@@ -270,6 +272,8 @@ export interface TakeoffResult {
   unit: string;
   kind: FigureFamily;
   measurement: Measurement;
+  /** The memory a NEW line took its price from (E4a), for the toast; null for a line that had none, or an existing line, whose price is its own. */
+  priced: RememberedPrice | null;
 }
 
 /**
@@ -298,6 +302,7 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   const { rows, summed, unit, quantityThousandths } = await measuredSet(tx, ctx.tenantId, est.projectId, picksOf(input));
 
   let lineId: string;
+  let priced: RememberedPrice | null = null;
   if (input.lineId) {
     const line = await tx
       .select()
@@ -326,6 +331,16 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
       .select({ top: max(schema.jobEstimateLines.sortOrder) })
       .from(schema.jobEstimateLines)
       .where(and(eq(schema.jobEstimateLines.tenantId, ctx.tenantId), eq(schema.jobEstimateLines.estimateId, est.id)));
+    const lineUnit = given || unit;
+    /**
+     * WHAT THIS BUSINESS CHARGED FOR THE SAME LINE LAST TIME (E4a), for the
+     * line the takeoff makes — the pasted takeoff's rule, kept: a blank is
+     * filled from memory, per the unit this line prices by and no other
+     * (`fitsUnit`), and the line's basis says so. The estimator reads the
+     * price on the estimate and in the toast and changes it like any other;
+     * a memory is a memory, not an opinion.
+     */
+    priced = fillFromMemory(priceBookFrom(await priceBookRows(tx, ctx.tenantId)), { description, unitCostCents: 0, unit: lineUnit });
     const inserted = await tx
       .insert(schema.jobEstimateLines)
       .values({
@@ -333,8 +348,11 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
         estimateId: est.id,
         costCodeId: input.newLine.costCodeId ?? null,
         description,
-        unit: input.newLine.unit?.trim() || unit,
+        unit: lineUnit,
         quantityThousandths,
+        unitCostCents: priced?.unitCostCents ?? 0,
+        basis: priced ? "memory" : "",
+        basisDetail: priced ? `your last price, on ${priced.projectNumber}` : "",
         notes: `From the takeoff.`,
         sortOrder: (last[0]?.top ?? 0) + 10,
       })
@@ -349,7 +367,7 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
     .update(schema.jobEstimates)
     .set({ version: est.version + 1, updatedAt: new Date() })
     .where(and(eq(schema.jobEstimates.tenantId, ctx.tenantId), eq(schema.jobEstimates.id, est.id)));
-  return { lineId, quantityThousandths, unit, kind: summed.kind, measurement: summed.total };
+  return { lineId, quantityThousandths, unit, kind: summed.kind, measurement: summed.total, priced };
 }
 
 /**

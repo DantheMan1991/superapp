@@ -5392,8 +5392,9 @@ d("jobs ops", () => {
     expect(await run((tx) => listMarkups(tx, tenantId, sheet.id))).toEqual([]);
   }, 120_000);
   it("A LINE THE TAKEOFF MAKES IS PRICED FROM MEMORY (E4a on a drawing): a blank takes what this business charged for the same words last time, per the same unit only — a price per sy is not a price per sf and a lump is not a rate — and the line's basis says so; an existing line's price is its own", async () => {
-    const entity = await newCompany("Takeoff Co 3");
-    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK3", name: "Remembered" }));
+    // Its own company: the file's scenarios share one tenant, and a company's name is unique within it — a name another scenario uses fails only when the whole file runs.
+    const entity = await newCompany("Takeoff Co memory");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TKM", name: "Remembered" }));
     const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
     const pdf = await run(async (tx) => {
       const rows = await tx
@@ -5419,7 +5420,7 @@ d("jobs ops", () => {
     await run((tx) =>
       createEstimate(tx, staffCtx, {
         projectId: project.id,
-        number: "EST-TK3-LAST",
+        number: "EST-TKM-LAST",
         lines: [
           { description: "Tile", unit: "sq. ft.", unitCostCents: 4_20 },
           { description: "Flooring, kitchen", unit: "sy", unitCostCents: 38_00 },
@@ -5427,17 +5428,17 @@ d("jobs ops", () => {
         ],
       }),
     );
-    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TK3", lines: [] }));
+    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TKM", lines: [] }));
     // The same words however typed, per the same unit however spelled: priced.
     const tile = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "tile" } }));
-    expect(tile.priced).toMatchObject({ unitCostCents: 4_20, unit: "sq. ft.", projectNumber: "OPS-TK3" });
+    expect(tile.priced).toMatchObject({ unitCostCents: 4_20, unit: "sq. ft.", projectNumber: "OPS-TKM" });
     // Per another unit, or a lump: left blank, and said to be.
     const flooring = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Flooring, kitchen" } }));
     const clean = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Final clean" } }));
     expect([flooring.priced, clean.priced]).toEqual([null, null]);
     const lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
     expect(lines.map((l) => [l.description, l.unit, l.quantityThousandths, l.unitCostCents, l.basis, l.basisDetail, l.notes])).toEqual([
-      ["tile", "sf", 93_500, 4_20, "memory", "your last price, on OPS-TK3", "From the takeoff."],
+      ["tile", "sf", 93_500, 4_20, "memory", "your last price, on OPS-TKM", "From the takeoff."],
       ["Flooring, kitchen", "sf", 93_500, 0, "", "", "From the takeoff."],
       ["Final clean", "sf", 93_500, 0, "", "", "From the takeoff."],
     ]);

@@ -20,7 +20,20 @@ export interface ReadPdf {
 
 /** Past this many pages the thumbnails stop; the text is still read. */
 export const THUMBNAIL_LIMIT = 150;
-const THUMBNAIL_WIDTH = 168;
+/**
+ * **WIDE ENOUGH TO BE THE PICTURE ON THE CARD, not a stamp in the corner of
+ * it.** This was 168px when the only place it showed was the index table at
+ * 96px wide. Now it IS the sheet card on the drawings page — ~490px across
+ * on a desktop in three columns, ~340 on a phone in one — and 168 stretched
+ * to that is a blur. The founder: *"there is a fair amount of wasted space
+ * with the thumbnails. it would be nice if they were bigger."*
+ *
+ * 480 is 1:1 on a desktop card and 1.4× on a phone's, at roughly 40–60KB a
+ * page — a forty-page set is a couple of MB on the drawings page, which on
+ * site is the trade-off worth making for pictures you can actually read.
+ * Sets read before this were stored at 168 and show soft until read again.
+ */
+const THUMBNAIL_WIDTH = 480;
 
 /**
  * Read a PDF in the browser: every page's text runs in viewport space,

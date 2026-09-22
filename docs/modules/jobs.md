@@ -126,6 +126,53 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — The picture is the card (`claude/bigger-thumbnails`)
+
+The founder, with pictures on his set at last: *"there is a fair amount of
+wasted space with the thumbnails. it would be nice if they were bigger."*
+He was right twice over, and only one of the two was visible.
+
+**THE BOX WAS A STRIP, AND THE PICTURE A STAMP IN IT.** The card's image was
+a fixed 112px-high band with the drawing centred — on a ~490px desktop card
+that is a picture a third of the width with white either side. It is now
+**the card's full width in a 3:2 box**, which is ARCH-D's own shape (36×24),
+so a plan fills it; a portrait detail sheet letterboxes, the honest way to
+show a tall page in a grid every card of which is the same height.
+
+**AND THE STORED PICTURE WAS 168px WIDE**, because when it was chosen the
+only place it showed was the index table at 96px. Stretched to a card it
+would have been a blur, so `THUMBNAIL_WIDTH` is **480** — 1:1 on a desktop
+card, 1.4× on a phone's, at roughly 40–60KB a page. A forty-page set is a
+couple of MB on the drawings page, which on site is the trade worth making
+for pictures you can read. **Sets read before this show soft until read
+again**, the same `Read again` → `Save` as before.
+
+### The production scare that was not one, recorded so it is not repeated
+
+Between the two PRs the founder re-read his set on production and reported
+**no pictures**. I diagnosed from the screenshot — thirty-seven uploads fired
+at once against an authenticating serverless route, every failure swallowed
+by an `allSettled` — and rewrote the upload before confirming any of it. Then:
+*"they are working now."* The original code had worked; the pictures were
+there on a later look. The likeliest cause is the page refreshing before the
+freshly written blobs were readable, each `<img>` 404ing and hiding itself
+for that one page load — unconfirmed, and left alone until it is seen again.
+
+The rewrite is kept **as hygiene, with a comment that says so**: `THUMB_LANES`
+uploads at a time rather than a stampede, one retry, and what could not be
+kept counted and put in front of the person with the way to fix it. A
+best-effort step that reports nothing is indistinguishable from one that never
+ran — that part was true whether or not it had failed. See
+[[a-repro-is-a-claim-check-the-row]]: the report named a cause, the fix was
+built to the cause, and the row said otherwise.
+
+### Driven, on dev
+
+The permit set read again and saved: its three sheets came back at
+**480px wide** (`naturalWidth`, measured) in a 3:2 box the card's full width
+— 272×181 on the pane — while ASI 1's two sheets, never re-read, stayed
+compact with no picture. No migration, no seed.
+
 ### 2026-09-21 — Sheets you can see, in the order you read them (`claude/sheets-you-can-see`)
 
 The founder, with the Wright house set read in and on the screen: *"The

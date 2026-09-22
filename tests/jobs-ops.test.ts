@@ -5391,6 +5391,63 @@ d("jobs ops", () => {
     expect(await run((tx) => getSheet(tx, tenantId, sheet.id))).toBeNull();
     expect(await run((tx) => listMarkups(tx, tenantId, sheet.id))).toEqual([]);
   }, 120_000);
+  it("A LINE THE TAKEOFF MAKES IS PRICED FROM MEMORY (E4a on a drawing): a blank takes what this business charged for the same words last time, per the same unit only — a price per sy is not a price per sf and a lump is not a rate — and the line's basis says so; an existing line's price is its own", async () => {
+    // Its own company: the file's scenarios share one tenant, and a company's name is unique within it — a name another scenario uses fails only when the whole file runs.
+    const entity = await newCompany("Takeoff Co memory");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TKM", name: "Remembered" }));
+    const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
+    const pdf = await run(async (tx) => {
+      const rows = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          blobPathname: `docs/${tenantId}/files/${STAMP}-takeoff-memory.pdf`,
+          fileName: "takeoff-memory.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-sha-takeoff-memory`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId: pdf, target: setTarget(set.id), makePrimary: false }));
+    const [sheet] = await run((tx) => indexSheets(tx, staffCtx, { setId: set.id, documentId: pdf, sheets: [{ pageNumber: 1, sheetNumber: "A-101", title: "First floor plan" }] }));
+    await run((tx) => setSheetScale(tx, staffCtx, sheet.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 11, unit: "ft", pageWidthPt: 792, pageHeightPt: 612 }));
+    const room = await run((tx) => addMarkup(tx, staffCtx, { sheetId: sheet.id, kind: "area", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] }, text: "Kitchen" }));
+    // What this business charged last time: tile per square foot, flooring per square yard, the clean as a lump.
+    await run((tx) =>
+      createEstimate(tx, staffCtx, {
+        projectId: project.id,
+        number: "EST-TKM-LAST",
+        lines: [
+          { description: "Tile", unit: "sq. ft.", unitCostCents: 4_20 },
+          { description: "Flooring, kitchen", unit: "sy", unitCostCents: 38_00 },
+          { description: "Final clean", unit: "", unitCostCents: 450_00 },
+        ],
+      }),
+    );
+    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TKM", lines: [] }));
+    // The same words however typed, per the same unit however spelled: priced.
+    const tile = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "tile" } }));
+    expect(tile.priced).toMatchObject({ unitCostCents: 4_20, unit: "sq. ft.", projectNumber: "OPS-TKM" });
+    // Per another unit, or a lump: left blank, and said to be.
+    const flooring = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Flooring, kitchen" } }));
+    const clean = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Final clean" } }));
+    expect([flooring.priced, clean.priced]).toEqual([null, null]);
+    const lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    expect(lines.map((l) => [l.description, l.unit, l.quantityThousandths, l.unitCostCents, l.basis, l.basisDetail, l.notes])).toEqual([
+      ["tile", "sf", 93_500, 4_20, "memory", "your last price, on OPS-TKM", "From the takeoff."],
+      ["Flooring, kitchen", "sf", 93_500, 0, "", "", "From the takeoff."],
+      ["Final clean", "sf", 93_500, 0, "", "", "From the takeoff."],
+    ]);
+    // Onto an EXISTING line the memory says nothing: its price is its own, blank or not.
+    const onto = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], lineId: flooring.lineId }));
+    expect(onto.priced).toBeNull();
+    const after = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    expect(after.find((l) => l.id === flooring.lineId)).toMatchObject({ unitCostCents: 0, basis: "" });
+  });
   it("PAPER FOR THE OUTSIDE: the change order loads with its contract's signed value, the approved changes on that contract and the client; the order loads as placed with its changes, its codes and the vendor's address from the books; a missing one is null", async () => {
     const entity = await newCompany("Paper Co 1");
     const { project, client, framer, code } = await run(async (tx) => {

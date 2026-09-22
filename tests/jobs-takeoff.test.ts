@@ -5,8 +5,12 @@ import {
   POINTS_PER_INCH,
   POINTS_PER_METRE,
   STANDARD_SCALES,
+  PITCH_DEGREES_MAX,
   driftedSince,
+  estimateFedBy,
   formatMeasure,
+  formatPitch,
+  isFlat,
   matchingStandard,
   measure,
   measureKindForUnit,
@@ -14,6 +18,7 @@ import {
   parseFigures,
   pathPoints,
   pitchFactor,
+  pitchFactorOf,
   polygonPoints,
   scaleFromKnownLength,
   scaleFromStandard,
@@ -325,5 +330,48 @@ describe("the figures a trace yields (ADR 0110)", () => {
     expect(unitAccepts("cu yd", "cy")).toBe(true);
     expect(unitAccepts("cy", "sf")).toBe(false);
     expect(() => sumMeasurements([{ kind: "volume", measurement: { quantity: 1, unit: "cy" } }, { kind: "area", measurement: { quantity: 1, unit: "sq ft" } }])).toThrow("cannot go onto one line together");
+  });
+});
+
+/**
+ * Step 4 of the drawings pass: a pitch as the trade says it, and where a push
+ * from a sheet aims. The pure half; the ops suite proves a new line priced from
+ * memory.
+ */
+describe("a pitch in degrees, and where a push aims", () => {
+  const scale: SheetScale = { pointsPerUnit: 18, unit: "ft", pageWidthPt: 792, pageHeightPt: 612 };
+  const room = { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] };
+  it("keeps a pitch as it was said — rise per 12 or degrees — and drops one that is not a slope", () => {
+    expect(parseFigures({ pitch: { degrees: 30 } })).toEqual({ pitch: { degrees: 30 } });
+    expect(parseFigures({ pitch: { rise: 6, degrees: 30 } })).toEqual({ pitch: { rise: 6 } });
+    expect(parseFigures({ pitch: { degrees: PITCH_DEGREES_MAX } })).toEqual({ pitch: { degrees: PITCH_DEGREES_MAX } });
+    expect(parseFigures({ pitch: { degrees: PITCH_DEGREES_MAX + 1 } })).toEqual({});
+    expect(parseFigures({ pitch: { degrees: -1 } })).toEqual({});
+    expect(parseFigures({ pitch: { degrees: "steep" } })).toEqual({});
+    expect(parseFigures({ pitch: { degrees: Number.NaN } })).toEqual({});
+  });
+  it("grows the plan by 1/cos θ: 45° is √2, as 12:12 is; 26.57° is 6:12; 0° is flat", () => {
+    expect(pitchFactorOf({ degrees: 45 })).toBeCloseTo(Math.SQRT2, 12);
+    expect(pitchFactorOf({ degrees: 45 })).toBeCloseTo(pitchFactorOf({ rise: 12 }), 12);
+    expect(pitchFactorOf({ degrees: (Math.atan(6 / 12) * 180) / Math.PI })).toBeCloseTo(pitchFactor(6), 12);
+    expect(pitchFactorOf({ degrees: 0 })).toBe(1);
+    expect([isFlat({ degrees: 0 }), isFlat({ rise: 0 }), isFlat({ degrees: 30 }), isFlat({ rise: 6 })]).toEqual([true, true, false, false]);
+    expect([formatPitch({ rise: 6 }), formatPitch({ degrees: 30 })]).toEqual(["6:12", "30°"]);
+  });
+  it("yields the roof at a pitch in degrees, the working in degrees, and no roof at all when flat", () => {
+    const roof = yieldsOf("area", room, { pitch: { degrees: 30 } }, scale).find((y) => y.figure === "roof")!;
+    expect(roof.measurement.quantity).toBeCloseTo(93.5 / Math.cos(Math.PI / 6), 6);
+    expect(roof.working).toBe("93.5 sq ft of plan at 30°");
+    expect(yieldsOf("area", room, { pitch: { degrees: 0 } }, scale).some((y) => y.figure === "roof")).toBe(false);
+    expect(yieldsOf("area", room, { pitch: { rise: 0 } }, scale).some((y) => y.figure === "roof")).toBe(false);
+  });
+  it("aims a push at the estimate the sheet already feeds — the last link wins — else the only one, else the first, and never at one that is not open", () => {
+    const open = [{ id: "e1" }, { id: "e2" }];
+    expect(estimateFedBy([], open)).toBe("e1");
+    expect(estimateFedBy([{ estimateId: "e2" }], open)).toBe("e2");
+    expect(estimateFedBy([{ estimateId: "e2" }, { estimateId: "e1" }], open)).toBe("e1");
+    expect(estimateFedBy([{ estimateId: "accepted-long-ago" }], open)).toBe("e1");
+    expect(estimateFedBy([{ estimateId: "e2" }, { estimateId: "accepted-long-ago" }], open)).toBe("e2");
+    expect(estimateFedBy([{ estimateId: "e2" }], [])).toBeNull();
   });
 });

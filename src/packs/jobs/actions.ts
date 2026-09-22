@@ -3831,7 +3831,7 @@ export async function pushTakeoffAction(input: unknown) {
     revalidateSheet(projectId, sheetId);
     revalidatePath(`${BASE}/${projectId}/estimates`);
     revalidatePath(`${BASE}/${projectId}/estimates/${estimateId}`);
-    return { ok: true as const, lineId: result.lineId, quantityThousandths: result.quantityThousandths, unit: result.unit };
+    return { ok: true as const, lineId: result.lineId, quantityThousandths: result.quantityThousandths, unit: result.unit, priced: result.priced };
   } catch (err) {
     return toResult(err);
   }

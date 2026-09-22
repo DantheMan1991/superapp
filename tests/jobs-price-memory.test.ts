@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fillFromMemory,
+  fitsUnit,
   howLongAgo,
   priceBookFrom,
   priceHint,
@@ -163,5 +164,32 @@ describe("priceHint: the whole sentence", () => {
   /** The money arrives formatted, so this file holds no money rules at all. */
   it("prints the money exactly as it was handed in", () => {
     expect(priceHint(remembered(), "$3.50", "2026-09-17")).toContain("$3.50/sf");
+  });
+});
+
+describe("fitsUnit: a remembered price is per its unit", () => {
+  const perSf = remembered({ unit: "sf" });
+  it("fits the same unit however either is spelled, and any unit when the line has none yet", () => {
+    expect(fitsUnit(perSf, "sf")).toBe(true);
+    expect(fitsUnit(perSf, "sq. ft.")).toBe(true);
+    expect(fitsUnit(perSf, "square feet")).toBe(true);
+    expect(fitsUnit(remembered({ unit: "sq ft" }), "SF")).toBe(true);
+    expect(fitsUnit(perSf, "")).toBe(true);
+    expect(fitsUnit(remembered({ unit: "" }), "")).toBe(true);
+  });
+  it("does NOT fit another unit — 3.50/sf is not a price per sy — and a lump remembered with no unit is not a rate for any unit", () => {
+    expect(fitsUnit(perSf, "sy")).toBe(false);
+    expect(fitsUnit(perSf, "lf")).toBe(false);
+    expect(fitsUnit(perSf, "ea")).toBe(false);
+    expect(fitsUnit(remembered({ unit: "" }), "sf")).toBe(false);
+  });
+  it("fillFromMemory keeps the rule once the line knows its unit, and asks nothing of a line that does not", () => {
+    const book = priceBookFrom([perSf]);
+    expect(fillFromMemory(book, { description: "tile labour", unitCostCents: 0 })?.unitCostCents).toBe(350);
+    expect(fillFromMemory(book, { description: "tile labour", unitCostCents: 0, unit: "" })?.unitCostCents).toBe(350);
+    expect(fillFromMemory(book, { description: "tile labour", unitCostCents: 0, unit: "sq ft" })?.unitCostCents).toBe(350);
+    expect(fillFromMemory(book, { description: "tile labour", unitCostCents: 0, unit: "sy" })).toBeNull();
+    // A typed price is still never argued with, whatever the unit.
+    expect(fillFromMemory(book, { description: "tile labour", unitCostCents: 500, unit: "sf" })).toBeNull();
   });
 });

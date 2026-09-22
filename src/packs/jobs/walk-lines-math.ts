@@ -1,4 +1,4 @@
-import { howLongAgo, recall, type PriceBook } from "./price-memory";
+import { fitsUnit, howLongAgo, recall, type PriceBook } from "./price-memory";
 
 /**
  * ANSWERS BECOME LINES (X2b, ADR 0098) — the pure half, and the one rule the
@@ -199,7 +199,7 @@ export function priceProposed(
 
   /* 2. What this business charged for the same line last time (E4a). */
   const remembered = recall(book, description);
-  if (remembered && remembered.unitCostCents > 0) {
+  if (remembered && remembered.unitCostCents > 0 && fitsUnit(remembered, base.unit)) {
     return {
       ...base,
       unit: base.unit === "" ? remembered.unit : base.unit,

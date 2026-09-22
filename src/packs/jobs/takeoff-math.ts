@@ -247,6 +247,19 @@ export function unitAccepts(lineUnit: string, takeoffUnit: string): boolean {
 }
 
 /**
+ * THE ESTIMATE A PUSH FROM THIS SHEET AIMS AT: the one the sheet's traces
+ * already feed — the last link drawn wins — else the only one there is, else
+ * the first. A sheet feeds one estimate at a time in practice, and the first
+ * of a list was the wrong one whenever the job had two.
+ */
+export function estimateFedBy(links: readonly { estimateId: string }[], open: readonly { id: string }[]): string | null {
+  for (let i = links.length - 1; i >= 0; i -= 1) {
+    if (open.some((e) => e.id === links[i].estimateId)) return links[i].estimateId;
+  }
+  return open[0]?.id ?? null;
+}
+
+/**
  * Whether a measurement has moved on from what IT pushed: its quantity now
  * against the quantity it contributed to the line — its own, never the
  * line's total, or two measurements pushed together would both read as
@@ -277,6 +290,12 @@ export function measureKindForUnit(unit: string): FigureFamily | "ask" | null {
 
 // ------------------------------------------ the figures a trace yields (ADR 0110)
 
+/** A pitch as it was said: `6:12` to one trade, `26.6°` to another. Either is kept as typed. */
+export type Pitch = { rise: number } | { degrees: number };
+
+/** A roof steeper than this is a wall, and the factor past it runs away. */
+export const PITCH_DEGREES_MAX = 85;
+
 /**
  * WHAT THE TRADE TYPES ONTO A TRACE so it yields more than one number. Kept
  * as typed, in the unit typed, because "9 ft" and "4 in" are what the
@@ -285,8 +304,8 @@ export function measureKindForUnit(unit: string): FigureFamily | "ask" | null {
 export interface TraceFigures {
   /** A wall's height on a length: the wall it stands is length × height. */
   height?: { value: number; unit: "ft" | "m" };
-  /** A roof's pitch on a plan area, rise per 12: the roof is the plan × √(1 + (rise/12)²). */
-  pitch?: { rise: number };
+  /** A roof's pitch on a plan area, as the trade says it — rise per 12, or degrees: the roof is the plan × the slope's factor (`pitchFactorOf`). */
+  pitch?: Pitch;
   /** A depth on an area, in inches or millimetres: the volume it fills. */
   depth?: { value: number; unit: "in" | "mm" };
   /** Openings taken out of an area: rings of points, fractions of the page, three or more each. */
@@ -330,8 +349,9 @@ export function parseFigures(raw: unknown): TraceFigures {
   }
   const p = r.pitch;
   if (typeof p === "object" && p !== null) {
-    const rise = (p as Record<string, unknown>).rise;
+    const { rise, degrees } = p as Record<string, unknown>;
     if (typeof rise === "number" && Number.isFinite(rise) && rise >= 0 && rise <= 48) out.pitch = { rise };
+    else if (typeof degrees === "number" && Number.isFinite(degrees) && degrees >= 0 && degrees <= PITCH_DEGREES_MAX) out.pitch = { degrees };
   }
   const d = r.depth;
   if (typeof d === "object" && d !== null) {
@@ -386,6 +406,21 @@ export function pitchFactor(rise: number): number {
   return Math.sqrt(1 + (rise / 12) ** 2);
 }
 
+/** The same factor for a pitch however it was said: a slope of θ degrees grows the plan by 1/cos θ — 45° is √2, as 12:12 is. */
+export function pitchFactorOf(pitch: Pitch): number {
+  return "rise" in pitch ? pitchFactor(pitch.rise) : 1 / Math.cos((pitch.degrees * Math.PI) / 180);
+}
+
+/** `6:12` or `30°`, as it was typed. */
+export function formatPitch(pitch: Pitch): string {
+  return "rise" in pitch ? `${pitch.rise}:12` : `${pitch.degrees}°`;
+}
+
+/** A pitch of nothing is a flat area, which yields no roof. */
+export function isFlat(pitch: Pitch): boolean {
+  return ("rise" in pitch ? pitch.rise : pitch.degrees) <= 0;
+}
+
 /**
  * EVERYTHING A TRACE YIELDS, each with its working. A count yields its count;
  * a length its length and — with a height — the wall it stands; an area its
@@ -433,11 +468,11 @@ export function yieldsOf(kind: MeasureKind, geometry: PointsGeometry, figures: T
       working: "around it",
     },
   ];
-  if (figures.pitch && figures.pitch.rise > 0) {
+  if (figures.pitch && !isFlat(figures.pitch)) {
     out.push({
       figure: "roof",
-      measurement: { quantity: net * pitchFactor(figures.pitch.rise), unit: areaUnit },
-      working: `${formatMeasure({ quantity: net, unit: areaUnit })} of plan at ${figures.pitch.rise}:12`,
+      measurement: { quantity: net * pitchFactorOf(figures.pitch), unit: areaUnit },
+      working: `${formatMeasure({ quantity: net, unit: areaUnit })} of plan at ${formatPitch(figures.pitch)}`,
     });
   }
   if (figures.depth) {

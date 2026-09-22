@@ -116,7 +116,6 @@ import {
   howLongAgo,
   priceBookFrom,
   priceHint,
-  recall,
   type RememberedPrice,
 } from "../price-memory";
 import {
@@ -758,7 +757,7 @@ export function EstimateEditor({
   const entryMemory = useMemo(() => {
     const parsed = parseEstimateLine(entry, knownUnits);
     if (parsed === null || parsed.unitCostCents !== 0) return null;
-    return recall(priceBook, parsed.description);
+    return fillFromMemory(priceBook, parsed);
   }, [entry, knownUnits, priceBook]);
 
   function commitEntry(useMemory = false) {
@@ -1058,7 +1057,7 @@ export function EstimateEditor({
     });
     let priced = 0;
     for (const l of result.loose) {
-      const remembered = fillFromMemory(priceBook, { description: l.description, unitCostCents: 0 });
+      const remembered = fillFromMemory(priceBook, { description: l.description, unitCostCents: 0, unit: l.unit });
       if (remembered) priced += 1;
       newLines.push({
         ...draftOf(
@@ -1620,9 +1619,10 @@ export function EstimateEditor({
   const ROW_GRID =
     `items-center gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)_78px] ` +
     // The last track holds two icons since ADR 0109 — the ruler and the bin — so it is 64px, not 34px.
-    "@sm/work:grid-cols-[76px_minmax(0,1fr)_92px_64px] " +
-    "@3xl/work:grid-cols-[84px_minmax(0,1fr)_92px_100px_112px_64px] " +
-    "@5xl/work:grid-cols-[88px_minmax(0,1fr)_96px_104px_108px_116px_64px]";
+    // The quantity track is 120px (124px at @5xl): a quantity in thousandths — 1234.567 — is eight characters at 14px tabular (58px), and the old 54px input in a 92px track clipped 59.026 to a 5.
+    "@sm/work:grid-cols-[76px_minmax(0,1fr)_120px_64px] " +
+    "@3xl/work:grid-cols-[84px_minmax(0,1fr)_120px_100px_112px_64px] " +
+    "@5xl/work:grid-cols-[88px_minmax(0,1fr)_124px_104px_108px_116px_64px]";
   const GUTTER_GRID =
     `grid gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)] @sm/work:grid-cols-[76px_minmax(0,1fr)] ` +
     "@3xl/work:grid-cols-[84px_minmax(0,1fr)] @5xl/work:grid-cols-[88px_minmax(0,1fr)]";
@@ -1752,7 +1752,7 @@ export function EstimateEditor({
                   onChange={(e) => setLine(l.key, { quantity: e.target.value })}
                   placeholder="1"
                   inputMode="decimal"
-                  className={cn("h-9 w-[54px] text-right tabular-nums", BARE)}
+                  className={cn("h-9 w-[72px] px-1.5 text-right tabular-nums", BARE)}
                   disabled={!editable}
                 />
                 <Input

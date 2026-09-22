@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatMoney } from "@/lib/money";
 import { loadPdfjs } from "@/modules/documents/components/pdf-canvas";
 import {
   addMarkupAction,
@@ -42,10 +43,12 @@ import {
   updateMarkupAction,
 } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
+import { priceHint } from "../price-memory";
 import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
 import {
   STANDARD_SCALES,
   driftedSince,
+  estimateFedBy,
   formatMeasure,
   matchingStandard,
   measure,
@@ -224,6 +227,7 @@ export function SheetViewer({
   scale,
   estimates,
   codes,
+  currencySymbol = null,
   measuringFor = null,
   forLine = null,
   onChanged,
@@ -238,6 +242,8 @@ export function SheetViewer({
   scale: SheetScale | null;
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
+  /** The tenant's money symbol, for the toast that says what a new line was priced at; null prints the amount alone. */
+  currencySymbol?: string | null;
   /** An estimate line is measuring (ADR 0109): tick boxes on its kind of trace, nothing else changes. */
   forLine?: MeasuringLine | null;
   /**
@@ -739,10 +745,13 @@ export function SheetViewer({
           </Button>
         </div>
       </div>
-      {canEdit && tool !== "select" && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {/* THE TOOL LINE IS ALWAYS THERE while the sheet can be drawn on, so picking a tool does not push the sheet down under the finger about to draw. */}
+      {canEdit && (
+        <div className="flex min-h-7 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
-            {tool === "cloud"
+            {tool === "select"
+              ? "Pick a tool to draw or measure; drag to move about, pinch or ctrl+wheel to zoom."
+              : tool === "cloud"
               ? "Drag a box around what changed."
               : tool === "arrow"
                 ? "Drag from where the arrow starts to what it points at."
@@ -760,8 +769,8 @@ export function SheetViewer({
                           ? "Tap along the wall, corner by corner, then Finish."
                           : tool === "area"
                             ? "Tap around the room, corner by corner, then Finish."
-                            : "Tap each one to count it, then Finish."}{" "}
-            Esc goes back to moving about.
+                            : "Tap each one to count it, then Finish."}
+            {tool !== "select" ? " Esc goes back to moving about." : ""}
           </span>
           {pointsDraft && pointsDraft.kind !== "calibrate" && (
             <span className="flex items-center gap-1">
@@ -948,6 +957,7 @@ export function SheetViewer({
         scale={scale}
         estimates={estimates}
         codes={codes}
+        currencySymbol={currencySymbol}
         projectId={projectId}
         sheetId={sheetId}
         onChanged={onChanged}
@@ -955,6 +965,13 @@ export function SheetViewer({
       />
     </div>
   );
+}
+
+/** Today as `YYYY-MM-DD`, for how long ago a remembered price was priced. */
+function today(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function describe(m: MarkupView, number: number | undefined, measurement: Measurement | null): string {
@@ -1487,6 +1504,7 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
   const [height, setHeight] = useState("");
   const [heightUnit, setHeightUnit] = useState<"ft" | "m">("ft");
   const [pitch, setPitch] = useState("");
+  const [pitchUnit, setPitchUnit] = useState<"rise" | "degrees">("rise");
   const [depth, setDepth] = useState("");
   const [depthUnit, setDepthUnit] = useState<"in" | "mm">("in");
   const [keepOpenings, setKeepOpenings] = useState(true);
@@ -1497,7 +1515,9 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
     setColor(markup.color);
     setHeight(markup.figures.height ? String(markup.figures.height.value) : "");
     setHeightUnit(markup.figures.height?.unit ?? "ft");
-    setPitch(markup.figures.pitch ? String(markup.figures.pitch.rise) : "");
+    const p = markup.figures.pitch;
+    setPitch(p ? String("rise" in p ? p.rise : p.degrees) : "");
+    setPitchUnit(p && "degrees" in p ? "degrees" : "rise");
     setDepth(markup.figures.depth ? String(markup.figures.depth.value) : "");
     setDepthUnit(markup.figures.depth?.unit ?? "in");
     setKeepOpenings(true);
@@ -1515,7 +1535,7 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
     }
     if (markup?.kind === "area") {
       const r = Number.parseFloat(pitch);
-      if (pitch.trim() !== "" && Number.isFinite(r) && r >= 0) out.pitch = { rise: r };
+      if (pitch.trim() !== "" && Number.isFinite(r) && r >= 0) out.pitch = pitchUnit === "degrees" ? { degrees: r } : { rise: r };
       const d = Number.parseFloat(depth);
       if (depth.trim() !== "" && Number.isFinite(d) && d > 0) out.depth = { value: d, unit: depthUnit };
       if (keepOpenings && markup.figures.deducts && markup.figures.deducts.length > 0) out.deducts = markup.figures.deducts;
@@ -1612,10 +1632,18 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
               <div className="space-y-1.5">
                 <Label htmlFor="mk-pitch">Pitch — as a roof</Label>
                 <div className="flex items-center gap-2">
-                  <Input id="mk-pitch" value={pitch} onChange={(e) => setPitch(e.target.value)} inputMode="decimal" placeholder="6" className="w-24" />
-                  <span className="text-sm text-muted-foreground">: 12</span>
+                  <Input id="mk-pitch" value={pitch} onChange={(e) => setPitch(e.target.value)} inputMode="decimal" placeholder={pitchUnit === "degrees" ? "27" : "6"} className="w-24" />
+                  <Select value={pitchUnit} onValueChange={(v) => setPitchUnit(v as "rise" | "degrees")}>
+                    <SelectTrigger className="w-32" aria-label="Pitch unit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rise">: 12</SelectItem>
+                      <SelectItem value="degrees">degrees</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <p className="text-xs text-muted-foreground">A plan area at 6:12 yields a roof area 1.118 times itself. Blank means the area is flat.</p>
+                <p className="text-xs text-muted-foreground">A plan area at 6:12 — 26.6° — yields a roof area 1.118 times itself. Blank means the area is flat.</p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="mk-depth">Depth — as a volume</Label>
@@ -1864,6 +1892,7 @@ function TakeoffDialog({
   scale,
   estimates,
   codes,
+  currencySymbol,
   projectId,
   sheetId,
   onChanged,
@@ -1875,6 +1904,7 @@ function TakeoffDialog({
   scale: SheetScale | null;
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
+  currencySymbol: string | null;
   projectId: string;
   sheetId: string;
   onChanged?: () => void;
@@ -1882,7 +1912,9 @@ function TakeoffDialog({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [estimateId, setEstimateId] = useState<string>(estimates[0]?.id ?? NONE);
+  /** The estimate this sheet already feeds, else the only one, else the first — never `estimates[0]` by habit. */
+  const aimedAt = estimateFedBy(markups.flatMap((m) => m.takeoffs), estimates) ?? NONE;
+  const [estimateId, setEstimateId] = useState<string>(aimedAt);
   const [lineId, setLineId] = useState<string>(NEW_LINE);
   const [description, setDescription] = useState("");
   const [costCodeId, setCostCodeId] = useState<string>(NONE);
@@ -1912,7 +1944,7 @@ function TakeoffDialog({
     const preselected = link ? pushedLineId(estimates, link, takeoffUnitFor(fam, scale?.unit ?? "")) : NEW_LINE;
     setIncluded(new Set([`${markup.id}:${markup.kind}`, ...(preselected === NEW_LINE ? [] : behindHere(preselected, fam))]));
     setDescription(markup.text || MARKUP_KIND_LABELS[markup.kind]);
-    setEstimateId(link?.estimateId ?? estimates[0]?.id ?? NONE);
+    setEstimateId(link?.estimateId ?? aimedAt);
     setLineId(preselected);
   }
   const ownYields = markup ? (yields.get(markup.id) ?? []) : [];
@@ -1955,7 +1987,11 @@ function TakeoffDialog({
         toast.error(result.error);
         return;
       }
-      toast.success(`${thousandthsToQuantityString(result.quantityThousandths)} ${result.unit} onto ${estimate.number}`);
+      toast.success(`${thousandthsToQuantityString(result.quantityThousandths)} ${result.unit} onto ${estimate.number}`, {
+        description: result.priced
+          ? `Priced from memory — ${priceHint(result.priced, formatMoney(result.priced.unitCostCents, currencySymbol), today())}. Check it: a price can be a year old.`
+          : undefined,
+      });
       setLoadedFor(null);
       onClose();
       onChanged?.();

@@ -9,16 +9,19 @@ import {
   formatMeasure,
   matchingStandard,
   measure,
+  measureKindForUnit,
   normaliseUnit,
   pathPoints,
   polygonPoints,
   scaleFromKnownLength,
   scaleFromStandard,
+  sheetsBehind,
   standardScale,
   sumMeasurements,
   takeoffUnitFor,
   toThousandths,
   unitAccepts,
+  type LineMeasurements,
   type SheetScale,
 } from "../src/packs/jobs/takeoff-math";
 import { MARKUP_KINDS, MEASURE_KINDS, MEASURE_POINTS_MAX, SCALE_UNITS, isMeasureKind, isScaleUnit } from "../src/packs/jobs/vocabulary";
@@ -212,6 +215,16 @@ describe("the takeoff", () => {
     expect(unitAccepts("sq", "sf")).toBe(false);
     expect(unitAccepts("m2", "sf")).toBe(false);
     expect(unitAccepts("ls", "ea")).toBe(false);
+  });
+
+  it("says how a drawing measures a line from its unit — an area, a length or a count — asks on a blank one and refuses a lump sum (ADR 0109)", () => {
+    expect(["sf", "sq. ft.", "m2", "Square feet"].map(measureKindForUnit)).toEqual(["area", "area", "area", "area"]);
+    expect(["lf", "ft", "m", "lin. ft."].map(measureKindForUnit)).toEqual(["length", "length", "length", "length"]);
+    expect(["ea", "Each"].map(measureKindForUnit)).toEqual(["count", "count"]);
+    expect(["", "  "].map(measureKindForUnit)).toEqual(["ask", "ask"]);
+    /** A lump sum, concrete by the yard, carpet by the square yard: no drawing yields these, and the ruler says so rather than guessing. */
+    expect(["ls", "cy", "sy", "hr"].map(measureKindForUnit)).toEqual([null, null, null, null]);
+    expect(sheetsBehind({ sheets: [{ sheetNumber: "A-101" }, { sheetNumber: "A-102" }] } as unknown as Pick<LineMeasurements, "sheets">)).toBe("A-101, A-102");
   });
 
   it("says a measurement has drifted from what IT pushed, never from the line's total", () => {

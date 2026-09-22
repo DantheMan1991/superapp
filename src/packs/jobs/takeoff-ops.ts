@@ -1,12 +1,13 @@
 import "server-only";
-import { and, eq, inArray, max, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, max, notInArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { JobSheet, JobSheetMarkup } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
-import { getSheet } from "./drawings-ops";
+import { getSheet, listSheets } from "./drawings-ops";
 import { getMarkup } from "./markups-ops";
 import { parsePoints } from "./markups-math";
 import {
+  driftedSince,
   formatMeasure,
   measure,
   scaleFromKnownLength,
@@ -15,8 +16,10 @@ import {
   takeoffUnitFor,
   toThousandths,
   unitAccepts,
+  type LineMeasurements,
   type Measurement,
   type SheetScale,
+  type SheetShare,
 } from "./takeoff-math";
 import { isMeasureKind, isScaleUnit, type MeasureKind, type ScaleUnit } from "./vocabulary";
 
@@ -108,6 +111,90 @@ export function measurementOf(markup: Pick<JobSheetMarkup, "kind" | "geometry">,
   return measure(markup.kind, parsePoints(markup.kind, markup.geometry), scale);
 }
 
+// ----------------------------------------------------- a set of measurements
+
+/** One measurement of a set, with what it comes to under its own sheet's scale. */
+interface MeasuredRow {
+  id: string;
+  sheetId: string;
+  kind: MeasureKind;
+  measurement: Measurement | null;
+}
+
+interface MeasuredSet {
+  rows: MeasuredRow[];
+  summed: ReturnType<typeof sumMeasurements>;
+  /** The unit the trade prices by: lf, sf, ea; m, m2. */
+  unit: string;
+  quantityThousandths: number;
+}
+
+/**
+ * The measurements named, checked as ONE SET: every one a length, an area or a
+ * count on a sheet of this job, one kind of thing between them (two floors add
+ * up, a floor and a wall do not), each under a scale when it needs one. What a
+ * push onto a line and a line's claim both start from — and it may span
+ * sheets: the downstairs floor on A-101 and the upstairs on A-102 are one
+ * flooring line (ADR 0109).
+ */
+async function measuredSet(tx: Tx, tenantId: string, projectId: string, markupIds: readonly string[]): Promise<MeasuredSet> {
+  if (markupIds.length === 0) throw new JobsError("INVALID_VALUE", "pick at least one measurement");
+  const ids = [...new Set(markupIds)];
+  const markups = await tx
+    .select()
+    .from(schema.jobSheetMarkups)
+    .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), inArray(schema.jobSheetMarkups.id, ids)));
+  if (markups.length !== ids.length) throw new JobsError("NOT_FOUND", "a measurement is missing");
+  const sheetIds = [...new Set(markups.map((m) => m.sheetId))];
+  const sheets = await tx
+    .select()
+    .from(schema.jobSheets)
+    .where(and(eq(schema.jobSheets.tenantId, tenantId), inArray(schema.jobSheets.id, sheetIds)));
+  const sheetById = new Map(sheets.map((s) => [s.id, s]));
+  const rows: MeasuredRow[] = [];
+  for (const m of markups) {
+    if (!isMeasureKind(m.kind)) throw new JobsError("INVALID_KIND", "only a length, an area or a count carries a quantity");
+    if (m.projectId !== projectId) throw new JobsError("WRONG_PROJECT", "that measurement is on another job's sheet");
+    const sheet = sheetById.get(m.sheetId);
+    rows.push({ id: m.id, sheetId: m.sheetId, kind: m.kind, measurement: measurementOf(m, sheet ? scaleOf(sheet) : null) });
+  }
+  let summed: ReturnType<typeof sumMeasurements>;
+  try {
+    summed = sumMeasurements(rows);
+  } catch (err) {
+    throw new JobsError("INVALID_VALUE", err instanceof Error ? err.message : "these cannot be pushed together");
+  }
+  const scaleUnit: ScaleUnit | "" = summed.total.unit === "m" || summed.total.unit === "m²" ? "m" : summed.total.unit === "each" ? "" : "ft";
+  return { rows, summed, unit: takeoffUnitFor(summed.kind, scaleUnit), quantityThousandths: toThousandths(summed.total.quantity) };
+}
+
+/**
+ * These measurements stand behind the line from now on, each remembering ITS
+ * OWN quantity — never the line's total, or a second one on the same line
+ * would read as drifted the moment after — and the line's others no longer
+ * do. An empty set lets every one of them go.
+ */
+async function linkMeasurements(tx: Tx, tenantId: string, lineId: string, rows: readonly MeasuredRow[]): Promise<void> {
+  const now = new Date();
+  for (const r of rows) {
+    await tx
+      .update(schema.jobSheetMarkups)
+      .set({ estimateLineId: lineId, pushedQuantityThousandths: toThousandths(r.measurement!.quantity), updatedAt: now })
+      .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobSheetMarkups.id, r.id)));
+  }
+  const kept = rows.map((r) => r.id);
+  await tx
+    .update(schema.jobSheetMarkups)
+    .set({ estimateLineId: null, pushedQuantityThousandths: null, updatedAt: now })
+    .where(
+      and(
+        eq(schema.jobSheetMarkups.tenantId, tenantId),
+        eq(schema.jobSheetMarkups.estimateLineId, lineId),
+        ...(kept.length > 0 ? [notInArray(schema.jobSheetMarkups.id, kept)] : []),
+      ),
+    );
+}
+
 // ------------------------------------------------------------- the takeoff
 
 export interface TakeoffInput {
@@ -150,35 +237,7 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   if (estimate.length === 0) throw new JobsError("NOT_FOUND", `estimate ${input.estimateId} not found`);
   const est = estimate[0];
   if (est.status === "accepted") throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${est.number} was accepted; its quantities are the agreement`);
-  if (input.markupIds.length === 0) throw new JobsError("INVALID_VALUE", "pick at least one measurement");
-  const ids = [...new Set(input.markupIds)];
-  const markups = await tx
-    .select()
-    .from(schema.jobSheetMarkups)
-    .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), inArray(schema.jobSheetMarkups.id, ids)));
-  if (markups.length !== ids.length) throw new JobsError("NOT_FOUND", "a measurement is missing");
-  const sheetIds = [...new Set(markups.map((m) => m.sheetId))];
-  const sheets = await tx
-    .select()
-    .from(schema.jobSheets)
-    .where(and(eq(schema.jobSheets.tenantId, ctx.tenantId), inArray(schema.jobSheets.id, sheetIds)));
-  const sheetById = new Map(sheets.map((s) => [s.id, s]));
-  const rows: { id: string; kind: MeasureKind; measurement: Measurement | null }[] = [];
-  for (const m of markups) {
-    if (!isMeasureKind(m.kind)) throw new JobsError("INVALID_KIND", "only a length, an area or a count carries a quantity");
-    if (m.projectId !== est.projectId) throw new JobsError("WRONG_PROJECT", "that measurement is on another job's sheet");
-    const sheet = sheetById.get(m.sheetId);
-    rows.push({ id: m.id, kind: m.kind, measurement: measurementOf(m, sheet ? scaleOf(sheet) : null) });
-  }
-  let summed: ReturnType<typeof sumMeasurements>;
-  try {
-    summed = sumMeasurements(rows);
-  } catch (err) {
-    throw new JobsError("INVALID_VALUE", err instanceof Error ? err.message : "these cannot be pushed together");
-  }
-  const scaleUnit: ScaleUnit | "" = summed.total.unit === "m" || summed.total.unit === "m²" ? "m" : summed.total.unit === "each" ? "" : "ft";
-  const unit = takeoffUnitFor(summed.kind, scaleUnit);
-  const quantityThousandths = toThousandths(summed.total.quantity);
+  const { rows, summed, unit, quantityThousandths } = await measuredSet(tx, ctx.tenantId, est.projectId, input.markupIds);
 
   let lineId: string;
   if (input.lineId) {
@@ -226,25 +285,8 @@ export async function pushTakeoff(tx: Tx, ctx: JobsCtx, input: TakeoffInput): Pr
   } else {
     throw new JobsError("INVALID_VALUE", "say which line the quantity goes on, or describe a new one");
   }
-  // Each measurement remembers the line and ITS OWN quantity — never the line's total, or a
-  // second measurement pushed onto the same line would read as drifted the moment after.
-  for (const r of rows) {
-    await tx
-      .update(schema.jobSheetMarkups)
-      .set({ estimateLineId: lineId, pushedQuantityThousandths: toThousandths(r.measurement!.quantity), updatedAt: new Date() })
-      .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), eq(schema.jobSheetMarkups.id, r.id)));
-  }
-  // Measurements that fed this line before and were not in this push no longer stand behind its quantity.
-  await tx
-    .update(schema.jobSheetMarkups)
-    .set({ estimateLineId: null, pushedQuantityThousandths: null, updatedAt: new Date() })
-    .where(
-      and(
-        eq(schema.jobSheetMarkups.tenantId, ctx.tenantId),
-        eq(schema.jobSheetMarkups.estimateLineId, lineId),
-        notInArray(schema.jobSheetMarkups.id, ids),
-      ),
-    );
+  // Each measurement remembers the line and its own share; the line's others no longer stand behind it.
+  await linkMeasurements(tx, ctx.tenantId, lineId, rows);
   await tx
     .update(schema.jobEstimates)
     .set({ version: est.version + 1, updatedAt: new Date() })
@@ -261,4 +303,133 @@ export async function unpushTakeoff(tx: Tx, ctx: JobsCtx, markupId: string): Pro
     .update(schema.jobSheetMarkups)
     .set({ estimateLineId: null, pushedQuantityThousandths: null, updatedAt: new Date() })
     .where(and(eq(schema.jobSheetMarkups.tenantId, ctx.tenantId), eq(schema.jobSheetMarkups.id, markupId)));
+}
+
+// ------------------------------------------------- what stands behind a line
+
+/**
+ * THE REVERSE LINK (ADR 0109): every measurement standing behind each line of
+ * an estimate, by sheet — what the estimate shows as *measured on A-101,
+ * A-102* and what the Measure dialog opens with. Derived from the markups'
+ * own link every time it is read, so it cannot disagree with the drawings;
+ * nothing is stored twice. A sheet's share is what its traces pushed; its
+ * `now` is what they come to today, and `drifted` says when those differ.
+ */
+export async function measurementsBehind(tx: Tx, tenantId: string, estimateId: string): Promise<Map<string, LineMeasurements>> {
+  const out = new Map<string, LineMeasurements>();
+  const est = await tx
+    .select({ projectId: schema.jobEstimates.projectId })
+    .from(schema.jobEstimates)
+    .where(and(eq(schema.jobEstimates.tenantId, tenantId), eq(schema.jobEstimates.id, estimateId)))
+    .limit(1);
+  if (est.length === 0) return out;
+  const rows = await tx
+    .select({ markup: schema.jobSheetMarkups })
+    .from(schema.jobSheetMarkups)
+    .innerJoin(
+      schema.jobEstimateLines,
+      and(eq(schema.jobEstimateLines.tenantId, schema.jobSheetMarkups.tenantId), eq(schema.jobEstimateLines.id, schema.jobSheetMarkups.estimateLineId)),
+    )
+    .where(and(eq(schema.jobSheetMarkups.tenantId, tenantId), eq(schema.jobEstimateLines.estimateId, estimateId)))
+    .orderBy(asc(schema.jobSheetMarkups.createdAt), asc(schema.jobSheetMarkups.id));
+  if (rows.length === 0) return out;
+  const sheets = await listSheets(tx, tenantId, est[0].projectId);
+  const order = new Map(sheets.map((s, i) => [s.sheet.id, i]));
+  const byId = new Map(sheets.map((s) => [s.sheet.id, s]));
+  const add = (target: { nowThousandths: number | null }, nowT: number | null) => {
+    target.nowThousandths = target.nowThousandths === null || nowT === null ? null : target.nowThousandths + nowT;
+  };
+  for (const { markup: m } of rows) {
+    if (!isMeasureKind(m.kind) || !m.estimateLineId) continue;
+    const sheet = byId.get(m.sheetId);
+    if (!sheet) continue;
+    const scale = scaleOf(sheet.sheet);
+    const now = measurementOf(m, scale);
+    const nowT = now ? toThousandths(now.quantity) : null;
+    const share = m.pushedQuantityThousandths ?? 0;
+    const drifted = driftedSince(m.pushedQuantityThousandths, now);
+    const line: LineMeasurements = out.get(m.estimateLineId) ?? {
+      lineId: m.estimateLineId,
+      kind: m.kind,
+      unit: takeoffUnitFor(m.kind, scale?.unit ?? ""),
+      traces: 0,
+      shareThousandths: 0,
+      nowThousandths: 0,
+      drifted: false,
+      sheets: [],
+    };
+    let s: SheetShare | undefined = line.sheets.find((x) => x.sheetId === m.sheetId);
+    if (!s) {
+      s = { sheetId: m.sheetId, sheetNumber: sheet.sheet.sheetNumber, setName: sheet.setName, isCurrent: sheet.isCurrent, traces: 0, shareThousandths: 0, nowThousandths: 0, drifted: false, markupIds: [] };
+      line.sheets.push(s);
+    }
+    s.markupIds.push(m.id);
+    s.traces += 1;
+    s.shareThousandths += share;
+    add(s, nowT);
+    s.drifted = s.drifted || drifted;
+    line.traces += 1;
+    line.shareThousandths += share;
+    add(line, nowT);
+    line.drifted = line.drifted || drifted;
+    out.set(m.estimateLineId, line);
+  }
+  for (const line of out.values()) line.sheets.sort((a, b) => (order.get(a.sheetId) ?? 0) - (order.get(b.sheetId) ?? 0));
+  return out;
+}
+
+export interface StandBehindInput {
+  lineId: string;
+  /** Every measurement that stands behind the line from now on, on any sheet of the job; empty lets them all go. */
+  markupIds: string[];
+}
+
+export interface StandBehindResult {
+  lineId: string;
+  /** What the line should now say, in thousandths of `unit` — 0 with nothing behind it. */
+  quantityThousandths: number;
+  unit: string;
+  kind: MeasureKind | null;
+  behind: LineMeasurements | null;
+}
+
+/**
+ * MEASURED FROM WHERE IT IS PRICED (ADR 0109): the measurements that stand
+ * behind an estimate line from now on, across every sheet of the job.
+ *
+ * **This writes the link and nothing else.** The editor holds the estimate
+ * (ADR 0082) and sets the line's quantity itself from what comes back, exactly
+ * as it appends what *Add an assembly* and *From the model* return — a second
+ * writer of the line while the editor is open is the disagreement that ADR
+ * warns about. The line's unit must be the measurement's or blank, as for a
+ * push; the editor gives a blank line the unit that comes back.
+ */
+export async function standBehind(tx: Tx, ctx: JobsCtx, input: StandBehindInput): Promise<StandBehindResult> {
+  requireWrite(ctx, "member");
+  const found = await tx
+    .select({ line: schema.jobEstimateLines, estimate: schema.jobEstimates })
+    .from(schema.jobEstimateLines)
+    .innerJoin(
+      schema.jobEstimates,
+      and(eq(schema.jobEstimates.tenantId, schema.jobEstimateLines.tenantId), eq(schema.jobEstimates.id, schema.jobEstimateLines.estimateId)),
+    )
+    .where(and(eq(schema.jobEstimateLines.tenantId, ctx.tenantId), eq(schema.jobEstimateLines.id, input.lineId)))
+    .limit(1);
+  if (found.length === 0) throw new JobsError("NOT_FOUND", `estimate line ${input.lineId} not found`);
+  const { line, estimate } = found[0];
+  if (estimate.status === "accepted") throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${estimate.number} was accepted; its quantities are the agreement`);
+  if (input.markupIds.length === 0) {
+    await linkMeasurements(tx, ctx.tenantId, line.id, []);
+    return { lineId: line.id, quantityThousandths: 0, unit: line.unit, kind: null, behind: null };
+  }
+  const set = await measuredSet(tx, ctx.tenantId, estimate.projectId, input.markupIds);
+  if (!unitAccepts(line.unit, set.unit)) {
+    throw new JobsError(
+      "UNIT_MISMATCH",
+      `${line.description} is priced per ${line.unit.trim()} and this measures ${formatMeasure(set.summed.total)}; a drawing measures it in ${set.unit}`,
+    );
+  }
+  await linkMeasurements(tx, ctx.tenantId, line.id, set.rows);
+  const behind = (await measurementsBehind(tx, ctx.tenantId, estimate.id)).get(line.id) ?? null;
+  return { lineId: line.id, quantityThousandths: set.quantityThousandths, unit: set.unit, kind: set.summed.kind, behind };
 }

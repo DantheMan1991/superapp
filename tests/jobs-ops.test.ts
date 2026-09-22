@@ -137,6 +137,7 @@ import {
   listEstimates,
   proposalData,
   updateEstimate,
+  updateEstimateReturning,
 } from "../src/packs/jobs/estimating-ops";
 import { createPhase, deletePhase, listPhases, scheduleSummary, updatePhase } from "../src/packs/jobs/schedule-ops";
 import {
@@ -155,7 +156,7 @@ import {
 } from "../src/packs/jobs/drawings-ops";
 import { attachDocumentToRecord } from "../src/modules/documents/attachments";
 import { addMarkup, deleteMarkup, listMarkups, markupCounts, updateMarkup } from "../src/packs/jobs/markups-ops";
-import { clearSheetScale, measurementOf, pushTakeoff, scaleOf, setSheetScale, unpushTakeoff } from "../src/packs/jobs/takeoff-ops";
+import { clearSheetScale, measurementOf, measurementsBehind, pushTakeoff, scaleOf, setSheetScale, standBehind, unpushTakeoff } from "../src/packs/jobs/takeoff-ops";
 import { loadChangeOrderPaper, loadOrderPaper } from "../src/packs/jobs/paper";
 import { buildChangeOrderPaper, buildOrderPaper } from "../src/packs/jobs/paper-model";
 import { certificateInputFrom } from "../src/packs/jobs/certificate";
@@ -5004,6 +5005,115 @@ d("jobs ops", () => {
     expect(await rowsOf()).toEqual([]);
     expect((await run((tx) => listPunchItems(tx, tenantId, project.id))).some((w) => w.id === pin2.workItemId)).toBe(true);
   }, 120_000);
+  it("A LINE MEASURED FROM WHERE IT IS PRICED (ADR 0109): what stands behind a line follows it across sheets, each trace holding its own share; the claim writes the link and nothing else; the reverse link reads by sheet and says which sheet drifted; a kind or a unit that does not fit refuses; and a save hands back the ids it minted, in the payload's order", async () => {
+    const entity = await newCompany("Takeoff Co 2");
+    const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK3", name: "Two floors" }));
+    const set = await run((tx) => createDrawingSet(tx, staffCtx, { projectId: project.id, name: "Permit set", issuedOn: "2026-06-01" }));
+    const pdf = await run(async (tx) => {
+      const rows = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          blobPathname: `docs/${tenantId}/files/${STAMP}-two-floors.pdf`,
+          fileName: "two-floors.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+          sha256: `${STAMP}-sha-two-floors`,
+          effectiveVisibility: "members",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await run((tx) => attachDocumentToRecord(tx, { tenantId, userId: ctx.userId, role: "owner" }, { documentId: pdf, target: setTarget(set.id), makePrimary: false }));
+    const [a101, a102] = await run((tx) =>
+      indexSheets(tx, staffCtx, {
+        setId: set.id,
+        documentId: pdf,
+        sheets: [
+          { pageNumber: 1, sheetNumber: "A-101", title: "First floor" },
+          { pageNumber: 2, sheetNumber: "A-102", title: "Second floor" },
+        ],
+      }),
+    );
+    const draw = (input: Parameters<typeof addMarkup>[2]) => run((tx) => addMarkup(tx, staffCtx, input));
+    const page = { pageWidthPt: 792, pageHeightPt: 612 };
+    // A quarter of the width is eleven feet on both sheets: eighteen points to the foot.
+    for (const s of [a101, a102]) {
+      await run((tx) => setSheetScale(tx, staffCtx, s.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 11, unit: "ft", ...page }));
+    }
+    const down = await draw({ sheetId: a101.id, kind: "area", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }, { x: 0.5, y: 0.5 }, { x: 0.25, y: 0.5 }] }, text: "Kitchen" });
+    const up = await draw({ sheetId: a102.id, kind: "area", geometry: { points: [{ x: 0.6, y: 0.25 }, { x: 0.7, y: 0.25 }, { x: 0.7, y: 0.5 }, { x: 0.6, y: 0.5 }] }, text: "Hall" });
+    const wall = await draw({ sheetId: a102.id, kind: "length", geometry: { points: [{ x: 0.25, y: 0.25 }, { x: 0.5, y: 0.25 }] } });
+    const est = await run((tx) =>
+      createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TK3", lines: [{ description: "Flooring", unit: "" }, { description: "Baseboard", unit: "lf" }] }),
+    );
+    const [flooring, baseboard] = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+
+    // The claim spans sheets and writes the LINK only: the line's quantity and the estimate's version do not move.
+    const stood = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [down.id, up.id] }));
+    expect([stood.quantityThousandths, stood.unit, stood.kind]).toEqual([93_500 + 37_400, "sf", "area"]);
+    expect(stood.behind?.sheets.map((s) => [s.sheetNumber, s.traces, s.shareThousandths, s.nowThousandths, s.drifted, s.isCurrent, s.markupIds])).toEqual([
+      ["A-101", 1, 93_500, 93_500, false, true, [down.id]],
+      ["A-102", 1, 37_400, 37_400, false, true, [up.id]],
+    ]);
+    const after = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!;
+    expect([after.estimate.version, after.lines.find((l) => l.id === flooring.id)!.quantityThousandths, after.lines.find((l) => l.id === flooring.id)!.unit]).toEqual([est.version, 1000, ""]);
+    // The reverse link, read for the whole estimate: the flooring line has two sheets behind it, the baseboard nothing.
+    let behind = await run((tx) => measurementsBehind(tx, tenantId, est.id));
+    expect([behind.get(flooring.id)?.shareThousandths, behind.get(flooring.id)?.unit, behind.has(baseboard.id)]).toEqual([130_900, "sf", false]);
+    // A length with the areas refuses by kind; an area onto the baseboard (lf) refuses by unit, in words.
+    await expect(run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [down.id, wall.id] }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("cannot go onto one line together") });
+    await expect(run((tx) => standBehind(tx, staffCtx, { lineId: baseboard.id, markupIds: [down.id] }))).rejects.toMatchObject({ code: "UNIT_MISMATCH", message: expect.stringContaining("Baseboard is priced per lf") });
+    // The scale set again on A-102 moves that sheet's traces, and the reverse link says so — for that sheet, and so for the line.
+    await run((tx) => setSheetScale(tx, staffCtx, a102.id, { by: "known", a: { x: 0.25, y: 0.5 }, b: { x: 0.5, y: 0.5 }, length: 22, unit: "ft", ...page }));
+    behind = await run((tx) => measurementsBehind(tx, tenantId, est.id));
+    const line = behind.get(flooring.id)!;
+    expect(line.sheets.map((s) => [s.sheetNumber, s.drifted, s.shareThousandths, s.nowThousandths])).toEqual([
+      ["A-101", false, 93_500, 93_500],
+      ["A-102", true, 37_400, 149_600],
+    ]);
+    expect([line.drifted, line.traces, line.shareThousandths, line.nowThousandths]).toEqual([true, 2, 130_900, 243_100]);
+    // Claimed again with A-101 alone, A-102's trace lets go; claimed with nothing, everything does.
+    const alone = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [down.id] }));
+    expect([alone.quantityThousandths, alone.behind?.sheets.map((s) => s.sheetNumber)]).toEqual([93_500, ["A-101"]]);
+    expect((await run((tx) => listMarkups(tx, tenantId, a102.id))).find((r) => r.markup.id === up.id)!.markup.estimateLineId).toBeNull();
+    const gone = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [] }));
+    expect([gone.quantityThousandths, gone.behind]).toEqual([0, null]);
+    expect((await run((tx) => measurementsBehind(tx, tenantId, est.id))).size).toBe(0);
+
+    // A save hands back the ids it minted, in the payload's order, so the editor can stop re-sending a new line as new.
+    const saved = await run((tx) =>
+      updateEstimateReturning(tx, staffCtx, est.id, {
+        version: est.version,
+        groups: [{ key: "g1", name: "Finishes" }],
+        lines: [
+          { id: flooring.id, description: "Flooring", unit: "sf", groupRef: "g1" },
+          { description: "Tile", unit: "sf", groupRef: "g1" },
+          { id: baseboard.id, description: "Baseboard", unit: "lf" },
+        ],
+      }),
+    );
+    expect(saved.lineIds).toHaveLength(3);
+    expect([saved.lineIds[0], saved.lineIds[2]]).toEqual([flooring.id, baseboard.id]);
+    expect(saved.lineIds[1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(Object.keys(saved.groupRefs)).toEqual(["g1"]);
+    // Sent again WITH those ids, the same rows are kept rather than remade.
+    const again = await run((tx) =>
+      updateEstimateReturning(tx, staffCtx, est.id, {
+        version: saved.row.version,
+        groups: [{ id: saved.groupRefs.g1, key: "g1", name: "Finishes" }],
+        lines: [
+          { id: flooring.id, description: "Flooring", unit: "sf", groupRef: saved.groupRefs.g1 },
+          { id: saved.lineIds[1], description: "Tile", unit: "sf", groupRef: saved.groupRefs.g1 },
+          { id: baseboard.id, description: "Baseboard", unit: "lf" },
+        ],
+      }),
+    );
+    expect(again.lineIds).toEqual(saved.lineIds);
+    expect(again.groupRefs).toEqual({ [saved.groupRefs.g1]: saved.groupRefs.g1 });
+  });
+
   it("THE TAKEOFF: the scale is the sheet's, set from a known dimension or the title block; a length, an area and a count are markups with points that read through it; a push puts the total onto an estimate line, new or existing, and the measurement remembers the line; an accepted estimate refuses; a line taken off the estimate leaves the measurement; a file read again keeps the sheet, its scale and its markups", async () => {
     const entity = await newCompany("Takeoff Co 1");
     const project = await run((tx) => createProject(tx, ctx, { entityId: entity, number: "OPS-TK1", name: "Measured" }));

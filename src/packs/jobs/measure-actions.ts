@@ -10,7 +10,7 @@ import { dateInTimezone } from "@/lib/timezone";
 import { JobsError, type JobsCtx } from "./ops";
 import { getSheet, listSheets } from "./drawings-ops";
 import { listMarkups } from "./markups-ops";
-import { scaleOf } from "./takeoff-ops";
+import { measurementsBehind, scaleOf } from "./takeoff-ops";
 import type { SheetScale } from "./takeoff-math";
 import type { MarkupView } from "./components/sheet-viewer";
 import { isMarkupColor, isMarkupKind, PACK } from "./vocabulary";
@@ -61,7 +61,12 @@ function toResult(err: unknown): { error: string } {
 
 /* ------------------------------------------------------------ the drawings */
 
-const sheetsSchema = z.object({ projectId: z.string().uuid() });
+const sheetsSchema = z.object({
+  projectId: z.string().uuid(),
+  /** Set when a line is measuring: each sheet then says what already stands behind it there (ADR 0109). */
+  estimateId: z.string().uuid().optional(),
+  lineId: z.string().uuid().optional(),
+});
 
 export interface MeasurableSheet {
   id: string;
@@ -70,6 +75,8 @@ export interface MeasurableSheet {
   issuedOn: string;
   /** A sheet with no scale can still be opened; the viewer asks for one. */
   hasScale: boolean;
+  /** What stands behind the measuring line on this sheet, when a line asked. */
+  behind: { traces: number; shareThousandths: number; nowThousandths: number | null } | null;
 }
 
 /** The current sheets of this job, for picking one to measure on. */
@@ -82,17 +89,23 @@ export async function sheetsForMeasuringAction(input: unknown) {
       ctx.tenantId,
       async (tx) => {
         const rows = await listSheets(tx, ctx.tenantId, parsed.data.projectId);
+        const { estimateId, lineId } = parsed.data;
+        const behind = estimateId && lineId ? ((await measurementsBehind(tx, ctx.tenantId, estimateId)).get(lineId) ?? null) : null;
         /** Only the current issue of each number: measuring a superseded
          *  sheet is measuring a building that is not being built. */
         return rows
           .filter((r) => r.isCurrent)
-          .map<MeasurableSheet>((r) => ({
-            id: r.sheet.id,
-            label: `${r.sheet.sheetNumber}${r.sheet.title ? ` · ${r.sheet.title}` : ""}`,
-            setName: r.setName,
-            issuedOn: r.issuedOn,
-            hasScale: scaleOf(r.sheet) !== null,
-          }));
+          .map<MeasurableSheet>((r) => {
+            const share = behind?.sheets.find((s) => s.sheetId === r.sheet.id);
+            return {
+              id: r.sheet.id,
+              label: `${r.sheet.sheetNumber}${r.sheet.title ? ` · ${r.sheet.title}` : ""}`,
+              setName: r.setName,
+              issuedOn: r.issuedOn,
+              hasScale: scaleOf(r.sheet) !== null,
+              behind: share ? { traces: share.traces, shareThousandths: share.shareThousandths, nowThousandths: share.nowThousandths } : null,
+            };
+          });
       },
       { role: ctx.role },
     );

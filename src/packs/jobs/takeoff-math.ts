@@ -243,6 +243,59 @@ export function driftedSince(pushedThousandths: number | null, now: Measurement 
 }
 
 /**
+ * How a drawing measures a line priced in this unit: an area for `sf` or
+ * `m2`, a length for `lf` or `m`, a count for `ea`. "ask" for a blank unit —
+ * the line takes the measurement's — and null for a unit no drawing yields
+ * (`ls`, `cy`, `sy`), which the ruler says rather than guesses at.
+ */
+export function measureKindForUnit(unit: string): MeasureKind | "ask" | null {
+  const u = normaliseUnit(unit);
+  if (u === "") return "ask";
+  if (u === "sf" || u === "m2") return "area";
+  if (u === "lf" || u === "m") return "length";
+  if (u === "ea") return "count";
+  return null;
+}
+
+// ------------------------------------------------ what stands behind a line
+
+/** The measurements standing behind one estimate line on one sheet (ADR 0109). */
+export interface SheetShare {
+  sheetId: string;
+  sheetNumber: string;
+  setName: string;
+  /** False on a superseded issue: the trace is on a sheet the job no longer builds from. */
+  isCurrent: boolean;
+  traces: number;
+  /** What these measurements pushed, added up. */
+  shareThousandths: number;
+  /** What they come to now — null while the sheet lacks its scale. */
+  nowThousandths: number | null;
+  /** Whether any of them has moved on from what it pushed. */
+  drifted: boolean;
+  /** The traces themselves, so a push from another sheet can keep them. */
+  markupIds: string[];
+}
+
+/** Everything standing behind one estimate line, by sheet (ADR 0109). */
+export interface LineMeasurements {
+  lineId: string;
+  kind: MeasureKind;
+  /** The unit the trade prices the line by, from the kind: lf, sf, ea; m, m2. */
+  unit: string;
+  traces: number;
+  shareThousandths: number;
+  nowThousandths: number | null;
+  drifted: boolean;
+  sheets: SheetShare[];
+}
+
+/** "A-101, A-102" — the sheets behind a line, in the business's reading order. */
+export function sheetsBehind(line: Pick<LineMeasurements, "sheets">): string {
+  return line.sheets.map((s) => s.sheetNumber).join(", ");
+}
+
+/**
  * Several measurements onto one line: they must be the same kind of thing.
  * Two rooms' floors add up; a floor and a wall length do not.
  */

@@ -42,7 +42,7 @@ import {
 } from "../actions";
 import { thousandthsToQuantityString } from "../billing-math";
 import { MIN_EXTENT, MIN_POINTS, arrowHead, clampFraction, cloudPath, markupSentence, normaliseBox, pinNumbers, summariseMarkups, type PointGeometry } from "../markups-math";
-import { STANDARD_SCALES, driftedSince, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, unitAccepts, type Measurement, type SheetScale } from "../takeoff-math";
+import { STANDARD_SCALES, driftedSince, formatMeasure, matchingStandard, measure, sumMeasurements, takeoffUnitFor, toThousandths, unitAccepts, type Measurement, type SheetScale, type SheetShare } from "../takeoff-math";
 import {
   MARKUP_COLORS,
   MARKUP_COLOR_HEX,
@@ -87,7 +87,28 @@ export interface EstimateOption {
   number: string;
   title: string;
   status: string;
-  lines: Array<{ id: string; description: string; unit: string; quantityThousandths: number }>;
+  lines: Array<{
+    id: string;
+    description: string;
+    unit: string;
+    quantityThousandths: number;
+    /** What already stands behind the line, sheet by sheet (ADR 0109) — so a push from here can keep the other sheets' traces. */
+    behind?: SheetShare[];
+  }>;
+}
+
+/**
+ * AN ESTIMATE LINE IS MEASURING (ADR 0109): which of this sheet's traces of
+ * its kind stand behind it, and a way to tick one. The dialog around the
+ * viewer keeps the set across sheets and adds it up; the viewer only shows
+ * the ticks and hands over each trace's quantity as it is ticked or drawn.
+ */
+export interface MeasuringLine {
+  kind: MeasureKind;
+  description: string;
+  selected: ReadonlySet<string>;
+  onToggle: (markupId: string, on: boolean, quantityThousandths: number) => void;
+  busy: boolean;
 }
 
 /** What a walk is waiting for, when the viewer was opened from one (X7). */
@@ -151,6 +172,8 @@ export function SheetViewer({
   estimates,
   codes,
   measuringFor = null,
+  forLine = null,
+  onChanged,
 }: {
   url: string;
   page: number;
@@ -162,6 +185,15 @@ export function SheetViewer({
   scale: SheetScale | null;
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
+  /** An estimate line is measuring (ADR 0109): tick boxes on its kind of trace, nothing else changes. */
+  forLine?: MeasuringLine | null;
+  /**
+   * Called after anything on the sheet was written — a trace drawn, rubbed
+   * out, renamed, pushed, the scale set. The drawings page refreshes itself;
+   * a dialog holding a SNAPSHOT of the sheet has to be told to read it again,
+   * or a trace drawn inside it never appears in its own list.
+   */
+  onChanged?: () => void;
   /**
    * **THE WALK IS WAITING FOR THIS NUMBER (X7).** Set when the viewer was
    * opened from a walk that is asking what the building measures, and null
@@ -477,7 +509,13 @@ export function SheetViewer({
     if (pointsDraft.points.length < MIN_POINTS[kind]) return;
     const points = pointsDraft.points;
     setPointsDraft(null);
-    submit({ kind, geometry: { points } });
+    submit({ kind, geometry: { points } }, (id) => {
+      /** Drawn while a line was measuring: it stands behind the line straight away. */
+      if (forLine && forLine.kind === kind) {
+        const q = measure(kind, { points }, scale);
+        if (q) forLine.onToggle(id, true, toThousandths(q.quantity));
+      }
+    });
   }
 
   useEffect(() => {
@@ -490,7 +528,10 @@ export function SheetViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointsDraft]);
 
-  function submit(input: { kind: MarkupKind; geometry: Record<string, unknown>; text?: string; raise?: boolean; dueOn?: string }) {
+  function submit(
+    input: { kind: MarkupKind; geometry: Record<string, unknown>; text?: string; raise?: boolean; dueOn?: string },
+    onMade?: (id: string) => void,
+  ) {
     startTransition(async () => {
       const result = await addMarkupAction({ sheetId, projectId, color, ...input });
       if ("error" in result) {
@@ -501,6 +542,8 @@ export function SheetViewer({
         input.kind === "pin" ? (result.workItemId ? "Pin placed — it is on the punch list" : "Pin placed") : `${MARKUP_KIND_LABELS[input.kind]} drawn`,
       );
       setPending(null);
+      onMade?.(result.id);
+      onChanged?.();
       router.refresh();
     });
   }
@@ -724,6 +767,16 @@ export function SheetViewer({
             )}
           </div>
         )}
+        {forLine && (
+          <div className="mb-2 rounded-[3px] border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+            <span className="font-medium">{forLine.description}</span>
+            <span className="text-muted-foreground">
+              {" "}
+              — draw {forLine.kind === "count" ? "a count" : forLine.kind === "area" ? "an area" : "a length"} and it stands behind the line, or tick the ones below that do
+              {scale || forLine.kind === "count" ? "" : ". Set the scale first"}.
+            </span>
+          </div>
+        )}
         {markups.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {canEdit
@@ -753,6 +806,8 @@ export function SheetViewer({
                 measuringFor={
                   measuringFor && m.kind === measuringFor.kind ? measuringFor : null
                 }
+                forLine={forLine && m.kind === forLine.kind ? forLine : null}
+                onChanged={onChanged}
               />
             ))}
           </ul>
@@ -767,7 +822,7 @@ export function SheetViewer({
         onClose={() => setPending(null)}
         onSave={(text, raise, dueOn) => pending && submit({ kind: pending.kind, geometry: { x: pending.x, y: pending.y }, text, raise, dueOn })}
       />
-      <EditDialog markup={editing} projectId={projectId} sheetId={sheetId} onClose={() => setEditing(null)} />
+      <EditDialog markup={editing} projectId={projectId} sheetId={sheetId} onClose={() => setEditing(null)} onChanged={onChanged} />
       <ScaleDialog
         open={scaleOpen}
         scale={scale}
@@ -775,6 +830,7 @@ export function SheetViewer({
         pageSize={pageSize}
         projectId={projectId}
         sheetId={sheetId}
+        onChanged={onChanged}
         onClose={() => setScaleOpen(false)}
         onCalibrate={() => {
           setScaleOpen(false);
@@ -787,6 +843,7 @@ export function SheetViewer({
         pageSize={pageSize}
         projectId={projectId}
         sheetId={sheetId}
+        onChanged={onChanged}
         onClose={() => setCalibration(null)}
       />
       <TakeoffDialog
@@ -798,6 +855,7 @@ export function SheetViewer({
         codes={codes}
         projectId={projectId}
         sheetId={sheetId}
+        onChanged={onChanged}
         onClose={() => setTakeoffFor(null)}
       />
     </div>
@@ -1012,6 +1070,8 @@ function MarkupRowView({
   onEdit,
   onTakeoff,
   measuringFor,
+  forLine,
+  onChanged,
 }: {
   markup: MarkupView;
   number?: number;
@@ -1027,6 +1087,9 @@ function MarkupRowView({
   onTakeoff: () => void;
   /** Non-null only when a walk is waiting for exactly this kind of number. */
   measuringFor: MeasuringFor | null;
+  /** Non-null only when an estimate line of exactly this kind is measuring (ADR 0109). */
+  forLine: MeasuringLine | null;
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1046,6 +1109,7 @@ function MarkupRowView({
         return;
       }
       toast.success(done ? "Punch item done" : "Punch item reopened");
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1058,6 +1122,7 @@ function MarkupRowView({
         return;
       }
       toast.success(m.kind === "pin" && m.punch ? "Pin rubbed out — its punch item stays on the list" : "Rubbed out");
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1070,6 +1135,7 @@ function MarkupRowView({
         return;
       }
       toast.success("The line keeps its quantity; this measurement no longer stands behind it");
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1128,6 +1194,17 @@ function MarkupRowView({
         ) : m.pushedQuantityThousandths !== null ? (
           <StatusBadge tone="quiet">Line gone</StatusBadge>
         ) : null)}
+      {forLine && measurement && (
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs" title={`${formatMeasure(measurement)} stands behind ${forLine.description}`}>
+          <Checkbox
+            checked={forLine.selected.has(m.id)}
+            disabled={pending || busy || forLine.busy}
+            onCheckedChange={(v) => forLine.onToggle(m.id, v === true, toThousandths(measurement.quantity))}
+            aria-label={`${formatMeasure(measurement)} stands behind the line`}
+          />
+          behind the line
+        </label>
+      )}
       {measuringFor && measurement && (
         <Button
           type="button"
@@ -1261,7 +1338,7 @@ function PointDialog({
 }
 
 /** A markup's words and colour, after the fact. The pin's punch item keeps its own words in Work. */
-function EditDialog({ markup, projectId, sheetId, onClose }: { markup: MarkupView | null; projectId: string; sheetId: string; onClose: () => void }) {
+function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup: MarkupView | null; projectId: string; sheetId: string; onClose: () => void; onChanged?: () => void }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState("");
@@ -1284,6 +1361,7 @@ function EditDialog({ markup, projectId, sheetId, onClose }: { markup: MarkupVie
       }
       toast.success("Markup saved");
       onClose();
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1346,6 +1424,7 @@ function ScaleDialog({
   pageSize,
   projectId,
   sheetId,
+  onChanged,
   onClose,
   onCalibrate,
 }: {
@@ -1355,6 +1434,7 @@ function ScaleDialog({
   pageSize: { w: number; h: number } | null;
   projectId: string;
   sheetId: string;
+  onChanged?: () => void;
   onClose: () => void;
   onCalibrate: () => void;
 }) {
@@ -1372,6 +1452,7 @@ function ScaleDialog({
       }
       toast.success("Scale set — every length and area on the sheet reads through it");
       onClose();
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1385,6 +1466,7 @@ function ScaleDialog({
       }
       toast.success("Scale cleared");
       onClose();
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1458,12 +1540,14 @@ function KnownLengthDialog({
   pageSize,
   projectId,
   sheetId,
+  onChanged,
   onClose,
 }: {
   calibration: { a: PointGeometry; b: PointGeometry } | null;
   pageSize: { w: number; h: number } | null;
   projectId: string;
   sheetId: string;
+  onChanged?: () => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1489,6 +1573,7 @@ function KnownLengthDialog({
       toast.success("Scale set — every length and area on the sheet reads through it");
       setLength("");
       onClose();
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1542,6 +1627,7 @@ function TakeoffDialog({
   codes,
   projectId,
   sheetId,
+  onChanged,
   onClose,
 }: {
   markup: MarkupView | null;
@@ -1552,6 +1638,7 @@ function TakeoffDialog({
   codes: Array<{ id: string; label: string }>;
   projectId: string;
   sheetId: string;
+  onChanged?: () => void;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -1561,17 +1648,26 @@ function TakeoffDialog({
   const [description, setDescription] = useState("");
   const [costCodeId, setCostCodeId] = useState<string>(NONE);
   const [included, setIncluded] = useState<Set<string>>(new Set());
+  /**
+   * THE LINE'S TRACES ON OTHER SHEETS STAY UNLESS UNTICKED (ADR 0109). A push
+   * states the whole set behind the line, so a push from A-102 that named only
+   * A-102's traces would silently drop the downstairs floor on A-101. They are
+   * listed, ticked, and go into the push unless somebody unticks a sheet.
+   */
+  const [leftOut, setLeftOut] = useState<Set<string>>(new Set());
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  /** This sheet's other traces already standing behind a line: ticked with it, so a push keeps them (ADR 0109). */
+  const behindHere = (id: string, ofKind: string) => markups.filter((m) => m.kind === ofKind && m.takeoff?.lineId === id).map((m) => m.id);
   if (markup && loadedFor !== markup.id) {
     setLoadedFor(markup.id);
-    setIncluded(new Set([markup.id]));
+    setLeftOut(new Set());
+    const preselected = markup.takeoff
+      ? pushedLineId(estimates, markup.takeoff, isMeasureKind(markup.kind) ? takeoffUnitFor(markup.kind, scale?.unit ?? "") : "")
+      : NEW_LINE;
+    setIncluded(new Set([markup.id, ...(preselected === NEW_LINE ? [] : behindHere(preselected, markup.kind))]));
     setDescription(markup.text || MARKUP_KIND_LABELS[markup.kind]);
     setEstimateId(markup.takeoff?.estimateId ?? estimates[0]?.id ?? NONE);
-    setLineId(
-      markup.takeoff
-        ? pushedLineId(estimates, markup.takeoff, isMeasureKind(markup.kind) ? takeoffUnitFor(markup.kind, scale?.unit ?? "") : "")
-        : NEW_LINE,
-    );
+    setLineId(preselected);
   }
   const kind = markup && isMeasureKind(markup.kind) ? markup.kind : null;
   const siblings = kind ? markups.filter((m) => m.kind === kind && measurements.get(m.id)) : [];
@@ -1580,6 +1676,11 @@ function TakeoffDialog({
   const unitWord = chosen[0] ? (measurements.get(chosen[0].id)?.unit ?? "") : "";
   const estimate = estimates.find((e) => e.id === estimateId) ?? null;
   const lineUnit = kind ? takeoffUnitFor(kind, scale?.unit ?? "") : "";
+  /** What stands behind the chosen line on OTHER sheets, kept unless unticked. */
+  const elsewhere = (estimate?.lines.find((l) => l.id === lineId)?.behind ?? []).filter((s) => s.sheetId !== sheetId);
+  const kept = elsewhere.filter((s) => !leftOut.has(s.sheetId));
+  const elsewhereThousandths = kept.reduce((sum, s) => sum + (s.nowThousandths ?? s.shareThousandths), 0);
+  const lineTotalThousandths = toThousandths(total) + elsewhereThousandths;
 
   function push() {
     if (!markup || !kind || !estimate || chosen.length === 0) return;
@@ -1588,7 +1689,7 @@ function TakeoffDialog({
         sheetId,
         projectId,
         estimateId: estimate.id,
-        markupIds: chosen.map((m) => m.id),
+        markupIds: [...chosen.map((m) => m.id), ...kept.flatMap((s) => s.markupIds)],
         lineId: lineId === NEW_LINE ? "" : lineId,
         newLine: lineId === NEW_LINE ? { description: description.trim(), costCodeId: costCodeId === NONE ? "" : costCodeId, unit: lineUnit } : null,
       });
@@ -1599,6 +1700,7 @@ function TakeoffDialog({
       toast.success(`${thousandthsToQuantityString(result.quantityThousandths)} ${result.unit} onto ${estimate.number}`);
       setLoadedFor(null);
       onClose();
+      onChanged?.();
       router.refresh();
     });
   }
@@ -1648,9 +1750,18 @@ function TakeoffDialog({
           )}
           <p className="text-sm">
             <span className="font-medium tabular-nums">{formatMeasure({ quantity: total, unit: unitWord })}</span>
+            {kept.length > 0 && (
+              <>
+                <span className="text-muted-foreground"> here, with </span>
+                <span className="font-medium tabular-nums">
+                  {thousandthsToQuantityString(elsewhereThousandths)} {lineUnit}
+                </span>
+                <span className="text-muted-foreground"> on {kept.map((s) => s.sheetNumber).join(", ")},</span>
+              </>
+            )}
             <span className="text-muted-foreground"> goes on the line as </span>
             <span className="font-medium tabular-nums">
-              {thousandthsToQuantityString(toThousandths(total))} {lineUnit}
+              {thousandthsToQuantityString(lineTotalThousandths)} {lineUnit}
             </span>
           </p>
           <div className="space-y-1.5">
@@ -1660,6 +1771,7 @@ function TakeoffDialog({
               onValueChange={(v) => {
                 setEstimateId(v);
                 setLineId(NEW_LINE);
+                setLeftOut(new Set());
               }}
             >
               <SelectTrigger className="w-full" id="to-estimate">
@@ -1677,7 +1789,14 @@ function TakeoffDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="to-line">Line</Label>
-            <Select value={lineId} onValueChange={setLineId}>
+            <Select
+              value={lineId}
+              onValueChange={(v) => {
+                setLineId(v);
+                setLeftOut(new Set());
+                if (v !== NEW_LINE && kind) setIncluded((prev) => new Set([...prev, ...behindHere(v, kind)]));
+              }}
+            >
               <SelectTrigger className="w-full" id="to-line">
                 <SelectValue />
               </SelectTrigger>
@@ -1696,6 +1815,37 @@ function TakeoffDialog({
               </SelectContent>
             </Select>
           </div>
+          {elsewhere.length > 0 && (
+            <div className="space-y-1.5">
+              <Label>Already behind this line, on other sheets</Label>
+              <ul className="space-y-1 rounded-md border p-2 text-sm">
+                {elsewhere.map((s) => (
+                  <li key={s.sheetId}>
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={!leftOut.has(s.sheetId)}
+                        onCheckedChange={(v) => {
+                          const next = new Set(leftOut);
+                          if (v === true) next.delete(s.sheetId);
+                          else next.add(s.sheetId);
+                          setLeftOut(next);
+                        }}
+                      />
+                      <span className="font-medium">{s.sheetNumber}</span>
+                      <span className="tabular-nums">
+                        {thousandthsToQuantityString(s.nowThousandths ?? s.shareThousandths)} {lineUnit}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {s.traces} {s.traces === 1 ? "trace" : "traces"}
+                        {s.isCurrent ? "" : " · superseded issue"}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">Ticked, they stay behind the line and count in its total. Unticked, they let go.</p>
+            </div>
+          )}
           {lineId === NEW_LINE && (
             <>
               <div className="space-y-1.5">

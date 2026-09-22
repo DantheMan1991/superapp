@@ -571,12 +571,37 @@ export async function createEstimate(tx: Tx, ctx: JobsCtx, input: EstimateInput)
  * budget or a schedule — so it refuses everything but the notes; revise by
  * making a new one and marking this one superseded.
  */
+export interface UpdatedEstimate {
+  row: JobEstimate;
+  /**
+   * THE IDS THE EDITOR IS OWED (ADR 0109). The editor posts a new line with no
+   * id, and until it learns the one the server minted every autosave sends
+   * the line again with none — `saveLines` deletes the row it made last time,
+   * inserts another, and anything hanging off the old id (a measurement
+   * standing behind the line) is cut loose by its SET NULL. In the payload's
+   * order, which is the sort order, so the editor can adopt them by position.
+   */
+  lineIds: string[];
+  /** A new item's key → the id it was given, for the same reason. */
+  groupRefs: Record<string, string>;
+}
+
 export async function updateEstimate(
   tx: Tx,
   ctx: JobsCtx,
   id: string,
   input: Partial<Omit<EstimateInput, "projectId">> & { version?: number },
 ): Promise<JobEstimate> {
+  return (await updateEstimateReturning(tx, ctx, id, input)).row;
+}
+
+/** `updateEstimate`, handing back the ids the save minted as well as the row. */
+export async function updateEstimateReturning(
+  tx: Tx,
+  ctx: JobsCtx,
+  id: string,
+  input: Partial<Omit<EstimateInput, "projectId">> & { version?: number },
+): Promise<UpdatedEstimate> {
   requireWrite(ctx, "member");
   validateEstimateShape(input);
   const existing = await loadEstimate(tx, ctx.tenantId, id);
@@ -602,6 +627,8 @@ export async function updateEstimate(
       throw new JobsError("ESTIMATE_ACCEPTED", `estimate ${existing.number} was accepted; revise it as a new one`);
     }
   }
+  let lineIds: string[] = [];
+  let groupRefs: Record<string, string> = {};
   if (input.groups !== undefined || input.lines !== undefined) {
     // Groups first so a line can name one made in the same save; the groups that
     // went last, so no line is ever orphaned mid-write.
@@ -609,11 +636,14 @@ export async function updateEstimate(
       input.groups === undefined
         ? null
         : await saveGroups(tx, ctx.tenantId, id, input.groups);
+    if (saved) groupRefs = Object.fromEntries(saved.refs);
     const refs =
       saved?.refs ?? new Map((await groupsOf(tx, ctx.tenantId, id)).map((g) => [g.id, g.id]));
     if (input.lines !== undefined) {
       const lineCounts = await saveLines(tx, ctx.tenantId, id, input.lines, refs);
       wrote = wrote || lineCounts.inserted + lineCounts.updated + lineCounts.removed > 0;
+      // In sort order, which `saveLines` set from the payload's order.
+      lineIds = (await linesOf(tx, ctx.tenantId, id)).map((l) => l.id);
     }
     if (saved) {
       wrote = wrote || saved.counts.inserted + saved.counts.updated > 0;
@@ -647,14 +677,14 @@ export async function updateEstimate(
    * edit is refused as stale.
    */
   if (!wrote && rowHolds(existing as unknown as Record<string, unknown>, patch)) {
-    return existing;
+    return { row: existing, lineIds, groupRefs };
   }
   const rows = await tx
     .update(schema.jobEstimates)
     .set({ ...patch, updatedAt: new Date(), version: existing.version + 1 })
     .where(and(eq(schema.jobEstimates.tenantId, ctx.tenantId), eq(schema.jobEstimates.id, id)))
     .returning();
-  return rows[0];
+  return { row: rows[0], lineIds, groupRefs };
 }
 
 export interface EstimateLineRow extends JobEstimateLine {

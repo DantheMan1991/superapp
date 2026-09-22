@@ -13,7 +13,8 @@ import { Button } from "@/components/ui/button";
 import { getSheet, listSheets } from "@/packs/jobs/drawings-ops";
 import { disciplineLabel } from "@/packs/jobs/drawings-math";
 import { listMarkups, markupCounts } from "@/packs/jobs/markups-ops";
-import { scaleOf } from "@/packs/jobs/takeoff-ops";
+import { measurementsBehind, scaleOf } from "@/packs/jobs/takeoff-ops";
+import type { LineMeasurements } from "@/packs/jobs/takeoff-math";
 import { listEstimates } from "@/packs/jobs/estimating-ops";
 import { getProject as getProjectRow, listCostCodes } from "@/packs/jobs/ops";
 import { SheetViewer, type MarkupView } from "@/packs/jobs/components/sheet-viewer";
@@ -48,7 +49,13 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
         listEstimates(tx, ctx.tenant.id, project.id),
         project.costCodeSetId ? listCostCodes(tx, ctx.tenant.id, project.costCodeSetId) : Promise.resolve([]),
       ]);
-      return { project, sheet, sheets, markups, members, counts, estimates, codes };
+      // What stands behind each open estimate's lines, so a push from this sheet keeps the other sheets' traces (ADR 0109).
+      const behind = new Map<string, Map<string, LineMeasurements>>();
+      for (const e of estimates) {
+        if (e.estimate.status !== "draft" && e.estimate.status !== "sent") continue;
+        behind.set(e.estimate.id, await measurementsBehind(tx, ctx.tenant.id, e.estimate.id));
+      }
+      return { project, sheet, sheets, markups, members, counts, estimates, codes, behind };
     },
     { role: ctx.role },
   );
@@ -96,7 +103,13 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
       number: e.estimate.number,
       title: e.estimate.title,
       status: e.estimate.status,
-      lines: e.lines.map((l) => ({ id: l.id, description: l.description, unit: l.unit, quantityThousandths: l.quantityThousandths })),
+      lines: e.lines.map((l) => ({
+        id: l.id,
+        description: l.description,
+        unit: l.unit,
+        quantityThousandths: l.quantityThousandths,
+        behind: data.behind.get(e.estimate.id)?.get(l.id)?.sheets ?? [],
+      })),
     }));
   const codeOptions = data.codes.filter((c) => c.isActive).map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }));
 

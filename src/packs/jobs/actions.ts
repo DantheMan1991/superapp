@@ -57,7 +57,7 @@ import {
   applyEstimateToBudget,
   applyEstimateToSchedule,
   createEstimate,
-  updateEstimate,
+  updateEstimateReturning,
   type EstimateGroupInput,
   type EstimateLineInput,
 } from "./estimating-ops";
@@ -79,7 +79,7 @@ import { addMarkup, deleteMarkup, updateMarkup } from "./markups-ops";
 import { decideClaim, deleteClaim, recordClaim, scheduleClaim, setClaimDone, setWarrantyPeriod, updateClaim } from "./warranty-ops";
 import { raiseBackCharge, setBackChargeApplication, setBackChargeVoid, updateBackCharge } from "./back-charges-ops";
 import { recordBond, setBondStatus, setBondingLine, updateBond } from "./bonding-ops";
-import { clearSheetScale, pushTakeoff, setSheetScale, unpushTakeoff } from "./takeoff-ops";
+import { clearSheetScale, pushTakeoff, setSheetScale, standBehind, unpushTakeoff } from "./takeoff-ops";
 import {
   approveSubApplication,
   createSubApplication,
@@ -2815,7 +2815,8 @@ export async function updateEstimateAction(input: unknown) {
     const saved = await withTenant(
       ctx.tenantId,
       async (tx) => {
-        const row = await updateEstimate(tx, ctx, id, { ...patch, version });
+        const updated = await updateEstimateReturning(tx, ctx, id, { ...patch, version });
+        const row = updated.row;
         // An autosave that changed nothing does not move the version, and there is
         // nothing to record: the audit trail is for edits, not for timers.
         // With no version sent we cannot tell, so we record; an autosave always sends one.
@@ -2829,7 +2830,7 @@ export async function updateEstimateAction(input: unknown) {
             meta: { projectId: row.projectId, status: row.status },
           });
         }
-        return row;
+        return updated;
       },
       { role: ctx.role },
     );
@@ -2838,7 +2839,8 @@ export async function updateEstimateAction(input: unknown) {
       revalidatePath(`${BASE}/${projectId}/estimates`);
       revalidatePath(`${BASE}/${projectId}/estimates/${id}`);
     }
-    return { ok: true as const, version: saved.version };
+    // The ids a new line or item was given, so the editor stops re-sending it as new (ADR 0109).
+    return { ok: true as const, version: saved.row.version, lineIds: saved.lineIds, groupRefs: saved.groupRefs };
   } catch (err) {
     return toResult(err);
   }
@@ -3825,6 +3827,48 @@ export async function pushTakeoffAction(input: unknown) {
     revalidatePath(`${BASE}/${projectId}/estimates`);
     revalidatePath(`${BASE}/${projectId}/estimates/${estimateId}`);
     return { ok: true as const, lineId: result.lineId, quantityThousandths: result.quantityThousandths, unit: result.unit };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * A line measured from where it is priced (ADR 0109): the measurements that
+ * stand behind it from now on, across the job's sheets. Writes the link only;
+ * the editor sets the line's quantity from what comes back.
+ */
+export async function standBehindAction(input: unknown) {
+  const parsed = z
+    .object({
+      projectId: z.string().uuid(),
+      estimateId: z.string().uuid(),
+      lineId: z.string().uuid(),
+      markupIds: z.array(z.string().uuid()).max(200),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the measurements and try again." };
+  try {
+    const ctx = await drawingsGate();
+    const { projectId, estimateId, lineId, markupIds } = parsed.data;
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const stood = await standBehind(tx, ctx, { lineId, markupIds });
+        await logAuditInTx(tx, {
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          action: "takeoff.stood_behind",
+          targetType: "estimate_line",
+          targetId: stood.lineId,
+          meta: { projectId, estimateId, markups: markupIds.length, kind: stood.kind, quantityThousandths: stood.quantityThousandths, unit: stood.unit },
+        });
+        return stood;
+      },
+      { role: ctx.role, userId: ctx.userId },
+    );
+    // The sheets' chips read the link; the estimate's editor is the caller and already knows.
+    revalidatePath(`${BASE}/${projectId}/drawings`);
+    return { ok: true as const, ...result };
   } catch (err) {
     return toResult(err);
   }

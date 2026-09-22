@@ -110,6 +110,7 @@ and the table now says where to.
 | **The Lines card is NOT `overflow-hidden`, and neither is the panel below `md`** | E8 | A clipping ancestor becomes the containing block for `position: sticky` and silently disables every pinned row inside it. The card rounds its header's and its entry bar's corners instead of clipping; the panel takes `md:overflow-hidden` so that on a phone, where it scrolls with the page, the page is still what the rows stick to. |
 | **Every direct child of the work column is `flex-none`** | E8 | Otherwise the flex items shrink to the constrained height, the column never overflows, and the grid is clipped with no way to scroll to it. |
 | **A row's number is its ADDRESS, and the order it hands back is always visual order** | E8, ADR 0087 | `sort_order` is the payload's order. A reorder that returned "the same array, two elements swapped" would put the screen and the database out of step the first time a line crossed into another item — and it would only show up in the client's proposal. |
+| **The Measure dialog writes the LINK only and the editor sets the quantity; the sheets chip is READ off the markups; and the autosave ADOPTS the ids a save minted** | ADR 0109 | A second writer of a line while the editor is open is the disagreement ADR 0082 forbids. A stored list of sheets would go stale the moment a trace was rubbed out. And without the adoption a new line's id churned on every autosave, and the SET NULL cut anything hanging off it — a screen that "just" rebuilt the save path would reopen that silently. |
 
 The screen also hosts two blocks to keep whole rather than re-plumb: the
 **proposal block** (format, presentation, the four texts) and **the client's
@@ -125,6 +126,92 @@ no equivalent for the editor, so a change here has to be clicked.
 > program's E1–E8, and the jobs redesign. This section keeps the estimate
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
+
+### 2026-09-22 — A line is measured from where it is priced (`claude/measure-from-the-line`, [ADR 0109](../decisions/0109-a-line-is-measured-from-where-it-is-priced-and-what-stands-behind-it-follows-it-across-sheets.md))
+
+Step 2 of the drawings-takeoff pass, agreed by mockup: the founder's *"I need
+the takeoff tool to get that a lot of the time"* finally reaches the
+ESTIMATE, where the number goes. Two structural findings drove it — nothing
+on the estimate could open a drawing, and a line could not span sheets,
+because the *Takeoff* dialog offered one sheet's traces and a push states the
+whole set (ADR 0074), so pushing the upstairs floor from A-102 silently
+replaced the downstairs figure from A-101.
+
+**The ruler on the line** (`estimate-editor.tsx`): beside the bin, on any line
+a drawing can measure — `measureKindForUnit`: `sf`/`m2` an area, `lf`/`m` a
+length, `ea` a count, blank asks, `ls`/`cy`/`sy` no ruler at all (a disabled
+control shows no reason on touch; the guide says why). The last grid track
+grew from 34px to 64px to hold two icons — a first attempt put the ruler in
+the quantity cell and clipped `59.026` to `5`; found by the screenshot, not
+the type-check. Under the description, **the sheets chip** — *A-101, A-102* —
+with *measured since* when a sheet's scale moved and *line differs* when the
+typed quantity has left what was measured; in the expansion, **From the
+drawings**, a row per sheet with its traces, set and any superseded or
+drifted note, the measured total against the line's, and *Open the drawings*.
+
+**The dialog** (`components/measure-line-dialog.tsx`): the sheets opened FOR
+the line — each saying *59.026 sf · 1 trace behind this line* — and inside
+one, the real `SheetViewer` in a new `forLine` mode: every trace of the
+line's kind carries a **behind the line** tick, a trace drawn in there is
+ticked the moment it is saved, and the footer adds the set up across sheets:
+*So far A-101 98.264 sf + A-102 77.562 sf = 175.826 sf*. A blank unit asks
+how a drawing measures the line first. **Use writes the LINK only**
+(`standBehind`: the markups' `estimate_line_id` and each trace's own share,
+the line's others unlinked; nothing empty lets them all go) and the editor
+sets the quantity itself — the second-writer rule of ADR 0082, the same shape
+as *Add an assembly* and *From the model*. The viewer gained `onChanged`,
+which the dialog answers by re-reading its sheet snapshot; **the walk's
+dialog got the same, which fixed a trace drawn inside it never appearing in
+its own list** — X7's drive had only ever used a trace that was already
+there.
+
+**The reverse link** (`measurementsBehind`): derived per line and per sheet
+from the markups — traces, share, what they come to now, drifted, current
+issue — never stored, so the estimate cannot disagree with the drawings. The
+estimate page loads it once; the sheet page loads it per open estimate so the
+**Takeoff dialog lists the line's traces on other sheets, ticked** (*Already
+behind this line, on other sheets — A-102 · 77.562 sf · 1 trace*), and this
+sheet's traces already behind the chosen line start ticked too, so a push
+keeps the set unless a sheet is unticked. The sentence reads *59 sq ft here,
+with 77.562 sf on A-102, goes on the line as 136.588 sf*.
+
+**A save hands the editor the ids it minted.** Found on the way: the editor
+posted a new line with no id on EVERY autosave, `saveLines` deleted the row
+it had made and inserted another, and anything hanging off the old id — a
+measurement standing behind the line, by its SET NULL — was cut loose each
+time somebody typed. `updateEstimateReturning` returns the lines' ids in the
+payload's order (which is the sort order) and a new item's key → id; the
+action passes them on and the editor adopts them by position — and rewrites
+its "last saved" payload with them, or adopting would read as an edit and
+fire a second save. `updateEstimate` is unchanged for its twenty callers.
+
+**No migration.** Tests: `measureKindForUnit` and `sheetsBehind` (pure); an
+ops scenario with TWO sheets — the claim across them writes no quantity and
+moves no version, each trace holds its own share, the reverse link reads by
+sheet and says which sheet drifted when A-102's scale is set again, a length
+with the areas and an area onto an `lf` line refuse, claiming one sheet lets
+the other go, claiming nothing lets all go, and a save returns the minted ids
+which a second save with them keeps. The takeoff scenario's one-sheet setup
+was exactly why the replace-across-sheets defect was invisible to it.
+
+**Driven** on the dev branch's Hilltop Farm 24-109, EST-2, on this worktree's
+own server. The ruler on *Flooring, kitchen* (59.026 sf, behind it 9c's area
+on A-101) opened the dialog: A-101 read *59.026 sf · 1 trace behind this
+line*, the other sheets *no scale set yet*. Inside A-101 the area's row carried
+*behind the line* ticked; a second area drawn there (39.2 sq ft) appeared in
+the dialog's own list ticked, and the footer read *So far A-101 98.264 sf*.
+Back to the sheets — *A-101 · 98.264 sf · 2 traces behind this line* — then
+A-102: *Set the scale* from the title block (1/4" = 1'-0"), the view re-read
+itself, an area drawn (77.6 sq ft), and the footer read *So far A-101 98.264
+sf + A-102 77.562 sf = 175.826 sf*. **Use 175.826 sf on the line**: the row
+read *175.826 sf*, the chip *A-101, A-102*, and the estimate said *Saved* with
+no other click. On A-101's sheet page both areas' chips read *→ EST-2 ·
+Flooring, kitchen · 175.826 sf*, and *Takeoff* on the first showed *Already
+behind this line, on other sheets — A-102 · 77.562 sf · 1 trace* ticked, the
+sentence *59 sq ft here, with 77.562 sf on A-102, goes on the line as 136.588
+sf*. Not driven: a blank-unit line's kind picker, *Let the drawings go*, and
+the autosave adopting a brand-new line's id (the ops scenario covers the
+server half).
 
 ### 2026-09-22 — What a measurement pushed is its own share (`claude/takeoff-measured-since`)
 
@@ -2617,7 +2704,7 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_estimates` | The job priced before anybody signs (10, ADR 0069): a number unique per job, title, draft / sent / accepted / declined / superseded, sent / decided / valid-until dates, the three rates in ppm — markup on cost (the lines' default), overhead on the subtotal, profit on the subtotal plus overhead — notes, and the contract an accepted one became. | Cascade from the project; **no action to the contract**. CHECK: status on the list, every rate 0..10,000,000 ppm (`RATE_PPM_MAX`), number present. Nothing stores a total: `estimate-math.ts` computes them. Accepted, the rates and lines are fixed by the verb, not the database. Since 10b (ADR 0070) also `presentation` — CHECK lines / codes / **groups** (E1, ADR 0079) / sum, the live definition being in `0373`, which drops and re-adds it — and the proposal's `scope`, `exclusions` and `terms`: the words fixed with the money, the presentation free. An accepted estimate's ITEMS are fixed with its lines and its rates. Since E2 also `show_code_numbers` (ADR 0080), off by default and free on an accepted estimate, being a printing choice. |
 | `job_estimate_groups` | **The item the client buys** (E1, ADR 0079): a name in the client's words, an optional `client_note` paragraph, `price_mode` — `rollup` (its lines sum) or `fixed` (the price is typed, and sits OUTSIDE the overhead-and-profit spread) — `fixed_price_cents`, sort order. One level deep, by the shape rather than by a rule. | Cascade from the estimate. CHECK: name present and ≤ 200, note ≤ 4,000, mode on the list, price ≥ 0, and **`(price_mode = 'fixed') = (fixed_price_cents is not null)`** so the mode and the number cannot disagree. Nothing stores a total; the item's cost, price and margin come from `estimate-math.ts`. |
 | `job_estimate_groups.section` / `.show_lines` | **Which heading an item prints under, and whether the client sees what is in it.** The section arrives from the outline step and is editable, because it is NOT the cost code's category — `Siding Labor` is accounted under `04. Structural` and printed under *Labour*. `show_lines` defaults true and is an extra reason to collapse, never a reason to expand: a typed price or a hidden line still closes an item (ADR 0080). |
-| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement.  Since X2b also `basis` / `basis_detail` (ADR 0098): where the number came from, BLANK on every line anybody typed — blank is not `none`, which means a walk produced it and could not price it. The input treats an absent basis as *leave what is there*, so the editor's autosave cannot strip it. |
+| `job_estimate_lines` | One line of an estimate: cost code, description, unit, quantity in thousandths (1000 = one, a lump sum), unit cost, an optional markup of its own, an optional unit price that wins over any markup, notes, sort order; since E1 the **item** it sits in (`group_id`, null = loose); and since E2 (ADR 0080) `client_description` — what the client reads instead, blank meaning the description — and `client_visible`. | Cascade from the estimate; **no action to the code**; **SET NULL (column-list form) from `job_estimate_groups`** — an item removed leaves its lines loose, which is what ungrouping means, and never destroys what was priced. CHECK: description present, client description ≤ 300, quantity / unit cost / unit price ≥ 0, markup 0..10,000,000 ppm or null, and **`client_visible or group_id is not null`** — hidden money must have somewhere to hide (ADR 0080). Written by id (updated, inserted, removed when left out), so a line keeps its identity across an edit; nothing points at one but a measurement.  Since X2b also `basis` / `basis_detail` (ADR 0098): where the number came from, BLANK on every line anybody typed — blank is not `none`, which means a walk produced it and could not price it. The input treats an absent basis as *leave what is there*, so the editor's autosave cannot strip it. **The sheets behind a line are never stored on it** (ADR 0109): `measurementsBehind` reads them off the markups' `estimate_line_id`, so the chip cannot disagree with the drawings. |
 | `job_estimate_outlines` | **A way this business walks an estimate** (X1, ADR 0098): "New build", "Remodel". Name, notes, `is_default`, `is_active`. Several per tenant, seeded from a profile and the tenant's from that moment. | FORCE RLS, member-wide — owner-only to WRITE is `requireWrite` in the ops, because RLS is row-level and not verb-level. `job_estimate_outlines_one_default_idx` is a PARTIAL unique index, the cost code set's rule: **two defaults fail at the database**. Name unique per tenant, so two businesses may both say "New build". **No company-scope restrictive policy** (ADR 0094) — an outline belongs to the tenant and to no company, as a cost code list and an assembly do. |
 | `job_estimate_outline_steps` | One stop on the walk: a phase in the order it is priced, with the cost code its lines are charged to and `guidance` — what must be established here, in prose, which the interview reads. | Composite FK to the outline, **cascade**. `cost_code` is **TEXT, not an id** — a code's id belongs to one cost code set and an outline is walked on every job (ADR 0086's call, ADR 0098's reason). CHECK: title present. Written by id, so a step keeps its identity across an edit. |
 | `job_estimate_outline_steps.section` | **The part of the bid a step belongs to** — a heading, not a code. Arrives from the cost code's `category` when an outline is read off a chart, and editable afterwards because the two differ: `Siding Labor` is accounted under `04. Structural` and printed under *Labour*. Where the price sheet's headings will come from. Blank on every outline written before it existed. |
@@ -2813,7 +2900,15 @@ ordering only bites when two new tables reference each other in one file.
 - `src/packs/jobs/takeoff-ops.ts` + `takeoff-math.ts` — the scale and the takeoff
   (ADR 0074): `setSheetScale` from a known dimension or a standard,
   `measure` through the scale (pure, shared with the viewer), `pushTakeoff`
-  onto an estimate line as a statement of the total.
+  onto an estimate line as a statement of the total. **And the line's side
+  (ADR 0109)**: `measuredSet` (one set of traces across sheets, one kind, one
+  unit), `standBehind` (the link only, each trace's own share),
+  `measurementsBehind` (the reverse link, read per line and per sheet),
+  `unitAccepts` / `measureKindForUnit` / `driftedSince` (pure).
+- `src/packs/jobs/components/measure-line-dialog.tsx` — the drawings opened
+  FOR an estimate line (ADR 0109): the sheets with what stands behind the line
+  on each, the viewer in its `forLine` mode, the total across sheets, *Use*.
+  The estimate editor holds the ruler, the sheets chip and *From the drawings*.
 - `src/packs/jobs/markups-ops.ts` + `markups-math.ts` + `components/sheet-viewer.tsx`
   — markups (ADR 0073): the shape checked once in `parseGeometry` on both
   sides, the revision cloud as `cloudPath`, a pin's punch item through the
@@ -3184,10 +3279,14 @@ ordering only bites when two new tables reference each other in one file.
   markup on a photo, burning markups into a PDF to send, telling the pinned
   trade (the digest and Mail are the seams); and from the takeoff, a scale
   read from the PDF's own metadata, an opening deducted from an area, a
-  volume, a running total across sheets, a quantity converted into a line's
-  own unit (sf → sy, m → lf — today a line priced in another unit is refused
-  by name, `unitAccepts`), and the reverse link from an
-  estimate line back to the sheets that fed it. A scanned set's
+  volume, ~~a running total across sheets~~ and ~~the reverse link from an
+  estimate line back to the sheets that fed it~~ — **both built 2026-09-22
+  (ADR 0109): a line is measured from where it is priced, and what stands
+  behind it follows it across sheets** — and a quantity converted into a
+  line's own unit (sf → sy, m → lf — today a line priced in another unit is
+  refused by name, `unitAccepts`). Still open there: a trace shared by two
+  lines (a wall's length behind the plate AND the baseboard), and the walk
+  opening a sheet for a phase's line. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is
   filed as a `drawing`.

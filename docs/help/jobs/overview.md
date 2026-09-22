@@ -349,6 +349,8 @@ Once the estimate is accepted its items are fixed with its lines and its rates.
 | `Unit cost` | What one unit costs you. `185.00`. |
 | `Cost` | Quantity at the unit cost, as you type. On a narrow screen it is in the opened row instead. |
 | `Price` | Quantity at the unit price if there is one, else the cost plus its markup. For a line inside an item you priced by hand it reads *in the item*. |
+| The ruler | Beside the bin, on any line a drawing can measure — priced per `lf`, `sf`, `ea` (or a spelling of them) or with no unit yet. Opens the {{project|lower}}'s drawings **for this line**; see *Measuring a line on the drawings*, below. Green once something on the drawings stands behind the line. A line priced per `ls`, `cy` or `sy` has no ruler: no drawing yields those. |
+| The sheets chip | Under the description, once a drawing stands behind the line: `A-101, A-102` — the sheets it was measured on. *measured since* means a sheet's scale was set again after the measuring; *line differs* means the quantity has been typed over since. Click it to open the drawings for the line. |
 | The bin | Removes the row (the last row stays). |
 
 **Open a row** with the {key:›} and the rest of it is underneath, without losing your place in the box you were typing in:
@@ -362,8 +364,19 @@ Once the estimate is accepted its items are fixed with its lines and its rates.
 | `What the client reads` | What the client sees in place of your description. Blank uses the description. |
 | `Shown on the proposal` | Only for a line **inside an item** — see *Client wording*, below. A line in no item says so, and is always shown. |
 | The margin | `margin $161.28 · 10.7%` for that one line. |
+| `From the drawings` | Only on a measured line: a row per sheet — `A-101 · 59.026 sf · 1 trace · Permit set`, with *superseded issue* when that sheet has been reissued since and *measured since* when its scale moved — then the measured total against what the line says, and {button:Open the drawings|ghost}. |
 
 Cost and price are worked out as you type and never stored, so a line typed as 320 sf at $4.20 and a line typed as $1,344.00 agree to the cent.
+
+**Measuring a line on the drawings.** The ruler beside the bin opens the {{project|lower}}'s sheets **for that line** — the same viewer as under Drawings, with the line's description and unit at the top.
+
+- **Pick a sheet.** Each says what already stands behind this line there — *59.026 sf · 1 trace behind this line* — and *no scale set yet* where it has none. A sheet nobody has measured for this line says nothing.
+- **On the sheet**, draw the way you would under Drawings — a length, an area or a count, whichever the line's unit calls for — and it stands behind the line the moment it is saved. Every trace of that kind on the sheet carries **`behind the line`**: tick the ones that count, untick the ones that do not. A sheet with no scale wants one first; {button:Set the scale|secondary} works here exactly as it does there.
+- **The total follows you across sheets.** The bottom line reads *So far A-101 98.264 sf + A-102 77.562 sf = 175.826 sf*; {key:‹} goes back to the sheets to add another.
+- **{button:Use 175.826 sf on the line|primary}** puts that total in the line's `Qty` — in the line's unit, or the measurement's (`lf`, `sf`, `ea`) when the line had none — and the estimate saves itself as usual. Untick everything and the button reads {button:Let the drawings go|primary}: the line keeps its quantity, and nothing stands behind it any more.
+- **A line with no unit** asks first how a drawing measures it — `Length · lf`, `Area · sf`, `Count · ea`.
+
+What was measured is read off the drawings every time, never copied onto the line: rub a trace out under Drawings and the chip, the block and the totals say so.
 
 **Putting them in order.** The order here is the order on the proposal, so it matters. Two ways in, and they do the same thing:
 
@@ -1426,7 +1439,8 @@ Three more tools on the same row — {button:Length|outline}, {button:Area|outli
 
 | Field | What it is |
 | --- | --- |
-| `Measurements to add up` | When the sheet has more of the same kind, tick the ones that go together — two floors onto one flooring line. A length, an area and a count never share a line. |
+| `Measurements to add up` | When the sheet has more of the same kind, tick the ones that go together — two floors onto one flooring line. The ones already behind the line you pick start ticked. A length, an area and a count never share a line. |
+| `Already behind this line, on other sheets` | Once a line is picked: the traces standing behind it on the {{project|lower}}'s **other** sheets — `A-102 · 77.562 sf · 1 trace` — ticked. Ticked, they stay behind the line and count in its total; unticked, they let go. The line above then reads *59 sq ft here, with 77.562 sf on A-102, goes on the line as 136.588 sf*. |
 | the line above the fields | *59 sq ft goes on the line as 59.026 sf* — the quantity in the unit the estimate prices by: `lf` and `sf` (or `m` and `m2`), `ea` for a count. |
 | `Estimate` | The {{project|lower}}'s draft and sent estimates. An accepted one is the agreement and cannot take a quantity. |
 | `Line` | An existing line of that estimate, or *A new line*. A line priced in another unit — `lf` for an area, `ls` for anything measured — is listed greyed out with the reason (*priced per ls, cannot take sf*) and cannot be picked: the quantity would be wrong in a way nothing downstream could see. Spelling does not matter — a line in `sq. ft.` takes square feet. A measurement that already stands behind a line opens with that line picked. |

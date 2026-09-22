@@ -7,6 +7,7 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { getProject, listContracts, listCostCodes } from "@/packs/jobs/ops";
 import { getEstimate, priceBookRows, unitsInUse } from "@/packs/jobs/estimating-ops";
+import { measurementsBehind } from "@/packs/jobs/takeoff-ops";
 import { listEstimateShares } from "@/packs/jobs/estimate-shares";
 import { listAssemblies } from "@/packs/jobs/assembly-ops";
 import { formatQuantity } from "@/packs/jobs/billing-math";
@@ -58,6 +59,8 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       // The client links on this estimate, each standing read off the facts
       // against the version the estimate is at right now (E5c, ADR 0085).
       const shares = await listEstimateShares(tx, ctx.tenant.id, estimateId, row.estimate.version);
+      // What stands behind each line on the drawings, by line id (ADR 0109).
+      const measured = await measurementsBehind(tx, ctx.tenant.id, estimateId);
       /**
        * THE WALK IS A LAYER, so it is read here and drawn ABOVE the editor —
        * never threaded through it (X2a, ADR 0098). Off, and none of this is
@@ -84,7 +87,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       const walk = gate.available
         ? { outlines: await listOutlines(tx, ctx.tenant.id), running: latest, left }
         : null;
-      return { project, row, contracts, codes, labels: pack.labels, units, prices, assemblies, shares, walk };
+      return { project, row, contracts, codes, labels: pack.labels, units, prices, assemblies, shares, walk, measured };
     },
     { role: ctx.role },
   );
@@ -167,6 +170,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       projectLabel={projectLabel}
       prices={data.prices}
       assemblies={assemblyOptions}
+      measured={Object.fromEntries(data.measured)}
       // What the SAVED lines add up to per code, worked out on the server. It is
       // the editor's fourth folded section now, not a panel underneath it.
       byCode={row.byCode.map((c) => ({

@@ -51,6 +51,7 @@ import {
   Link2,
   Package,
   Pencil,
+  Ruler,
   Plus,
   Trash2,
   Wallet,
@@ -92,8 +93,10 @@ import {
   updateEstimateAction,
 } from "../actions";
 import { BimTakeoffDialog } from "./bim-takeoff-dialog";
+import { MeasureLineDialog } from "./measure-line-dialog";
 import type { TakeoffResult } from "../bim-takeoff-actions";
 import { quantityStringToThousandths, thousandthsToQuantityString } from "../billing-math";
+import { measureKindForUnit, sheetsBehind, type LineMeasurements } from "../takeoff-math";
 import { parseEstimateLine, parseEstimateLines, unitsFor, type ParsedEstimateLine } from "../estimate-parse";
 import { SHARE_STANDING_LABELS, type ShareStanding } from "../estimate-share-status";
 import { suggestDriver } from "../assembly-math";
@@ -538,6 +541,7 @@ export function EstimateEditor({
   prices,
   assemblies,
   byCode,
+  measured,
 }: {
   projectId: string;
   /** "Job 24-118 · 118 Oak Row" — worded by the page, so the editor holds no vocabulary. */
@@ -556,6 +560,8 @@ export function EstimateEditor({
   symbol: string | null;
   shares: ShareView[];
   byCode: ByCodeRow[];
+  /** What stands behind each line on the drawings, by line id (ADR 0109). */
+  measured: Record<string, LineMeasurements>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -577,6 +583,10 @@ export function EstimateEditor({
   const [letterText, setLetterText] = useState(estimate.letter);
   /** The version every guarded verb is handed; it advances with each save. */
   const [version, setVersion] = useState(estimate.version);
+  /** What the drawings say stands behind each line, by line id — moved here by the Measure dialog (ADR 0109). */
+  const [behind, setBehind] = useState<Record<string, LineMeasurements>>(measured);
+  /** The key of the line being measured on the drawings, while that dialog is open. */
+  const [measuring, setMeasuring] = useState<string | null>(null);
   /**
    * Writing the client's words is a pass of its own, so the item's own
    * sentence is behind one switch and off by default: a second input under
@@ -1366,6 +1376,19 @@ export function EstimateEditor({
     saveRef.current = (quiet: boolean) => {
     const sending = buildPayload();
     const sendingJson = JSON.stringify(sending);
+    /**
+     * THE ROWS SENT, IN THE ORDER SENT (ADR 0109) — the same filter and order
+     * `buildPayload` uses, so the ids that come back can be matched by
+     * position. Until this, a new line went to the server with no id on EVERY
+     * autosave: `saveLines` deleted the row it had made the time before and
+     * inserted another, and anything hanging off the old id — a measurement
+     * standing behind the line — was cut loose each time somebody typed.
+     */
+    const sentLineKeys = locked
+      ? []
+      : [...named.map((g) => g.key), ""].flatMap((key) =>
+          lines.filter((l) => (keyOf(l) ?? "") === key && l.description.trim() !== "").map((l) => l.key),
+        );
     startTransition(async () => {
       const result = await updateEstimateAction({ ...sending, version, quiet });
       if ("error" in result) {
@@ -1375,8 +1398,31 @@ export function EstimateEditor({
         return;
       }
       setFailed(false);
-      // What was SENT is what is saved; anything typed since stays unsaved.
-      setSavedJson(sendingJson);
+      const lineIds = Array.isArray(result.lineIds) && result.lineIds.length === sentLineKeys.length ? result.lineIds : null;
+      const groupRefs: Record<string, string> = result.groupRefs ?? {};
+      if (lineIds) {
+        setLines((prev) =>
+          prev.map((l) => {
+            const i = sentLineKeys.indexOf(l.key);
+            return i >= 0 && l.id === null ? { ...l, id: lineIds[i] } : l;
+          }),
+        );
+      }
+      if (!locked) {
+        setGroups((prev) => prev.map((g) => (g.id === null && groupRefs[g.key] ? { ...g, id: groupRefs[g.key] } : g)));
+      }
+      // What was SENT is what is saved — with the ids it was given, so adopting
+      // them does not read as an edit; anything typed since stays unsaved.
+      const sent = sending as { lines?: Array<{ id: string }>; groups?: Array<{ id: string; key: string }> };
+      setSavedJson(
+        lineIds && sent.lines
+          ? JSON.stringify({
+              ...sending,
+              ...(sent.groups ? { groups: sent.groups.map((g) => ({ ...g, id: g.id || groupRefs[g.key] || "" })) } : {}),
+              lines: sent.lines.map((l, i) => ({ ...l, id: l.id || lineIds[i] })),
+            })
+          : sendingJson,
+      );
       if (typeof result.version === "number") setVersion(result.version);
       if (!quiet) {
         toast.success("Estimate saved");
@@ -1569,11 +1615,14 @@ export function EstimateEditor({
    * sometimes goes nowhere.
    */
   const PAD = "px-2.5 @sm/work:px-[18px]";
+  /** The line being measured on the drawings, while its dialog is open (ADR 0109). */
+  const measuringLine = measuring ? (lines.find((l) => l.key === measuring) ?? null) : null;
   const ROW_GRID =
     `items-center gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)_78px] ` +
-    "@sm/work:grid-cols-[76px_minmax(0,1fr)_92px_34px] " +
-    "@3xl/work:grid-cols-[84px_minmax(0,1fr)_92px_100px_112px_34px] " +
-    "@5xl/work:grid-cols-[88px_minmax(0,1fr)_96px_104px_108px_116px_34px]";
+    // The last track holds two icons since ADR 0109 — the ruler and the bin — so it is 64px, not 34px.
+    "@sm/work:grid-cols-[76px_minmax(0,1fr)_92px_64px] " +
+    "@3xl/work:grid-cols-[84px_minmax(0,1fr)_92px_100px_112px_64px] " +
+    "@5xl/work:grid-cols-[88px_minmax(0,1fr)_96px_104px_108px_116px_64px]";
   const GUTTER_GRID =
     `grid gap-2 ${PAD} grid-cols-[64px_minmax(0,1fr)] @sm/work:grid-cols-[76px_minmax(0,1fr)] ` +
     "@3xl/work:grid-cols-[84px_minmax(0,1fr)] @5xl/work:grid-cols-[88px_minmax(0,1fr)]";
@@ -1600,6 +1649,14 @@ export function EstimateEditor({
     const expanded = openRows.has(l.key);
     const marginCents = linePriceCents(f, terms.markupPpm) - lineCostCents(f);
     const priceCents = linePriceCents(f, terms.markupPpm);
+    /** What the drawings say stands behind this line (ADR 0109), and whether a ruler makes sense for its unit. */
+    const stood = l.id ? behind[l.id] : undefined;
+    const rulerKind = measureKindForUnit(l.unit);
+    const typedThousandths = quantityStringToThousandths(l.quantity);
+    const lineDiffers =
+      stood !== undefined &&
+      typedThousandths !== null &&
+      Math.abs(typedThousandths - stood.shareThousandths) > Math.max(5, stood.shareThousandths * 0.005);
     return (
       <SortableRow
         key={l.key}
@@ -1672,6 +1729,19 @@ export function EstimateEditor({
                     <EyeOff className="size-3" /> off the proposal
                   </p>
                 )}
+                {/* The sheets behind the quantity (ADR 0109): the reverse link, read off the drawings. */}
+                {stood && (
+                  <button
+                    type="button"
+                    onClick={() => setMeasuring(l.key)}
+                    className="flex items-center gap-1 px-2 text-[11px] text-module-accent hover:underline"
+                    title={`${thousandthsToQuantityString(stood.shareThousandths)} ${stood.unit} measured on ${sheetsBehind(stood)} — open the drawings`}
+                  >
+                    <Ruler className="size-3" /> {sheetsBehind(stood)}
+                    {stood.drifted ? <span className="text-warning-foreground"> · measured since</span> : null}
+                    {lineDiffers ? <span className="text-warning-foreground"> · line differs</span> : null}
+                  </button>
+                )}
               </div>
 
               <div className={cn(CELL_QTY, "flex items-center justify-end gap-1")}>
@@ -1724,7 +1794,29 @@ export function EstimateEditor({
                 )}
               </div>
 
-              <div className={CELL_LAST}>
+              <div className={cn(CELL_LAST, "flex items-center justify-end gap-0.5")}>
+                {/* Measured from where it is priced (ADR 0109): the drawings, opened FOR this line.
+                    Only on a line a drawing can measure — lf, sf, ea or no unit yet; a lump sum gets no ruler. */}
+                {editable && rulerKind !== null && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn("size-7", stood ? "text-module-accent" : "text-subtle-foreground")}
+                    disabled={l.id === null}
+                    title={
+                      l.id === null
+                        ? "Saving the line…"
+                        : stood
+                          ? `Measured on ${sheetsBehind(stood)} — open the drawings`
+                          : "Measure it on a drawing"
+                    }
+                    onClick={() => setMeasuring(l.key)}
+                  >
+                    <Ruler className="size-[15px]" />
+                    <span className="sr-only">Measure line {lineNumber(sectionIndex, position, groups.length > 0)} on a drawing</span>
+                  </Button>
+                )}
                 {editable && (
                   <Button
                     type="button"
@@ -1821,6 +1913,46 @@ export function EstimateEditor({
                     disabled={!editable}
                   />
                 </div>
+                {/* What the drawings say, sheet by sheet (ADR 0109). */}
+                {stood && (
+                  <div className="space-y-1 @sm/work:col-span-2 @3xl/work:col-span-3 @5xl/work:col-span-5">
+                    <Label className="text-xs font-medium text-muted-foreground">From the drawings</Label>
+                    <ul className="divide-y divide-divider rounded-[10px] border border-border text-[13px]">
+                      {stood.sheets.map((s) => (
+                        <li key={s.sheetId} className="flex flex-wrap items-baseline gap-x-2 px-3 py-1.5">
+                          <span className="font-medium">{s.sheetNumber}</span>
+                          <span className="tabular-nums">
+                            {thousandthsToQuantityString(s.nowThousandths ?? s.shareThousandths)} {stood.unit}
+                          </span>
+                          <span className="text-subtle-foreground">
+                            {s.traces} {s.traces === 1 ? "trace" : "traces"} · {s.setName}
+                            {s.isCurrent ? "" : " · superseded issue"}
+                            {s.drifted ? " · measured since" : ""}
+                          </span>
+                        </li>
+                      ))}
+                      <li className="flex flex-wrap items-baseline justify-between gap-x-2 px-3 py-1.5">
+                        <span className="tabular-nums">
+                          <span className="text-subtle-foreground">Measured </span>
+                          <span className="font-medium">
+                            {thousandthsToQuantityString(stood.shareThousandths)} {stood.unit}
+                          </span>
+                          {lineDiffers && (
+                            <span className="text-warning-foreground">
+                              {" "}
+                              · the line says {l.quantity} {l.unit}
+                            </span>
+                          )}
+                        </span>
+                        {editable && (
+                          <button type="button" onClick={() => setMeasuring(l.key)} className="text-[13px] font-medium text-module-accent hover:underline">
+                            Open the drawings
+                          </button>
+                        )}
+                      </li>
+                    </ul>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-between gap-3 @sm/work:col-span-2 @3xl/work:col-span-3 @5xl/work:col-span-5">
                   {/* Only a line IN an item may be kept off the proposal: hidden money
                       needs somewhere to hide, or the printed rows stop adding up (ADR 0080). */}
@@ -3083,6 +3215,36 @@ export function EstimateEditor({
         </DialogContent>
       </Dialog>
 
+      {/* A line measured from where it is priced (ADR 0109): the drawings, opened for it. */}
+      {measuringLine && measuringLine.id && (
+        <MeasureLineDialog
+          projectId={projectId}
+          estimateId={estimate.id}
+          line={{ id: measuringLine.id, description: measuringLine.description, unit: measuringLine.unit }}
+          behind={behind[measuringLine.id] ?? null}
+          onClose={() => setMeasuring(null)}
+          onUsed={(r) => {
+            const stoodNow = r.behind;
+            if (stoodNow) {
+              // The editor sets the quantity — nothing else writes a line while it is open (ADR 0082) — and a blank unit takes the measurement's.
+              setLine(measuringLine.key, {
+                quantity: thousandthsToQuantityString(r.quantityThousandths),
+                unit: measuringLine.unit.trim() === "" ? r.unit : measuringLine.unit,
+              });
+              setBehind((prev) => ({ ...prev, [r.lineId]: stoodNow }));
+              toast.success(`${thousandthsToQuantityString(r.quantityThousandths)} ${r.unit} on the line, measured on ${sheetsBehind(stoodNow)}`);
+            } else {
+              setBehind((prev) => {
+                const next = { ...prev };
+                delete next[r.lineId];
+                return next;
+              });
+              toast.success("The drawings let go; the line keeps its quantity");
+            }
+            setMeasuring(null);
+          }}
+        />
+      )}
       {/* The takeoff off the model (X15, ADR 0107). */}
       <BimTakeoffDialog
         projectId={projectId}

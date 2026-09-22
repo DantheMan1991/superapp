@@ -175,6 +175,9 @@ export function MeasureOnADrawing({
                *  is going to the building, not to an estimate line. */
               estimates={[]}
               codes={[]}
+              /** A trace drawn in here must show up in here: the view is a
+               *  snapshot, so anything the viewer changed re-reads it. */
+              onChanged={() => pick(sheet.sheetId)}
               measuringFor={{
                 name: measure.name,
                 unit: measure.unit,

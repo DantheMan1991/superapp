@@ -173,6 +173,29 @@ The permit set read again and saved: its three sheets came back at
 — 272×181 on the pane — while ASI 1's two sheets, never re-read, stayed
 compact with no picture. No migration, no seed.
 
+### 2026-09-22 — The lumber list (`claude/the-lumber-list`, X16)
+
+The framing half of *"lumber takeoff … from the model"*. A framing schedule
+names a member by its type AND its cut length — forty-six 2x10s at 14' and
+twelve at 12' — and X15 grouped by the naming column alone, which folded
+every 2x10 into one row with a total length. A lumber list is pieces by size
+and length, so a thing may now be named by two columns.
+
+- `alsoColumnDefault` (pure): a schedule with a *Count* column beside a
+  *Cut Length* column is named by type and length unless the person says
+  otherwise; anything else by one column. `takeoffRows` takes the second
+  index and keys on `${type} · ${length}`; the slug reduces the pair.
+- The preview says which columns named things (`namedBy`, `alsoBy`) and
+  offers the alternatives (`nameChoices`, `alsoChoices`); the dialog shows
+  two *Named by* selects above the rows and re-reads the schedule when either
+  changes; *— nothing* (`alsoBy: -1`, said out loud) is not the same as left
+  unsaid. The import groups by the same choice the preview showed.
+- `2x10 · 14' - 0"` as a line by its count is the lumber list, priced per
+  piece from the book; as an assembly per `ea` it comes in priced.
+
+Tests: the pure default and the split (`jobs-bim-takeoff`), and the preview
+and import told *nothing* (`jobs-bim-takeoff-ops`).
+
 ### 2026-09-21 — The takeoff off the model (`claude/the-schedule-off-the-model`, X15, [ADR 0107](../decisions/0107-a-takeoff-off-the-model-is-a-join-through-the-assembly-keyed-by-what-the-model-calls-it.md))
 
 The founder, an hour after X14 shipped: *"I'm really looking for way more

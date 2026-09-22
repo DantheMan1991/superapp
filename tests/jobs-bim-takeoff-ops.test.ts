@@ -32,6 +32,15 @@ const WALL_TYPES = [
   '"Grand total: 34"\t"34"\t"660\' - 0""\t"5,940 SF"',
 ].join("\n");
 
+const FRAMING = [
+  '"Structural Framing Schedule"',
+  '"Type"\t"Count"\t"Cut Length"',
+  '"2x10"\t"1"\t"14\' - 0""',
+  '"2x10"\t"1"\t"14\' - 0""',
+  '"2x10"\t"1"\t"12\' - 0""',
+  '"2x12"\t"1"\t"20\' - 0""',
+].join("\n");
+
 const MATERIALS = [
   '"Wall Material Takeoff"',
   '"Material: Name"\t"Material: Area"\t"Material: Volume"',
@@ -182,6 +191,53 @@ d("a takeoff off the model", () => {
       { key: "Wood - Stud Layer", reason: "the schedule has no Cut Length figure for it" },
       { key: "Not in it", reason: "it is not in the schedule" },
     ]);
+  });
+
+  it("names framing by type and cut length unless told not to, and says which columns it used", async () => {
+    const preview = await run((tx) => previewTakeoff(tx, tenantId, FRAMING, "framing.txt"));
+    expect(preview.namedBy?.header).toBe("Type");
+    expect(preview.alsoBy?.header).toBe("Cut Length");
+    expect(preview.nameChoices.map((c) => c.header)).toEqual(["Type"]);
+    expect(preview.alsoChoices.map((c) => c.header)).toEqual(["Count", "Cut Length"]);
+    expect(preview.rows.map((r) => [r.key, r.count])).toEqual([
+      ["2x10 · 14' - 0\"", 2],
+      ["2x10 · 12' - 0\"", 1],
+      ["2x12 · 20' - 0\"", 1],
+    ]);
+    /** As a lumber list line: the count is the figure that matters. */
+    const result = await run((tx) =>
+      takeoffItems(tx, ctx, {
+        projectId,
+        text: FRAMING,
+        fileName: "framing.txt",
+        choices: [{ key: "2x10 · 14' - 0\"", lineFrom: "count" }],
+      }),
+    );
+    expect(result.loose).toEqual([
+      {
+        description: "2x10 · 14' - 0\"",
+        quantityThousandths: 2_000,
+        unit: "ea",
+        basisDetail: "off the model: Structural Framing Schedule · 2x10 · 14' - 0\" · 2 in the schedule",
+      },
+    ]);
+    /** Told *nothing*, every 2x10 is one thing again — and the import groups the same way. */
+    const flat = await run((tx) => previewTakeoff(tx, tenantId, FRAMING, "framing.txt", { alsoBy: -1 }));
+    expect(flat.alsoBy).toBeNull();
+    expect(flat.rows.map((r) => [r.key, r.count])).toEqual([
+      ["2x10", 3],
+      ["2x12", 1],
+    ]);
+    const flatResult = await run((tx) =>
+      takeoffItems(tx, ctx, {
+        projectId,
+        text: FRAMING,
+        fileName: "framing.txt",
+        choices: [{ key: "2x10", lineFrom: "count" }],
+        named: { alsoBy: -1 },
+      }),
+    );
+    expect(flatResult.loose.map((l) => [l.description, l.quantityThousandths])).toEqual([["2x10", 3_000]]);
   });
 
   it("keeps one assembly per name, and a name typed on another assembly moves to it", async () => {

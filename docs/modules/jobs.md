@@ -196,10 +196,13 @@ links; the two older scenarios pass on the new table unchanged in meaning.
 Isolation: the table (cross-tenant, FKs, both CHECKs, the unique index,
 both cascades) and the `figures` CHECK.
 
-**Migrations 0421 and 0422** — applied to dev and verified at 245 tables;
-production was NOT applied from the session (the auto-mode classifier
-refused the production run), so the founder runs `npm run db:migrate` and
-`npm run db:verify-rls` before the merge. The backfill is `ON CONFLICT DO
+**Migrations 0421 and 0422** — applied to dev and verified at 245 tables,
+then, on the founder's say-so later the same day (the auto-mode classifier
+had refused the production run unasked), applied to PRODUCTION with
+`npm run db:migrate` and verified with `npm run db:verify-rls`: 245 tables,
+RLS enabled and forced everywhere. Read back from production: the table with
+both policies, the `figures` column defaulting to `{}`, and the backfill
+carrying every existing link (2 of 2). The backfill is `ON CONFLICT DO
 NOTHING`, so a second run after the deploy is safe and catches a push made
 in the window between.
 

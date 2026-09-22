@@ -188,10 +188,15 @@ function DisciplineSection({
               className="flex h-full flex-col overflow-hidden rounded-lg border hover:bg-secondary/50"
             >
               {/**
-                * **A FIXED BOX, AND THE PICTURE INSIDE IT.** Sheets are all
-                * sorts of shapes — a 36x24 plan beside a portrait detail —
-                * and cards that grow to their own picture make a ragged grid
-                * nobody can scan. `object-contain` keeps the drawing whole.
+                * **THE PICTURE IS THE CARD'S WIDTH, in a 3:2 box.** The first
+                * cut was a fixed 112px strip with the drawing centred in it —
+                * on a desktop card ~490px across that is a stamp with white
+                * either side, and the founder said so: *"a fair amount of
+                * wasted space... it would be nice if they were bigger."*
+                * 3:2 is ARCH-D's own shape (36×24), so a plan fills the box;
+                * a portrait detail sheet letterboxes, which is the honest way
+                * to show a tall page in a grid every card of which is the
+                * same height. `object-contain` keeps the drawing whole.
                 *
                 * eslint-disable: this is a private, authenticated route that
                 * 404s for a page with no picture, which is the ordinary case.
@@ -202,7 +207,7 @@ function DisciplineSection({
                 src={`/api/jobs/sheet-thumbs/${s.documentId}/${s.pageNumber}`}
                 alt=""
                 loading="lazy"
-                className="h-28 w-full bg-white object-contain"
+                className="aspect-[3/2] w-full bg-white object-contain"
                 onError={(e) => {
                   e.currentTarget.style.display = "none";
                 }}

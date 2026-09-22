@@ -31,6 +31,23 @@ import { PageLoupe } from "./page-loupe";
 
 const NONE = "__none__";
 
+/** How many page pictures upload at once. Enough to be quick; few enough not to be a stampede. */
+const THUMB_LANES = 4;
+
+/** A canvas's `data:image/jpeg;base64,…` as bytes, without a fetch. Null when it is not one. */
+function jpegFromDataUrl(dataUrl: string): Blob | null {
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:image/jpeg;base64,") || comma === -1) return null;
+  try {
+    const raw = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return new Blob([bytes], { type: "image/jpeg" });
+  } catch {
+    return null;
+  }
+}
+
 export interface EditableDrawingSet {
   id: string;
   version: number;
@@ -518,20 +535,69 @@ export function SheetIndexTable({
    * overwrites rather than orphans. **Best effort, and after the sheets are
    * saved**: a picture that does not upload costs a card its thumbnail, and
    * losing the index over it would be the wrong trade by a distance.
+   *
+   * ── A FEW AT A TIME, TRIED TWICE, AND SAID ──────────────────────────────
+   *
+   * The first cut fired every page at once and swallowed every failure in a
+   * `Promise.allSettled`. **It worked** — the founder re-read his 37-page set
+   * on production and the pictures were there on a later look — but it also
+   * could not have told anybody if it had not: thirty-seven simultaneous
+   * token requests against a serverless route that authenticates and hits
+   * the database per call, with every rejection thrown away, is a stampede
+   * that reports success whatever happens. So, on principle rather than
+   * because of an outage:
+   *
+   * - **`THUMB_LANES` uploads run at once**; the rest wait. A set still
+   *   lands in seconds.
+   * - **A failure is tried once more**, because the failure mode here would
+   *   be load, and load passes.
+   * - **What could not be kept is counted and said**, with the way to fix it
+   *   (`Read again`). A best-effort step that reports nothing is
+   *   indistinguishable from one that never ran.
+   *
+   * What the founder actually saw — cards with no pictures on the FIRST
+   * look after a re-read, and pictures on the next — is not this function
+   * failing. The likeliest cause is the page refreshing before the freshly
+   * written blobs were readable, each `<img>` 404ing and hiding itself for
+   * that page load. Unconfirmed, and left alone until it is seen again.
+   *
+   * The data URL is decoded here rather than `fetch()`ed: one fewer thing
+   * that a content-security policy or a browser quirk can refuse silently.
    */
-  async function keepThumbnails() {
+  async function keepThumbnails(): Promise<{ kept: number; lost: number }> {
     const withPictures = included.filter((r) => r.thumbnail !== null);
-    if (withPictures.length === 0) return;
-    await Promise.allSettled(
-      withPictures.map(async (r) => {
-        const blob = await (await fetch(r.thumbnail!)).blob();
-        await uploadPresigned(thumbPath(tenantId, documentId, r.pageNumber), blob, {
-          access: "private",
-          contentType: "image/jpeg",
-          handleUploadUrl: "/api/jobs/sheet-thumbs/blob/upload",
-        });
-      }),
-    );
+    let kept = 0;
+    let lost = 0;
+    const queue = [...withPictures];
+    const lane = async () => {
+      for (let r = queue.shift(); r; r = queue.shift()) {
+        const body = jpegFromDataUrl(r.thumbnail!);
+        if (!body) {
+          lost++;
+          continue;
+        }
+        const put = () =>
+          uploadPresigned(thumbPath(tenantId, documentId, r.pageNumber), body, {
+            access: "private",
+            contentType: "image/jpeg",
+            handleUploadUrl: "/api/jobs/sheet-thumbs/blob/upload",
+          });
+        try {
+          await put();
+          kept++;
+        } catch {
+          try {
+            await put();
+            kept++;
+          } catch (err) {
+            lost++;
+            console.error(`sheet thumbnail for page ${r.pageNumber} could not be kept`, err);
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(THUMB_LANES, queue.length) }, lane));
+    return { kept, lost };
   }
 
   function save() {
@@ -545,12 +611,15 @@ export function SheetIndexTable({
         toast.error(result.error);
         return;
       }
-      try {
-        await keepThumbnails();
-      } catch {
-        /** The sheets are on the job; the pictures are a nicety. */
-      }
+      /** The sheets are on the job whatever happens to the pictures. */
+      const pictures = await keepThumbnails().catch(() => ({ kept: 0, lost: included.length }));
       toast.success(`${result.count} ${result.count === 1 ? "sheet" : "sheets"} on the job`);
+      if (pictures.lost > 0) {
+        toast.warning(
+          `${pictures.lost} ${pictures.lost === 1 ? "picture" : "pictures"} could not be kept. Open the set, Read again and Save to try them again.`,
+          { duration: 12_000 },
+        );
+      }
       onDone();
     });
   }

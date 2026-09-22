@@ -11,6 +11,7 @@ import {
 } from "./assembly-ops";
 import { MAX_SCHEDULE_CHARS, parseSchedule, readColumns, type Dimension } from "./bim-schedule";
 import {
+  alsoColumnDefault,
   driverFor,
   keyColumnOf,
   keySlug,
@@ -47,6 +48,12 @@ export interface TakeoffPreview {
   footers: number;
   /** The column the things were named by. */
   keyHeader: string;
+  /** The column that names things, and the one that splits a name — a cut length (X16). */
+  namedBy: { index: number; header: string } | null;
+  alsoBy: { index: number; header: string } | null;
+  /** What the person may name things by instead: the word columns, and any other column. */
+  nameChoices: { index: number; header: string }[];
+  alsoChoices: { index: number; header: string }[];
   /** Rows with nothing in that column, left out. */
   unnamed: number;
   rows: {
@@ -72,13 +79,32 @@ function checkSize(text: string): void {
   }
 }
 
+/**
+ * Which columns name a thing: the person's choice when it is one that can,
+ * else the reader's. `alsoBy` of -1 is *nothing* said out loud, which is
+ * not the same as left unsaid — a framing schedule splits by cut length
+ * until somebody says not to.
+ */
+export interface NamedBy {
+  keyBy?: number;
+  alsoBy?: number;
+}
+
 /** The schedule as things, and the library as things to match them to. */
-async function readAll(tx: Tx, tenantId: string, text: string) {
+async function readAll(tx: Tx, tenantId: string, text: string, named: NamedBy = {}) {
   checkSize(text);
   const schedule = parseSchedule(text);
   const { columns, rows, footers } = readColumns(schedule);
-  const keyColumn = keyColumnOf(columns);
-  const taken = keyColumn ? takeoffRows(columns, rows, keyColumn.index) : { rows: [], unnamed: 0 };
+  const chosen = named.keyBy === undefined ? undefined : columns[named.keyBy];
+  const keyColumn = chosen && chosen.kind === "text" ? chosen : keyColumnOf(columns);
+  let also: (typeof columns)[number] | null = null;
+  if (named.alsoBy === undefined) also = alsoColumnDefault(columns);
+  else if (named.alsoBy >= 0 && columns[named.alsoBy] && named.alsoBy !== keyColumn?.index) {
+    also = columns[named.alsoBy];
+  }
+  const taken = keyColumn
+    ? takeoffRows(columns, rows, keyColumn.index, also?.index ?? null)
+    : { rows: [], unnamed: 0 };
   const [library, keys] = await Promise.all([listAssemblies(tx, tenantId), listAssemblyKeys(tx, tenantId)]);
   const keysBy = new Map<string, string[]>();
   for (const k of keys) keysBy.set(k.assemblyId, [...(keysBy.get(k.assemblyId) ?? []), k.key]);
@@ -90,7 +116,7 @@ async function readAll(tx: Tx, tenantId: string, text: string) {
     per: figure(a.assembly.drivingQuantityThousandths, a.assembly.drivingUnit),
     costCents: a.costCents,
   }));
-  return { schedule, rows, footers, keyColumn, taken, assemblies };
+  return { schedule, columns, rows, footers, keyColumn, also, taken, assemblies };
 }
 
 export async function previewTakeoff(
@@ -98,14 +124,28 @@ export async function previewTakeoff(
   tenantId: string,
   text: string,
   fileName: string,
+  named: NamedBy = {},
 ): Promise<TakeoffPreview> {
-  const { schedule, rows, footers, keyColumn, taken, assemblies } = await readAll(tx, tenantId, text);
+  const { schedule, columns, rows, footers, keyColumn, also, taken, assemblies } = await readAll(
+    tx,
+    tenantId,
+    text,
+    named,
+  );
   return {
     title: schedule.title,
     fileName,
     rowCount: rows.length,
     footers,
     keyHeader: keyColumn?.header ?? "",
+    namedBy: keyColumn ? { index: keyColumn.index, header: keyColumn.header } : null,
+    alsoBy: also ? { index: also.index, header: also.header } : null,
+    nameChoices: columns
+      .filter((c) => c.kind === "text")
+      .map((c) => ({ index: c.index, header: c.header })),
+    alsoChoices: columns
+      .filter((c) => c.index !== keyColumn?.index)
+      .map((c) => ({ index: c.index, header: c.header })),
     unnamed: taken.unnamed,
     rows: taken.rows.map((row) => ({
       key: row.key,
@@ -176,12 +216,18 @@ export interface TakeoffResult {
 export async function takeoffItems(
   tx: Tx,
   ctx: JobsCtx,
-  input: { projectId: string; text: string; fileName: string; choices: readonly TakeoffChoice[] },
+  input: {
+    projectId: string;
+    text: string;
+    fileName: string;
+    choices: readonly TakeoffChoice[];
+    named?: NamedBy;
+  },
 ): Promise<TakeoffResult> {
   requireWrite(ctx, "member");
   const project = await getProject(tx, ctx.tenantId, input.projectId);
   if (!project) throw new JobsError("NOT_FOUND", "job not found");
-  const { schedule, taken, assemblies } = await readAll(tx, ctx.tenantId, input.text);
+  const { schedule, taken, assemblies } = await readAll(tx, ctx.tenantId, input.text, input.named);
   const bySlug = new Map<string, TakeoffRow>(taken.rows.map((r) => [r.slug, r]));
 
   const items: TakeoffItem[] = [];

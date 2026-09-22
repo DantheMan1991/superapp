@@ -69,6 +69,9 @@ export function BimTakeoffDialog({
   /** Row key → "asm:<id>" | "line:<header>" | "line:count" | "". */
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [remember, setRemember] = useState<Record<string, boolean>>({});
+  /** Which column names things and which splits a name — undefined until the person changes them. */
+  const [keyBy, setKeyBy] = useState<number | undefined>(undefined);
+  const [alsoBy, setAlsoBy] = useState<number | undefined>(undefined);
   const [pending, startTransition] = useTransition();
 
   function reset() {
@@ -77,12 +80,14 @@ export function BimTakeoffDialog({
     setPreview(null);
     setPicks({});
     setRemember({});
+    setKeyBy(undefined);
+    setAlsoBy(undefined);
   }
 
-  function look(next: string, name: string) {
+  function look(next: string, name: string, named: { keyBy?: number; alsoBy?: number } = { keyBy, alsoBy }) {
     startTransition(async () => {
       try {
-        const result = await previewTakeoffAction({ projectId, text: next, fileName: name });
+        const result = await previewTakeoffAction({ projectId, text: next, fileName: name, ...named });
         if ("error" in result) {
           toast.error(result.error);
           return;
@@ -124,7 +129,7 @@ export function BimTakeoffDialog({
     if (!preview || choices.length === 0) return;
     startTransition(async () => {
       try {
-        const result = await takeoffFromModelAction({ projectId, text, fileName, choices });
+        const result = await takeoffFromModelAction({ projectId, text, fileName, choices, keyBy, alsoBy });
         if ("error" in result) {
           toast.error(result.error);
           return;
@@ -195,6 +200,53 @@ export function BimTakeoffDialog({
                 {preview.unnamed > 0 && `, ${preview.unnamed} unnamed ${preview.unnamed === 1 ? "row" : "rows"} left out`}
               </span>
             </p>
+
+            {preview.namedBy && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>Named by</span>
+                <select
+                  className={SELECT}
+                  value={preview.namedBy.index}
+                  aria-label="The column that names things"
+                  disabled={pending}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setKeyBy(n);
+                    look(text, fileName, { keyBy: n, alsoBy });
+                  }}
+                >
+                  {preview.nameChoices.map((c) => (
+                    <option key={c.index} value={c.index}>
+                      {c.header}
+                    </option>
+                  ))}
+                </select>
+                <span>and</span>
+                <select
+                  className={SELECT}
+                  value={preview.alsoBy?.index ?? -1}
+                  aria-label="A second column that splits a name"
+                  disabled={pending}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setAlsoBy(n);
+                    look(text, fileName, { keyBy, alsoBy: n });
+                  }}
+                >
+                  <option value={-1}>— nothing</option>
+                  {preview.alsoChoices.map((c) => (
+                    <option key={c.index} value={c.index}>
+                      {c.header}
+                    </option>
+                  ))}
+                </select>
+                {preview.alsoBy && (
+                  <span>
+                    — a lumber list: each length of a member is its own thing
+                  </span>
+                )}
+              </div>
+            )}
 
             {preview.rows.length === 0 ? (
               <p className="text-xs text-muted-foreground">

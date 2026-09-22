@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseSchedule, readColumns } from "../src/packs/jobs/bim-schedule";
 import {
+  alsoColumnDefault,
   countColumnOf,
   driverFor,
   keyColumnOf,
@@ -228,5 +229,35 @@ describe("lineFromRow and offTheModel", () => {
     expect(offTheModel({ title: "" }, "walls.txt", taken.rows[0], "Length 248 lf")).toBe(
       "off the model: walls.txt · Basic Wall: Exterior - 2x6 Wood Stud · Length 248 lf",
     );
+  });
+});
+
+describe("a lumber list: named by type and cut length", () => {
+  it("names a framing member by both columns by default, and anything else by one", () => {
+    const framing = readColumns(parseSchedule(FRAMING)).columns;
+    expect(alsoColumnDefault(framing)?.header).toBe("Cut Length");
+    /** A wall schedule has a Count, but no cut length to split by. */
+    expect(alsoColumnDefault(readColumns(parseSchedule(WALL_TYPES)).columns)).toBeNull();
+    /** A cut length with no count beside it is an itemised list already; one column names it. */
+    const noCount = readColumns(parseSchedule('"Type"\t"Cut Length"\n"2x10"\t"14\' - 0""')).columns;
+    expect(alsoColumnDefault(noCount)).toBeNull();
+  });
+
+  it("makes each length of a member its own thing, with its count and its total", () => {
+    const { columns, rows } = readColumns(parseSchedule(FRAMING));
+    const key = keyColumnOf(columns)!;
+    const also = alsoColumnDefault(columns)!;
+    const taken = takeoffRows(columns, rows, key.index, also.index);
+    expect(taken.rows.map((r) => [r.key, r.count, r.quantities[0].totalThousandths])).toEqual([
+      ["2x10 · 14' - 0\"", 2, 28_000],
+      ["2x10 · 12' - 0\"", 1, 12_000],
+      ["2x12 · 20' - 0\"", 1, 20_000],
+    ]);
+    expect(taken.rows[0].slug).toBe("2x10 14 0");
+    /** Named by one column again, the 2x10s are one thing. */
+    expect(takeoffRows(columns, rows, key.index, null).rows.map((r) => [r.key, r.count])).toEqual([
+      ["2x10", 3],
+      ["2x12", 1],
+    ]);
   });
 });

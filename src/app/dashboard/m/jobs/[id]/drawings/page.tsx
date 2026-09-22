@@ -10,11 +10,11 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { todayInTimezone } from "@/lib/timezone";
 import { Panel } from "@/components/app/panel";
-import { Badge } from "@/components/ui/badge";
 import { roleMayWrite } from "@/modules/documents/core/errors";
 import { getProject } from "@/packs/jobs/ops";
-import { drawingsSummary, listDrawingSets, listSheets, type SheetRow } from "@/packs/jobs/drawings-ops";
-import { compareDisciplines, disciplineLabel } from "@/packs/jobs/drawings-math";
+import { drawingsSummary, listDrawingSets, listSheets } from "@/packs/jobs/drawings-ops";
+import { disciplineOrderFrom } from "@/packs/jobs/drawings-math";
+import { CurrentSet } from "@/packs/jobs/components/current-set";
 import { AddDrawingSetDialog, EditDrawingSetDialog } from "@/packs/jobs/components/drawing-set-form";
 import { PACK } from "@/packs/jobs/vocabulary";
 
@@ -35,39 +35,38 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
     async (tx) => {
       const project = await getProject(tx, ctx.tenant.id, id);
       if (!project) return null;
-      const [sets, sheets, summary, parties, pack] = await Promise.all([
+      /**
+       * **THE ORDER IS READ BEFORE THE SHEETS ARE SORTED**, so the pack's
+       * context is not in the parallel batch below: `listSheets` sorts by it.
+       */
+      const pack = await packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK);
+      const order = disciplineOrderFrom(pack.config);
+      const [sets, sheets, summary, parties] = await Promise.all([
         listDrawingSets(tx, ctx.tenant.id, project.id),
-        listSheets(tx, ctx.tenant.id, project.id),
+        listSheets(tx, ctx.tenant.id, project.id, order),
         drawingsSummary(tx, ctx.tenant.id, project.id),
         tx
           .select({ id: schema.parties.id, name: schema.parties.displayName })
           .from(schema.parties)
           .where(eq(schema.parties.tenantId, ctx.tenant.id))
           .limit(500),
-        packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
       ]);
-      return { project, sets, sheets, summary, parties, labels: pack.labels };
+      return { project, sets, sheets, summary, parties, order, labels: pack.labels };
     },
     { role: ctx.role },
   );
   if (!data) notFound();
 
-  const { project, sets, sheets, summary } = data;
+  const { project, sets, sheets, summary, order } = data;
   const canEdit = allowsWrite(ctx.role, "member");
   const canFile = documentsOn && canEdit && roleMayWrite(ctx.role);
+  /** Deciding how the business reads its drawings is an owner's call. */
+  const canReorder = ctx.role === "owner";
   const projectWord = labelFor(data.labels, "project", "Project");
   const today = todayInTimezone(ctx.tenant.timezone);
   const current = sheets.filter((s) => s.isCurrent);
   const superseded = sheets.filter((s) => !s.isCurrent);
   const byId = new Map(sheets.map((s) => [s.sheet.id, s]));
-
-  const groups = new Map<string, SheetRow[]>();
-  for (const s of current) {
-    const list = groups.get(s.discipline) ?? [];
-    list.push(s);
-    groups.set(s.discipline, list);
-  }
-  const disciplines = [...groups.keys()].sort(compareDisciplines);
 
   const sentence =
     summary.sets === 0
@@ -99,38 +98,24 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
               : "The sets have no sheets yet. Open a set with the pencil and read its file into pages."}
           </p>
         ) : (
-          <div className="space-y-5">
-            {disciplines.map((d) => (
-              <section key={d}>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {disciplineLabel(d)} · {groups.get(d)!.length}
-                </h3>
-                <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {groups.get(d)!.map((s) => (
-                    <li key={s.sheet.id}>
-                      <Link
-                        href={`/dashboard/m/jobs/${project.id}/drawings/${s.sheet.id}`}
-                        className="flex h-full flex-col gap-1 rounded-lg border px-3 py-2 hover:bg-secondary/50"
-                      >
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-sm font-semibold">{s.sheet.sheetNumber}</span>
-                          {s.issues > 1 && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              {s.issues} issues
-                            </Badge>
-                          )}
-                        </span>
-                        <span className="text-sm">{s.sheet.title || <span className="text-muted-foreground">Untitled</span>}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {s.setName} · {s.issuedOn}
-                          {s.sheet.revision ? ` · rev ${s.sheet.revision}` : ""}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+          <div>
+            <CurrentSet
+              projectId={project.id}
+              order={order}
+              canReorder={canReorder}
+              sheets={current.map((s) => ({
+                id: s.sheet.id,
+                sheetNumber: s.sheet.sheetNumber,
+                title: s.sheet.title,
+                revision: s.sheet.revision,
+                discipline: s.discipline,
+                documentId: s.sheet.documentId,
+                pageNumber: s.sheet.pageNumber,
+                setName: s.setName,
+                issuedOn: s.issuedOn,
+                issues: s.issues,
+              }))}
+            />
           </div>
         )}
       </Panel>

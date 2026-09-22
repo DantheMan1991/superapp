@@ -10,6 +10,8 @@ import {
   guessSheet,
   issuesOf,
   tickedByDefault,
+  disciplineOrderFrom,
+  disciplineRank,
   linesFrom,
   sheetNumberIn,
   stackedTitle,
@@ -317,5 +319,74 @@ describe("stackedTitle", () => {
   it("ignores lines of another size, whatever the leading", () => {
     const seed = line("DETAILS", 265);
     expect(stackedTitle(seed, [seed, line("IN-FLOOR BEAM", 290, 12.6)])).toBe("DETAILS");
+  });
+});
+
+/**
+ * **THE BUSINESS'S READING ORDER OVER THE STANDARD'S.**
+ *
+ * `DISCIPLINE_ORDER` is the US National CAD Standard's, and it genuinely puts
+ * **S before A**. The founder, looking at his own house: *"I should be able
+ * to organize the categories. architectural, then structural etc. right now
+ * structural shows first but I would not want that."* Both are right, which
+ * is why it is config and not a corrected constant.
+ */
+describe("the order a business reads its disciplines in", () => {
+  it("is the standard's when nothing has been said", () => {
+    expect(["A", "S", "E"].sort(compareDisciplines)).toEqual(["S", "A", "E"]);
+  });
+
+  it("is the business's where the business has spoken", () => {
+    const mine = ["A", "S"];
+    expect(["A", "S", "E"].sort((a, b) => compareDisciplines(a, b, mine))).toEqual(["A", "S", "E"]);
+  });
+
+  /**
+   * Naming one discipline must not shuffle the rest: everything unnamed keeps
+   * its place in the standard's own order, after everything named.
+   */
+  it("keeps what was never named in the standard's order, after what was", () => {
+    const mine = ["E"];
+    expect(["A", "S", "E", "G"].sort((a, b) => compareDisciplines(a, b, mine))).toEqual(["E", "G", "S", "A"]);
+  });
+
+  it("leaves Other last unless it was asked for earlier", () => {
+    expect(["Other", "A", "S"].sort(compareDisciplines)).toEqual(["S", "A", "Other"]);
+    expect(["Other", "A", "S"].sort((a, b) => compareDisciplines(a, b, ["Other"]))).toEqual(["Other", "S", "A"]);
+  });
+
+  /** The whole set reads in that order too, not just the headings. */
+  it("orders sheet numbers by it as well", () => {
+    const sheets = ["S1.0", "A1.1", "A1.2", "S2.0"];
+    expect([...sheets].sort((a, b) => compareSheetNumbers(a, b, ["A"]))).toEqual(["A1.1", "A1.2", "S1.0", "S2.0"]);
+    expect([...sheets].sort((a, b) => compareSheetNumbers(a, b))).toEqual(["S1.0", "S2.0", "A1.1", "A1.2"]);
+  });
+
+  it("ranks a discipline the business named ahead of every one it did not", () => {
+    expect(disciplineRank("A", ["A"])).toBe(0);
+    expect(disciplineRank("G", ["A"])).toBeGreaterThan(disciplineRank("A", ["A"]));
+  });
+});
+
+describe("disciplineOrderFrom", () => {
+  it("reads the order out of the pack's config", () => {
+    expect(disciplineOrderFrom({ disciplineOrder: ["A", "S"] })).toEqual(["A", "S"]);
+  });
+
+  /** A key nothing can label would sort a section under a blank heading. */
+  it("drops what the convention does not know, and repeats", () => {
+    expect(disciplineOrderFrom({ disciplineOrder: ["A", "ZZTOP", 7, "A", "Other"] })).toEqual(["A", "Other"]);
+  });
+
+  it("is empty for a business that has said nothing, and for nonsense", () => {
+    expect(disciplineOrderFrom({})).toEqual([]);
+    expect(disciplineOrderFrom(null)).toEqual([]);
+    expect(disciplineOrderFrom({ disciplineOrder: "A,S" })).toEqual([]);
+    expect(disciplineOrderFrom([{ disciplineOrder: ["A"] }])).toEqual([]);
+  });
+
+  /** The jsonb it shares with tabsOff and the profile's lists is untouched. */
+  it("ignores everything else in the config", () => {
+    expect(disciplineOrderFrom({ tabsOff: ["warranty"], disciplineOrder: ["A"] })).toEqual(["A"]);
   });
 });

@@ -126,6 +126,77 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-21 — Sheets you can see, in the order you read them (`claude/sheets-you-can-see`)
+
+The founder, with the Wright house set read in and on the screen: *"The
+drawings should show thumbnail. Also, I should be able to organize the
+categories. architectural, then structural etc. right now structural shows
+first but I would not want that."*
+
+**THE PICTURE WAS ALREADY BEING DRAWN AND THROWN AWAY.** Indexing renders a
+168px JPEG of every page for the index table, and it died with the dialog.
+It is now uploaded and the cards show it.
+
+**KEYED BY THE PAGE, NOT BY THE SHEET, AND SO NO MIGRATION.**
+`sheetThumbPath(tenant, document, page)` is derived, so there is no column to
+add and nothing has to round-trip a sheet id before it can store a picture: a
+thumbnail is a picture of page 12 of a file, and which sheet number that page
+is called is the office's decision, correctable on a re-read, while the
+picture does not change. Re-reading overwrites rather than orphans
+(`addRandomSuffix: false`, `allowOverwrite: true`).
+
+**THE SHEET ROW IS THE PERMISSION.** A derived pathname means nothing stops a
+caller asking for any document and page, so `/api/jobs/sheet-thumbs/[doc]/[page]`
+reads a `job_sheets` row for that pair through RLS, carrying the caller's
+role, before it streams. No sheet, no picture, same 404 either way. The upload
+door is **a deliberate sibling** of Documents' rather than a parameterised
+version of it — that route's own note says why: one door answering to two
+module gates has cross-module escalation as its failure mode.
+
+**A SET READ BEFORE THIS HAS NO PICTURES, AND NOTHING RE-READS ITSELF.**
+`Read again` then `Save` is the whole fix and it changes nothing else.
+Re-reading a forty-page set is the browser's work and doing it unasked on
+every page load would be rude. The card falls back to exactly what it showed
+before, which is why the empty state needed no design.
+
+### The order is the business's, and the standard is what it was
+
+`DISCIPLINE_ORDER` is the **US National CAD Standard's**, and the standard
+genuinely puts **S before A**. He is not wrong and neither is it — a builder
+of custom homes reads architectural first; a bridge engineer does not. So it
+is config (`config.disciplineOrder`, owner-only, `setDisciplineOrderAction`
+mirroring `setJobTabsAction` down to the `withSystem` justification), and a
+pack that shipped one builder's reading order would be the pack knowing its
+client.
+
+**WHAT IS SAVED IS THE WHOLE VISIBLE ORDER**, not the heading that moved: a
+list of one would leave everything else to the standard, and the next job
+carrying a discipline this one has not got would read in an order nobody
+chose. **Anything never named keeps its place in the standard's own order,
+after everything named**, so putting architectural first does not shuffle the
+rest. It sorts the SHEETS too, not just the headings — `listSheets` takes the
+order — or the grid and the superseded list would disagree.
+
+### Two things found by driving it
+
+- **The grip was hover-only, which is invisible on a phone.** It copied the
+  estimate grid's fade-in, and on the screen a builder actually stands in
+  front of there is no hover — the only way to reorder anything could not be
+  seen. It is always visible now.
+- **A card with no picture and a card with one have to be the same height.**
+  They are (`h-full` on the link, the grid stretching the row), which is why
+  a part-re-read set reads as a grid rather than a ragged wall. Measured, not
+  assumed: all four cards in the mixed row came back 194px.
+
+### Driven end to end, on dev
+
+24-109's seeded set: cards with no pictures fell back cleanly, `Read again` +
+`Save` on the permit set put pictures on its three sheets while the ASI 1
+sheets stayed pictureless, and dragging ARCHITECTURAL above STRUCTURAL
+reordered the page, saved, and survived a reload —
+`Architectural · 3 / Structural · 1 / Electrical · 1`. The same at 375px, one
+column, no horizontal overflow. **No migration, no seed.**
+
 ### 2026-09-21 — A phase the standards covered is still a phase (`claude/a-phase-the-standards-covered`, X13a)
 
 **Found by walking a whole bid**, which nobody had done since X1. X13 shipped
@@ -2333,6 +2404,17 @@ ordering only bites when two new tables reference each other in one file.
   sides, the revision cloud as `cloudPath`, a pin's punch item through the
   field slice's own `addPunchItem`, and the viewer's SVG over the canvas in
   the page's own units.
+- `src/packs/jobs/components/current-set.tsx` + `discipline-settings.ts` +
+  `src/lib/blob-paths.ts` + `src/app/api/jobs/sheet-thumbs/**` — **the sheet
+  cards, with pictures, in the business's order.** The picture is stored at a
+  pathname DERIVED from `(tenant, document, page)` — no column, no migration —
+  and the streaming route reads the `job_sheets` row for that pair through
+  RLS before it serves anything. `blob-paths.ts` exists because `blob.ts` is
+  `server-only` and the browser builds the pathname before it asks for a
+  presigned URL; `blob.ts` re-exports it so every prefix is still in one
+  place. The order lives in `config.disciplineOrder`, owner-only, read by
+  `disciplineOrderFrom` and threaded through `listSheets` so the sheets sort
+  by it too.
 - `src/packs/jobs/components/page-loupe.tsx` — **one page, big enough to read
   the title block off**. Drawn from the PDF at up to 8×, `Title block` going
   to the bottom-right corner at 4×, and the `Sheet`/`Title`/`Rev` boxes in it

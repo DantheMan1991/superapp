@@ -1267,7 +1267,17 @@ One sentence: *38 sheets in the current set from 3 issues; newest ASI 3, dated 2
 
 The sentence again at the top and {button:Add a set|primary}. Then three panels.
 
-**Current set** — a card per sheet, grouped by discipline in the order an index page lists them (general, civil, landscape, structural, architectural, interiors, … electrical, and *Other* for a number with no letter the convention knows). Each card: the sheet number, its title, the set it comes from and that set's date, `rev 2` when the sheet carries a revision mark, and `3 issues` when the number has been reissued. Click a card to open the sheet.
+**Current set** — a card per sheet, grouped by discipline. Each card: **a picture of the sheet**, the sheet number, its title, the set it comes from and that set's date, `rev 2` when the sheet carries a revision mark, and `3 issues` when the number has been reissued. Click a card to open the sheet.
+
+**The picture is made when the set is read**, so a set read before this existed shows cards with no picture on them. Open the set with the pencil, press {button:Read again|ghost} on the file and {button:Save 38 sheets|primary} — nothing else changes, and the pictures are there. Nothing is re-read on its own: reading a 40-page set is your browser's work, and doing it behind your back every time you opened this page would be rude.
+
+#### Putting the disciplines in your own order
+
+The order out of the box is the **US National CAD Standard's** — general, hazardous materials, survey, geotechnical, civil, landscape, **structural, architectural**, interiors, … electrical, with *Other* last for a number carrying no letter the convention knows. That really does put structural before architectural, which is right for some businesses and wrong for others.
+
+**Drag a heading by the {icon:grip-vertical} beside it** and the order is yours: it saves as you drop and applies to **every {{project|lower}}**, not just this one. A discipline you never move keeps its place in the standard's order, after the ones you did — so putting architectural first does not shuffle everything else into a new arrangement you did not ask for.
+
+**Owners only.** It changes what everybody on the team sees on every job, so it sits at the same level as choosing which tabs a {{project|lower}} has.
 
 **Sets** — newest issue first:
 

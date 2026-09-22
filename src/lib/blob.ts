@@ -1,5 +1,15 @@
 import "server-only";
 
+import { sheetThumbPathPrefix } from "./blob-paths";
+
+/**
+ * **A PICTURE OF ONE PAGE OF A DRAWING SET** (jobs, ADR 0072). Named in
+ * `blob-paths.ts` because the browser builds the pathname before it asks for
+ * a presigned URL, and re-exported here so every prefix is still reachable
+ * from one place.
+ */
+export { sheetThumbPath, sheetThumbPathPrefix } from "./blob-paths";
+
 /**
  * Vercel Blob plumbing. The @vercel/blob SDK reads BLOB_READ_WRITE_TOKEN
  * from the environment itself; this guard exists so features fail with a
@@ -99,6 +109,7 @@ export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
     pathname.startsWith(dmsPathPrefix(tenantId, "signed")) ||
     pathname.startsWith(brandPathPrefix(tenantId)) ||
     pathname.startsWith(sitePhotoPathPrefix(tenantId)) ||
-    pathname.startsWith(feedbackPathPrefix(tenantId))
+    pathname.startsWith(feedbackPathPrefix(tenantId)) ||
+    pathname.startsWith(sheetThumbPathPrefix(tenantId))
   );
 }

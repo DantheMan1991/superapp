@@ -1,0 +1,2 @@
+ALTER TABLE "job_measurements" DROP CONSTRAINT "job_measurements_source_valid";--> statement-breakpoint
+ALTER TABLE "job_measurements" ADD CONSTRAINT "job_measurements_source_valid" CHECK ("job_measurements"."source" in ('measured', 'said', 'derived', 'schedule'));

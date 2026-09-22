@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { JobEstimateOutlineMeasure, JobMeasurement } from "@/db/schema";
+import type { JobEstimateOutlineMeasure, JobMeasurement, MeasurementSource } from "@/db/schema";
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import {
   measureSlug,
@@ -237,7 +237,7 @@ export interface MeasurementInput {
   name: string;
   unit: string;
   valueThousandths: number;
-  source?: "measured" | "said" | "derived";
+  source?: MeasurementSource;
   note?: string;
   sheetId?: string | null;
   markupId?: string | null;

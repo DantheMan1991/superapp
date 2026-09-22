@@ -97,10 +97,74 @@ underneath you is worse than one that is out of date where you can see it.
 If the job has no drawings, the picker says so. Type the number instead;
 nothing about the walk depends on there being a PDF.
 
+### Reading it off the model
+
+If the building is drawn in Revit — or any modelling tool that exports a
+schedule — the numbers are already in the model. {button:From the model|outline}
+sits beside the drawings button whenever the walk is asking for a
+measurement, again beside the room list, and after the measure-up as a small
+button in the side panel under the building's numbers, so a re-drawn model or
+a figure typed wrong is one file away from right.
+
+**Getting the file out of Revit.** Open the schedule that holds the number —
+the roof schedule, the wall schedule, the room schedule — then **File → Export
+→ Reports → Schedule**. Keep *Export title* and *Export column headers* ticked;
+the delimiter and the text qualifier can stay as they are, and *Export group
+headers, footers, and blank lines* does no harm. Revit writes a `.txt` file.
+**Filter the schedule first** if you want a subset — exterior walls only, say
+— because the walk adds up every row it is given.
+
+**In the dialog.** Press {button:Choose the file|outline} and pick the export,
+or paste the text into the box and press {button:Read it|primary}. It reads
+the file and shows:
+
+- **The schedule's name and how many rows it holds**, with any total rows
+  left out. Revit's *Grand total* line and the footer under each group are
+  never counted twice.
+- **Add the rooms**, when the schedule is a room list: how many, on how many
+  floors, how many with an area, and the list itself grouped by floor with
+  each area beside it. A room marked *Not Placed* or *Redundant* in the model
+  is left out and named under *rows not taken*. A room already on the job is
+  greyed with *already there* — its area is updated, nothing is doubled.
+  Untick the box to bring in the numbers only.
+- **The building's numbers** — one line per column of figures: the column's
+  name, its total (*across 12 rows*), and a drop-down of the measurements on
+  your outline's [Measure first](estimate-outlines.md#measure-first) list that
+  it could answer. Where the words agree — an *Area* column in a *Roof
+  Schedule* against *Roof area* — the choice is already made for you; check
+  it. Where they do not, pick one, or leave it on *— leave it*. A measurement
+  the building already has shows its current figure in the list, and picking
+  it replaces that figure. A column whose every row carries the same figure —
+  a wall height — offers *the same on every row* as well as the total. The
+  **Rows** line offers the number of rows, for a measurement that is a count.
+
+A length column is never offered for an area measurement, nor the other way
+round, and a column with no unit in the file says *no unit in the file*. If a
+column fits nothing on your list it says so in italics. If your outline has no
+Measure first list at all, the dialog says that too, and the rooms still come
+in.
+
+Press {button:Bring it in|primary}. The rooms and the figures land on the
+job, each marked as read off the model — a small table icon beside the
+number in the side panel, where a traced figure shows a ruler — and the walk
+carries on from wherever it stood: it asks for the next number the file did
+not hold, or moves to the rooms, or opens the first phase. A message names
+what came in: `Wall perimeter 128 lf · Wall height 9 lf · 11 rooms added`.
+Anything it could not write is named in a second message with the reason —
+*Roof area wants an area and Length holds a length* — so nothing goes
+quietly missing.
+
+**Units.** Feet and inches with fractions (`63' - 4 1/2"`), `SF`, `ft²`,
+`m²`, millimetres, cubic feet and cubic yards all read. A metric schedule
+against an imperial list is converted; a room's area stays in the unit the
+schedule gave it.
+
 ## Then it asks what rooms are in it
 
 The last thing before the questions start. **Paste the list** — one room a
-line — or press {button:Skip the rooms|ghost} if you would rather not.
+line — press {button:From the model|outline} to read the room schedule out of
+the model (see [Reading it off the model](#reading-it-off-the-model)), or
+press {button:Skip the rooms|ghost} if you would rather not.
 
 This is what lets the questions be specific. Without rooms the walk asks
 *"how much flooring?"*; with them it asks what is going where, and the

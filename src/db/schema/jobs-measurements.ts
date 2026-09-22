@@ -58,8 +58,12 @@ import { jobRooms } from "./jobs-rooms";
  * - `derived` — worked out from other measurements, with the working in
  *   `note`. Nothing writes this yet; the column allows it so the walk can
  *   start showing its arithmetic without a migration.
+ * - `schedule` — read off a schedule exported from the model (X14, ADR 0106):
+ *   the founder draws in Revit, and the roof area is in the model before
+ *   anybody opens a PDF. `note` names the schedule, the column and how many
+ *   rows the figure came from, which is the whole provenance there is.
  */
-export const MEASUREMENT_SOURCES = ["measured", "said", "derived"] as const;
+export const MEASUREMENT_SOURCES = ["measured", "said", "derived", "schedule"] as const;
 export type MeasurementSource = (typeof MEASUREMENT_SOURCES)[number];
 
 /**
@@ -169,7 +173,7 @@ export const jobMeasurements = pgTable(
     check("job_measurements_slug_present", sql`length(btrim(${t.slug})) > 0`),
     check(
       "job_measurements_source_valid",
-      sql`${t.source} in ('measured', 'said', 'derived')`,
+      sql`${t.source} in ('measured', 'said', 'derived', 'schedule')`,
     ),
     /** A number or a pass. A row that is neither is a question nobody answered. */
     check(

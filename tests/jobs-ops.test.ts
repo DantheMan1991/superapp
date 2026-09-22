@@ -5062,13 +5062,14 @@ d("jobs ops", () => {
     ]);
 
     // An estimate to push onto, and the pushes.
-    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TK1", lines: [{ description: "Baseboard", unit: "lf", unitCostCents: 3_00 }] }));
+    const est = await run((tx) => createEstimate(tx, staffCtx, { projectId: project.id, number: "EST-TK1", lines: [{ description: "Baseboard", unit: "lf", unitCostCents: 3_00 }, { description: "Tile", unit: "sq. ft.", unitCostCents: 4_20 }] }));
     const baseboard = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines[0];
     const pushed = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], newLine: { description: "Flooring, kitchen" } }));
     expect([pushed.kind, pushed.unit, pushed.quantityThousandths, pushed.measurement.unit]).toEqual(["area", "sf", 93_500, "sq ft"]);
     let lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
     expect(lines.map((l) => [l.description, l.unit, l.quantityThousandths, l.notes])).toEqual([
       ["Baseboard", "lf", 1000, ""],
+      ["Tile", "sq. ft.", 1000, ""],
       ["Flooring, kitchen", "sf", 93_500, "From the takeoff."],
     ]);
     // Onto the existing baseboard line: the quantity becomes the length, the line's own unit kept.
@@ -5084,6 +5085,16 @@ d("jobs ops", () => {
     const hall = await draw({ sheetId: sheet.id, kind: "area", geometry: { points: [{ x: 0.6, y: 0.25 }, { x: 0.7, y: 0.25 }, { x: 0.7, y: 0.5 }, { x: 0.6, y: 0.5 }] }, text: "Hall" });
     const both = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id, hall.id], lineId: pushed.lineId }));
     expect(both.quantityThousandths).toBe(93_500 + 37_400);
+    // Each remembers ITS OWN quantity, never the line's total — or both would read as drifted the moment they were pushed together.
+    rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
+    expect(
+      [room.id, hall.id]
+        .map((id) => rows.find((r) => r.markup.id === id)!)
+        .map((r) => [r.markup.pushedQuantityThousandths, r.takeoff?.lineId ?? null, r.takeoff?.lineQuantityThousandths ?? null]),
+    ).toEqual([
+      [93_500, pushed.lineId, 130_900],
+      [37_400, pushed.lineId, 130_900],
+    ]);
     await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id, walls.id], lineId: pushed.lineId }))).rejects.toMatchObject({ code: "INVALID_VALUE", message: expect.stringContaining("cannot go onto one line together") });
     const cans = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [count.id], newLine: { description: "Recessed cans", unit: "" } }));
     expect([cans.unit, cans.quantityThousandths]).toEqual(["ea", 3_000]);
@@ -5092,6 +5103,16 @@ d("jobs ops", () => {
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
     expect(rows.find((r) => r.markup.id === hall.id)!.takeoff).toBeNull();
     expect(rows.find((r) => r.markup.id === room.id)!.takeoff?.lineQuantityThousandths).toBe(93_500);
+    // The line's unit is the measurement's or nothing: an area onto the baseboard (lf) refuses by name, a length onto the tile (sq. ft.) refuses,
+    // a new line asked for in the wrong unit refuses; an area onto the tile is taken however the unit is spelled, and the spelling is kept.
+    const tile = lines.find((l) => l.description === "Tile")!;
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [room.id], lineId: baseboard.id }))).rejects.toMatchObject({ code: "UNIT_MISMATCH", message: expect.stringContaining("Baseboard is priced per lf and this measures 93.5 sq ft") });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [walls.id], lineId: tile.id }))).rejects.toMatchObject({ code: "UNIT_MISMATCH", message: expect.stringContaining("Tile is priced per sq. ft.") });
+    await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [count.id], newLine: { description: "Cans", unit: "sf" } }))).rejects.toMatchObject({ code: "UNIT_MISMATCH" });
+    const onTile = await run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [hall.id], lineId: tile.id }));
+    expect([onTile.quantityThousandths, onTile.unit]).toEqual([37_400, "sf"]);
+    lines = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.lines;
+    expect(lines.find((l) => l.id === tile.id)).toMatchObject({ unit: "sq. ft.", quantityThousandths: 37_400 });
     // Refusals: a cloud has no quantity; another job's estimate; a line not on the estimate; nothing picked; no line said.
     const cloud = await draw({ sheetId: sheet.id, kind: "cloud", geometry: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
     await expect(run((tx) => pushTakeoff(tx, staffCtx, { estimateId: est.id, markupIds: [cloud.id], newLine: { description: "x" } }))).rejects.toMatchObject({ code: "INVALID_KIND" });

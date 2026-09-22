@@ -99,6 +99,7 @@ export class JobsError extends Error {
       | "INVALID_ROLE"
       | "INVALID_BILLING_METHOD"
       | "INVALID_VALUE"
+      | "UNIT_MISMATCH"
       | "NO_LINES"
       | "INVALID_DELIVERY_METHOD"
       | "NUMBER_TAKEN"

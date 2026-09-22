@@ -5,9 +5,11 @@ import {
   POINTS_PER_INCH,
   POINTS_PER_METRE,
   STANDARD_SCALES,
+  driftedSince,
   formatMeasure,
   matchingStandard,
   measure,
+  normaliseUnit,
   pathPoints,
   polygonPoints,
   scaleFromKnownLength,
@@ -16,6 +18,7 @@ import {
   sumMeasurements,
   takeoffUnitFor,
   toThousandths,
+  unitAccepts,
   type SheetScale,
 } from "../src/packs/jobs/takeoff-math";
 import { MARKUP_KINDS, MEASURE_KINDS, MEASURE_POINTS_MAX, SCALE_UNITS, isMeasureKind, isScaleUnit } from "../src/packs/jobs/vocabulary";
@@ -192,5 +195,38 @@ describe("the takeoff", () => {
         { kind: "length", measurement: { quantity: 1, unit: "m" } },
       ]),
     ).toThrow("different units");
+  });
+
+  it("takes a line whose unit is the measurement's however it is spelled, and refuses another unit by name rather than converting it", () => {
+    expect(["sf", "SF", "sq ft", "sq. ft.", "Square feet", "sqft"].map(normaliseUnit)).toEqual(["sf", "sf", "sf", "sf", "sf", "sf"]);
+    expect(["lf", "lin. ft.", "ft", "linear feet"].map(normaliseUnit)).toEqual(["lf", "lf", "lf", "lf"]);
+    expect(["ea", "Each", "m", "m²", "sq m", "sy", "cy", "ls", " "].map(normaliseUnit)).toEqual(["ea", "ea", "m", "m2", "m2", "sy", "cy", "ls", ""]);
+    expect(unitAccepts("", "sf")).toBe(true);
+    expect(unitAccepts("  ", "lf")).toBe(true);
+    expect(unitAccepts("sq. ft.", "sf")).toBe(true);
+    expect(unitAccepts("Each", "ea")).toBe(true);
+    expect(unitAccepts("lf", "sf")).toBe(false);
+    expect(unitAccepts("ft", "sf")).toBe(false);
+    /** The same family is still refused: `sq` is a roofing square to one business and a square yard to the next, and a conversion that guessed would be the same wrong number. */
+    expect(unitAccepts("sy", "sf")).toBe(false);
+    expect(unitAccepts("sq", "sf")).toBe(false);
+    expect(unitAccepts("m2", "sf")).toBe(false);
+    expect(unitAccepts("ls", "ea")).toBe(false);
+  });
+
+  it("says a measurement has drifted from what IT pushed, never from the line's total", () => {
+    expect(driftedSince(93_500, { quantity: 93.5, unit: "sq ft" })).toBe(false);
+    expect(driftedSince(93_500, { quantity: 93.504, unit: "sq ft" })).toBe(false);
+    expect(driftedSince(93_500, { quantity: 94.1, unit: "sq ft" })).toBe(true);
+    /** The bug this guards: every measurement in a push stored the line's TOTAL, so its own 59 sq ft read as drifted from 111 the moment after. */
+    expect(driftedSince(111_198, { quantity: 59.026, unit: "sq ft" })).toBe(true);
+    expect(driftedSince(59_026, { quantity: 59.026, unit: "sq ft" })).toBe(false);
+    expect(driftedSince(null, { quantity: 59, unit: "sq ft" })).toBe(false);
+    expect(driftedSince(59_000, null)).toBe(false);
+    /** Five thousandths of slack under one unit, half a percent above it. */
+    expect(driftedSince(500, { quantity: 0.504, unit: "ft" })).toBe(false);
+    expect(driftedSince(500, { quantity: 0.506, unit: "ft" })).toBe(true);
+    expect(driftedSince(3_000, { quantity: 3.006, unit: "each" })).toBe(false);
+    expect(driftedSince(3_000, { quantity: 3.02, unit: "each" })).toBe(true);
   });
 });

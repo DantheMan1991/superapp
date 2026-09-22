@@ -196,6 +196,76 @@ and length, so a thing may now be named by two columns.
 Tests: the pure default and the split (`jobs-bim-takeoff`), and the preview
 and import told *nothing* (`jobs-bim-takeoff-ops`).
 
+### 2026-09-22 — A phase the estimate already has (`claude/a-phase-the-estimate-already-has`, X17, [ADR 0108](../decisions/0108-a-phase-the-estimate-already-has-is-stated-at-the-gate-and-ends-in-the-money-it-has.md))
+
+The walk's side of the takeoff. X15 puts drywall, framing and roofing on the
+estimate before the walk starts, and the walk could not see any of it: it
+opened the drywall phase, asked who was doing it, proposed drywall lines,
+and the estimate carried the drywall twice. The same for an item typed by
+hand and for a previous walk's lines on the same estimate.
+
+**What is a phase's** — `walk-coverage.ts`, pure, 9 tests: a line on the
+phase's cost code (`normalizedCode`, so `09 25 00` and `092500` agree) or in
+the item named after the assembly the phase is pinned to (X11). Never the
+words. `coverageOf` / `coveredPhases` / `coverageLines` (*Drywall — $6,952.50
+in 2 lines, off the model*) / `coverageReason` / `questionsToSettle` (every
+outstanding question but a must-ask). `walk-coverage-ops.ts` reads the lines
+this walk did not write — the proposed rows that remember the walk's own
+(X9) are the exclusion — with the code number on this job's set and the
+item's name, plus the library's names by id.
+
+**Where it lands** — `LoadedWalk` carries `onEstimate` and `assemblyNames`
+(two more reads in the same `Promise.all`). The gate (X13) gained a second
+section: *"And these phases are already on the estimate, so I will move
+past them"*, and is shown when there are standards OR covered phases; the
+same two buttons stamp `usual_accepted` for both. `oneTurn`'s gather settles
+a covered phase's questions right after the standards (`settleCovered`, off
+the answers as they stand after the standards, so nothing is answered
+twice), with the reason on each. `openPhase` asks `alreadyPriced` before
+`priceTheStep`, whether the gate agreed or not — a refusal means *ask me*,
+never *price the drywall twice* — and moves on through the same
+`applyAndMoveOn`. `StepFacts` gained the on-estimate figures (optional) and
+`reckonStep` reads a covered phase as priced at what the estimate carries —
+*2 lines already on the estimate, off the model* — or as a hole when every
+one of those lines is unpriced. `reckoningFor` reads the same facts.
+
+**No migration.** `usual_accepted` means what it always did.
+
+Tests: the pure rules (`jobs-walk-coverage`), and against the database
+(`jobs-walk-ops`): an item named after the pinned assembly with a line off
+the model is seen, is not settled until the gate agreed, settles the one
+question that is not a must-ask with *already on the estimate — $5,562.00 in
+1 line, off the model*, settles nothing a second time, and reckons as priced
+at $5,562.00.
+
+**Two more doors X13a missed, found by driving this.** `goToStepAction` (the
+rail's *Work on this*) and `askAgainAction` opened a phase with a bare
+`oneTurn`, not `openPhase`. A phase the standards cover is finished the
+moment it opens, so jumping to one from the rail left the walk standing at
+the next phase with *It has not asked anything yet* and nothing priced —
+X13a's bug on two doors nobody had used on such a phase, because until the
+takeoff there was no reason to jump to a covered phase. Both now call
+`openPhase`, so a jump or an *Ask again* on a covered phase prices it (or
+moves past it when the estimate already has it) and asks the next question,
+exactly as every other door does.
+
+### Driven
+
+On the dev branch, a fresh estimate (24-111 EST-2) with the drywall takeoff
+brought in off the model first, the Drywall step pinned to the *Drywall, hang
+and finish* assembly, then the walk:
+
+| | |
+| --- | --- |
+| The measure-up | skipped — the building measured and 7 rooms on the job already; one tap on *Carry on* |
+| The gate | the usual's nine standards, then **"And these phases are already on the estimate, so I will move past them: - Drywall — $6,952.50 in 2 lines, off the model"**; the rail already read *1 priced · $6,952.50 of cost on the estimate* with Drywall out of the unfinished list |
+| That's right | Rough carpentry asked its always-ask question; the Drywall card on the rail read *priced · 2 lines already on the estimate, off the model · $6,952.50 of cost* |
+| Work on this (Drywall) | the standard settled its one question, the phase finished, nothing was proposed — **and the walk stood at the next phase with nothing asked**: the bare-turn door above |
+| Ask again, after the fix | Drywall re-opened, its standard re-settled, the estimate already had it, and the walk moved on to Painting and priced THAT: *Paint walls and ceilings — Kitchen, Great room, … — what are you getting for that?*; Drywall untouched, still one priced phase at $6,952.50 |
+
+Nothing was priced twice at any point, with the gate agreed or the phase
+re-opened.
+
 ### 2026-09-21 — The takeoff off the model (`claude/the-schedule-off-the-model`, X15, [ADR 0107](../decisions/0107-a-takeoff-off-the-model-is-a-join-through-the-assembly-keyed-by-what-the-model-calls-it.md))
 
 The founder, an hour after X14 shipped: *"I'm really looking for way more

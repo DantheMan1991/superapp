@@ -21,6 +21,13 @@ import {
 import { JobsError, requireWrite, type JobsCtx } from "./ops";
 import { phaseOnScreen, type PendingPrice } from "./walk-price-math";
 import { standardsOutstanding } from "./usual-math";
+import {
+  coverageReason,
+  questionsToSettle,
+  type EstimateLineFacts,
+  type PhaseCoverage,
+} from "./walk-coverage";
+import { assemblyNamesOf, onEstimateOf } from "./walk-coverage-ops";
 import { asDeclared, asTaken, listMeasurements, listOutlineMeasures } from "./measure-ops";
 import { formatMeasurement, measureSlug } from "./measure-math";
 import { asRoomViews, listRooms, type RoomRow, type RoomView } from "./room-ops";
@@ -72,6 +79,15 @@ export interface LoadedWalk {
    * derived, because the derived step has already left that phase.
    */
   pricing: PendingPrice | null;
+  /**
+   * Lines on the estimate this walk did not write — the takeoff off the
+   * model, an item typed by hand, a previous walk — for the phases they
+   * cover (X17). Read with the walk so the gate, the settling and the
+   * pricing loop cannot disagree about what the estimate already has.
+   */
+  onEstimate: EstimateLineFacts[];
+  /** The library's names by id, for a phase pinned to an assembly (X11). */
+  assemblyNames: Map<string, string>;
 }
 
 /**
@@ -214,7 +230,7 @@ export async function loadWalk(
    * already here — a turn is two and a half seconds of model, and the
    * founder has already had to complain about this screen's speed once.
    */
-  const [outline, answers, project, declared, pricing] = await Promise.all([
+  const [outline, answers, project, declared, pricing, onEstimate, assemblyNames] = await Promise.all([
     stepsOfOutline(tx, tenantId, interview.outlineId),
     answersOf(tx, tenantId, interview.id),
     tx
@@ -230,6 +246,9 @@ export async function loadWalk(
     listOutlineMeasures(tx, tenantId, interview.outlineId),
     /** A price question's own phase, and nothing at all when there is none. */
     readPendingPrice(tx, tenantId, interview),
+    /** What the estimate already has that is not this walk's (X17). */
+    onEstimateOf(tx, tenantId, interview.id, interview.estimateId),
+    assemblyNamesOf(tx, tenantId),
   ]);
   const projectId = project[0]?.projectId ?? "";
   const [measurements, rooms] = projectId
@@ -266,6 +285,8 @@ export async function loadWalk(
     measurements,
     rooms,
     pricing,
+    onEstimate,
+    assemblyNames,
   };
 }
 
@@ -608,6 +629,44 @@ export async function settleStandards(
      * but the flag means *"this is not the walk's own judgement"*, and that
      * is exactly what a standard is not.
      */
+    { byPerson: true, steps: [step] },
+  );
+}
+
+/**
+ * **SETTLE A PHASE THE ESTIMATE ALREADY HAS** (X17), once the gate agreed:
+ * every outstanding question but a must-ask, skipped with the reason on it —
+ * *already on the estimate — $6,952.50 in 2 lines, off the model* — so the
+ * transcript says why nobody was asked. Idempotent like the standards: it
+ * reads what is still outstanding.
+ */
+export async function settleCovered(
+  tx: Tx,
+  ctx: JobsCtx,
+  interviewId: string,
+  step: WalkStep,
+  answers: readonly WalkAnswer[],
+  accepted: boolean | null,
+  coverage: PhaseCoverage | null,
+  symbol: string | null,
+): Promise<number> {
+  if (accepted !== true || !coverage) return 0;
+  const questions = questionsToSettle(step, answers);
+  if (questions.length === 0) return 0;
+  const reason = coverageReason(coverage, symbol);
+  return recordAnswers(
+    tx,
+    ctx,
+    interviewId,
+    questions.map((q) => ({
+      questionId: q.id,
+      stepId: step.id,
+      stepTitle: step.title,
+      prompt: q.prompt,
+      skipped: true,
+      skipReason: reason,
+    })),
+    /** By person: somebody agreed at the gate that these phases are done. */
     { byPerson: true, steps: [step] },
   );
 }
@@ -974,6 +1033,9 @@ export function walkViewFrom(
     measurements: [...building.measurements],
     rooms: [...building.rooms],
     pricing,
+    /** The view does not read these; the gate, the settling and the reckoning do (X17). */
+    onEstimate: [],
+    assemblyNames: new Map(),
   };
   return viewOf(walk);
 }

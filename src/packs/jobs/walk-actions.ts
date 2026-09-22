@@ -35,6 +35,7 @@ import {
   walkView,
   walkViewFrom,
   type WalkView,
+  settleCovered,
 } from "./walk-ops";
 import { outlineCanCarry, outlineTurn } from "./walk-fallback";
 import { priceQuestionFor, readPriceReply } from "./walk-price-math";
@@ -82,6 +83,7 @@ import {
   usualLines,
   usualSize,
 } from "./usual-math";
+import { coverageLines, coverageOf, coveredPhases } from "./walk-coverage";
 import { PACK } from "./vocabulary";
 
 /**
@@ -107,6 +109,8 @@ interface WalkCtx extends JobsCtx {
   /** Carried from the gate so nothing has to call `requireTenant` again
    *  inside an open transaction. Blank when the tenant has no profile. */
   industry: string;
+  /** The tenant's currency symbol, for money the walk says out loud (X17). */
+  symbol: string | null;
 }
 
 async function gate(): Promise<WalkCtx> {
@@ -117,6 +121,7 @@ async function gate(): Promise<WalkCtx> {
     userId: tenant.userId,
     role: tenant.role,
     industry: tenant.tenant.industry ?? "",
+    symbol: tenant.tenant.currencySymbol ?? null,
   };
 }
 
@@ -324,7 +329,29 @@ async function oneTurn(
               walk.interview.usualAccepted,
             )
           : 0;
-        const after = settled > 0 ? await getWalk(tx, ctx.tenantId, interviewId) : walk;
+        let after = settled > 0 ? await getWalk(tx, ctx.tenantId, interviewId) : walk;
+
+        /**
+         * **AND A PHASE THE ESTIMATE ALREADY HAS IS SETTLED THE SAME WAY**
+         * (X17): its questions skipped with the reason on them, once the
+         * gate agreed, every one but a must-ask. Read off the answers as
+         * they stand AFTER the standards, so nothing is answered twice.
+         */
+        const coverage = walk.step ? coverageOf(walk.step, walk.onEstimate, walk.assemblyNames) : null;
+        const settledCovered =
+          walk.step && coverage && after
+            ? await settleCovered(
+                tx,
+                ctx,
+                interviewId,
+                walk.step,
+                asWalkAnswers(after.answers),
+                walk.interview.usualAccepted,
+                coverage,
+                ctx.symbol,
+              )
+            : 0;
+        if (settledCovered > 0) after = await getWalk(tx, ctx.tenantId, interviewId);
 
         /**
          * **AND A PHASE THE STANDARDS JUST FINISHED STILL ENDS IN MONEY.**
@@ -346,7 +373,7 @@ async function oneTurn(
          * that needed no conversation.
          */
         const coveredByStandards =
-          settled > 0 && walk.step && after
+          settled + settledCovered > 0 && walk.step && after
             ? outstanding(walk.step, asWalkAnswers(after.answers)).length === 0
             : false;
 
@@ -780,6 +807,8 @@ async function usualContext(ctx: WalkCtx, interviewId: string) {
       const walk = await getWalk(tx, ctx.tenantId, interviewId);
       if (!walk) return null;
       const standards = standardsIn(walk.steps);
+      /** The phases the estimate already has, stated at the same gate (X17). */
+      const covered = coveredPhases(walk.steps, walk.onEstimate, walk.assemblyNames);
       return {
         askedAt: walk.interview.usualAskedAt,
         accepted: walk.interview.usualAccepted,
@@ -787,6 +816,8 @@ async function usualContext(ctx: WalkCtx, interviewId: string) {
         standards,
         lines: usualLines(groupStandards(standards), walk.steps.length),
         size: usualSize(standards),
+        covered,
+        coverLines: coverageLines(covered, ctx.symbol),
       };
     },
     { role: ctx.role },
@@ -810,27 +841,46 @@ async function askForTheUsual(ctx: WalkCtx, interviewId: string): Promise<boolea
    * than skipped, so a standard added to the outline next week does not put
    * the question in front of a walk that is already half way down the house.
    */
-  if (where.standards.length === 0) {
+  if (where.standards.length === 0 && where.covered.length === 0) {
     await withTenant(ctx.tenantId, (tx) => recordUsual(tx, ctx, interviewId, false), {
       role: ctx.role,
     });
     return false;
   }
 
+  /**
+   * One gate for both: what the outline answers for itself (X13), and what
+   * the estimate already has (X17). Both are things the walk will take as
+   * read, and a second confirmation for the second kind would be a second
+   * tap for the same question.
+   */
   const { questions, steps } = where.size;
+  const say: string[] = [];
+  if (where.standards.length > 0) {
+    say.push(
+      `Before we start, here is what I will take as read — ${questions} ${
+        questions === 1 ? "question" : "questions"
+      } across ${steps} ${steps === 1 ? "phase" : "phases"}:`,
+      "",
+      ...where.lines,
+    );
+  }
+  if (where.covered.length > 0) {
+    if (say.length > 0) say.push("");
+    say.push(
+      say.length > 0
+        ? "And these phases are already on the estimate, so I will move past them:"
+        : "Before we start — these phases are already on the estimate, so I will move past them:",
+      "",
+      ...where.coverLines,
+    );
+  }
+  say.push("", "Right for this one? Anything you say no to, I will ask you about as we go.");
   await withTenant(
     ctx.tenantId,
     (tx) =>
       askTheUsual(tx, ctx, interviewId, {
-        say: [
-          `Before we start, here is what I will take as read — ${questions} ${
-            questions === 1 ? "question" : "questions"
-          } across ${steps} ${steps === 1 ? "phase" : "phases"}:`,
-          "",
-          ...where.lines,
-          "",
-          "Right for this one? Anything you say no to, I will ask you about as we go.",
-        ].join("\n"),
+        say: say.join("\n"),
         questionId: null,
         quickReplies: ["That's right", "Ask me everything"],
       }),
@@ -1473,12 +1523,39 @@ const PHASES_AT_MOST = 60;
  * needs to ASK returns straight away, so the loop only ever runs on phases
  * the pack could price by itself.
  */
+/**
+ * Whether the estimate already has this phase — lines this walk did not
+ * write, on the phase's code or in the item its assembly makes (X17).
+ * Read fresh, because it is asked about a phase that has just finished and
+ * the estimate may have moved since the walk was loaded.
+ */
+async function alreadyPriced(ctx: WalkCtx, interviewId: string, step: WalkStep): Promise<boolean> {
+  return withTenant(
+    ctx.tenantId,
+    async (tx) => {
+      const walk = await getWalk(tx, ctx.tenantId, interviewId);
+      return walk ? coverageOf(step, walk.onEstimate, walk.assemblyNames) !== null : false;
+    },
+    { role: ctx.role },
+  );
+}
+
 async function openPhase(ctx: WalkCtx, interviewId: string) {
   let out = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
   for (let pass = 0; pass < PHASES_AT_MOST; pass += 1) {
     if (!out.ok || !out.stepFinished || !out.step) break;
     const step = out.step;
     try {
+      /**
+       * **A PHASE THE ESTIMATE ALREADY HAS ENDS IN THE MONEY IT HAS** (X17),
+       * whether the gate agreed or the questions were asked: a refusal at
+       * the gate means *ask me*, never *price the drywall twice*.
+       */
+      if (await alreadyPriced(ctx, interviewId, step)) {
+        await applyAndMoveOn(ctx, interviewId, step.id);
+        out = await oneTurn(ctx, interviewId, undefined, { ignoreCooldown: true });
+        continue;
+      }
       const pricing = await priceTheStep(ctx, interviewId, step);
       if (pricing) return { ...out, view: pricing };
       await applyAndMoveOn(ctx, interviewId, step.id);
@@ -1980,9 +2057,14 @@ export async function goToStepAction(input: unknown) {
       { role: ctx.role },
     );
     /** Nobody is hammering anything: this is one click, not a conversation. */
-    const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
-      ignoreCooldown: true,
-    });
+    /**
+     * **OPEN THE PHASE, NOT JUST A TURN** (X17). A phase the standards or the
+     * estimate already cover is finished the moment it opens, and a bare turn
+     * left the walk standing there with nothing asked and nothing priced —
+     * the fifth and sixth doors X13a did not find, because nobody had jumped
+     * to such a phase from the rail until the takeoff made one.
+     */
+    const out = await openPhase(ctx, parsed.data.interviewId);
     /**
      * **THE VIEW COMES BACK EVEN WHEN THE TURN DID NOT.** The screen keeps
      * whatever it has when this is empty, and on a walk just picked back up
@@ -2041,9 +2123,14 @@ export async function askAgainAction(input: unknown) {
       },
       { role: ctx.role },
     );
-    const out = await oneTurn(ctx, parsed.data.interviewId, undefined, {
-      ignoreCooldown: true,
-    });
+    /**
+     * **OPEN THE PHASE, NOT JUST A TURN** (X17). A phase the standards or the
+     * estimate already cover is finished the moment it opens, and a bare turn
+     * left the walk standing there with nothing asked and nothing priced —
+     * the fifth and sixth doors X13a did not find, because nobody had jumped
+     * to such a phase from the rail until the takeoff made one.
+     */
+    const out = await openPhase(ctx, parsed.data.interviewId);
     return {
       ok: true as const,
       view: out.view ?? (await freshView(ctx, parsed.data.interviewId)),

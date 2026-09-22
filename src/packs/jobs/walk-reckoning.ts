@@ -93,6 +93,19 @@ export interface StepFacts {
    */
   zeroLines: number;
   bid: StepBidFacts | null;
+  /**
+   * **LINES THE ESTIMATE ALREADY HAS FOR THIS PHASE THAT THE WALK DID NOT
+   * WRITE** (X17) — the takeoff off the model, an item typed by hand, a
+   * previous walk. On the phase's cost code or in the item its assembly
+   * makes. A phase with these is priced, and the walk knows not to price it
+   * again. Optional so a caller with none says nothing.
+   */
+  onEstimateLines?: number;
+  onEstimateCents?: number;
+  /** Of those, the ones nothing could price. */
+  onEstimateZero?: number;
+  /** "off the model", or blank. */
+  onEstimateFrom?: string;
 }
 
 export const NO_FACTS: StepFacts = {
@@ -257,6 +270,34 @@ export function reckonStep(
       standing: "priced",
       detail: "",
       amountCents: facts.appliedCents,
+      blocking: false,
+    };
+  }
+
+  /**
+   * **THE ESTIMATE ALREADY HAS IT** (X17). Lines that are really there, so
+   * they beat a bid and beat what anybody said — the same order as the
+   * walk's own lines above. All of them unpriced is a hole with a different
+   * cause; any of them priced is the phase, done.
+   */
+  const already = facts.onEstimateLines ?? 0;
+  if (already > 0) {
+    const zero = facts.onEstimateZero ?? 0;
+    const from = facts.onEstimateFrom ?? "";
+    if (zero === already) {
+      return {
+        ...base,
+        standing: "unpriced",
+        detail: `${already} ${already === 1 ? "line" : "lines"} on the estimate, no prices${from ? `, ${from}` : ""}`,
+        amountCents: facts.onEstimateCents ?? 0,
+        blocking: true,
+      };
+    }
+    return {
+      ...base,
+      standing: "priced",
+      detail: `${already} ${already === 1 ? "line" : "lines"} already on the estimate${from ? `, ${from}` : ""}`,
+      amountCents: facts.onEstimateCents ?? 0,
       blocking: false,
     };
   }

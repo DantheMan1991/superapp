@@ -30,20 +30,64 @@ export function disciplineLabel(key: string): string {
   return DISCIPLINE_LABELS[key] ?? OTHER_DISCIPLINE;
 }
 
-/** Disciplines in the order the set is read: the convention's, then Other. */
-export function compareDisciplines(a: string, b: string): number {
-  const ia = a === OTHER_DISCIPLINE ? DISCIPLINE_ORDER.length : DISCIPLINE_ORDER.indexOf(a);
-  const ib = b === OTHER_DISCIPLINE ? DISCIPLINE_ORDER.length : DISCIPLINE_ORDER.indexOf(b);
-  return ia - ib;
+/**
+ * **THE BUSINESS'S READING ORDER, AND THE STANDARD'S UNDER IT.**
+ *
+ * `DISCIPLINE_ORDER` is the US National CAD Standard's, which genuinely puts
+ * **S before A** — and the founder, looking at his own house: *"right now
+ * structural shows first but I would not want that."* He is not wrong and
+ * neither is the standard; a builder of custom homes reads architectural
+ * first and a bridge engineer does not. So the order is the TENANT's, kept
+ * in pack config, and the standard is what a business that has said nothing
+ * gets ([[packs-and-profiles]]: per-client differences live in config).
+ *
+ * Anything the business did not name keeps its place in the standard's own
+ * order, AFTER everything it did — so naming one discipline does not shuffle
+ * the rest into alphabetical nonsense. `Other` stays last either way, unless
+ * the business asked for it earlier.
+ */
+export function disciplineRank(key: string, custom: readonly string[] = []): number {
+  const named = custom.indexOf(key);
+  if (named !== -1) return named;
+  const standard = key === OTHER_DISCIPLINE ? DISCIPLINE_ORDER.length : DISCIPLINE_ORDER.indexOf(key);
+  return custom.length + (standard === -1 ? DISCIPLINE_ORDER.length : standard);
 }
+
+/** Disciplines in the order the set is read: the business's, then the convention's. */
+export function compareDisciplines(a: string, b: string, custom: readonly string[] = []): number {
+  return disciplineRank(a, custom) - disciplineRank(b, custom);
+}
+
+/**
+ * The order this business reads its disciplines in, out of the pack's config
+ * jsonb. **Validated, never trusted**: a key the convention does not know
+ * would sort sheets under a heading with no name.
+ */
+export function disciplineOrderFrom(config: unknown): string[] {
+  const raw =
+    config && typeof config === "object" && !Array.isArray(config)
+      ? (config as Record<string, unknown>).disciplineOrder
+      : undefined;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const key of raw) {
+    if (typeof key !== "string") continue;
+    if (key !== OTHER_DISCIPLINE && !DISCIPLINE_LABELS[key]) continue;
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
+/** Every discipline a business can put in its order, in the standard's order. */
+export const ORDERABLE_DISCIPLINES: readonly string[] = [...DISCIPLINE_ORDER, OTHER_DISCIPLINE];
 
 /**
  * Natural order: `A-2` before `A-10`, `A1.1` before `A1.2` before `A2.0`,
  * and the discipline's own order before any of it, so a whole set sorts the
  * way its index page lists it.
  */
-export function compareSheetNumbers(a: string, b: string): number {
-  const byDiscipline = compareDisciplines(disciplineOf(a), disciplineOf(b));
+export function compareSheetNumbers(a: string, b: string, custom: readonly string[] = []): number {
+  const byDiscipline = compareDisciplines(disciplineOf(a), disciplineOf(b), custom);
   if (byDiscipline !== 0) return byDiscipline;
   const pa = normaliseSheetNumber(a).split(/(\d+)/).filter((s) => s !== "");
   const pb = normaliseSheetNumber(b).split(/(\d+)/).filter((s) => s !== "");

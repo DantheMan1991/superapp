@@ -416,7 +416,17 @@ export interface SheetRow {
  * Every sheet of a job, in reading order — discipline, then number, then
  * newest issue first — with which issue of each number is current.
  */
-export async function listSheets(tx: Tx, tenantId: string, projectId: string): Promise<SheetRow[]> {
+/**
+ * The set, sorted the way THIS business reads it. `order` comes from pack
+ * config and is empty for a business that has said nothing, which is the
+ * standard's order — see `disciplineRank`.
+ */
+export async function listSheets(
+  tx: Tx,
+  tenantId: string,
+  projectId: string,
+  order: readonly string[] = [],
+): Promise<SheetRow[]> {
   const rows = await tx
     .select({
       sheet: schema.jobSheets,
@@ -455,7 +465,7 @@ export async function listSheets(tx: Tx, tenantId: string, projectId: string): P
       };
     })
     .sort((a, b) => {
-      const byNumber = compareSheetNumbers(a.sheet.sheetNumber, b.sheet.sheetNumber);
+      const byNumber = compareSheetNumbers(a.sheet.sheetNumber, b.sheet.sheetNumber, order);
       if (byNumber !== 0) return byNumber;
       const ia = byId.get(a.sheet.id)!;
       const ib = byId.get(b.sheet.id)!;

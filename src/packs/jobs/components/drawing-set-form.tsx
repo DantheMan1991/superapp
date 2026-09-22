@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MAX_FILE_BYTES } from "@/modules/documents/allowlist";
+import { sheetThumbPath as thumbPath } from "@/lib/blob-paths";
 import { pickDocumentsAction, type PickableDocument } from "@/modules/documents/picker-actions";
 import { formatBytes } from "@/modules/documents/lib/format";
 import {
@@ -171,6 +172,7 @@ export function AddDrawingSetDialog({
           {step === "sheets" && setId && file && (
             <SheetIndexTable
               setId={setId}
+              tenantId={tenantId}
               documentId={file.documentId}
               fileName={file.fileName}
               read={file.read}
@@ -439,6 +441,7 @@ function DocumentPicker({ open, onOpenChange, onPick }: { open: boolean; onOpenC
  */
 export function SheetIndexTable({
   setId,
+  tenantId,
   documentId,
   fileName,
   read,
@@ -447,6 +450,8 @@ export function SheetIndexTable({
   onDone,
 }: {
   setId: string;
+  /** Whose namespace a page's picture is stored under. */
+  tenantId: string;
   documentId: string;
   fileName: string;
   read: ReadPdf;
@@ -502,6 +507,33 @@ export function SheetIndexTable({
     setRows((rs) => rs.map((r) => (r.pageNumber === pageNumber ? { ...r, ...change } : r)));
   }
 
+  /**
+   * **THE PICTURES ARE KEPT, NOT THROWN AWAY.** The browser has already drawn
+   * one per page to put in this table; until now they died with the dialog,
+   * and the drawings page showed cards with no picture on them at all — the
+   * founder, looking at his own set: *"The drawings should show thumbnail."*
+   *
+   * Uploaded under a pathname derived from the FILE and the PAGE
+   * (`sheetThumbPath`), so nothing has to wait for a sheet id and a re-read
+   * overwrites rather than orphans. **Best effort, and after the sheets are
+   * saved**: a picture that does not upload costs a card its thumbnail, and
+   * losing the index over it would be the wrong trade by a distance.
+   */
+  async function keepThumbnails() {
+    const withPictures = included.filter((r) => r.thumbnail !== null);
+    if (withPictures.length === 0) return;
+    await Promise.allSettled(
+      withPictures.map(async (r) => {
+        const blob = await (await fetch(r.thumbnail!)).blob();
+        await uploadPresigned(thumbPath(tenantId, documentId, r.pageNumber), blob, {
+          access: "private",
+          contentType: "image/jpeg",
+          handleUploadUrl: "/api/jobs/sheet-thumbs/blob/upload",
+        });
+      }),
+    );
+  }
+
   function save() {
     startTransition(async () => {
       const result = await indexSheetsAction({
@@ -512,6 +544,11 @@ export function SheetIndexTable({
       if ("error" in result) {
         toast.error(result.error);
         return;
+      }
+      try {
+        await keepThumbnails();
+      } catch {
+        /** The sheets are on the job; the pictures are a nicety. */
       }
       toast.success(`${result.count} ${result.count === 1 ? "sheet" : "sheets"} on the job`);
       onDone();
@@ -733,6 +770,7 @@ export function EditDrawingSetDialog({
           {reading ? (
             <SheetIndexTable
               setId={existing.id}
+              tenantId={tenantId}
               documentId={reading.documentId}
               fileName={reading.fileName}
               read={reading.read}

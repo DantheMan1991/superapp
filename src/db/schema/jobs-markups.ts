@@ -54,17 +54,8 @@ export const jobSheetMarkups = pgTable(
      * out when read, through the sheet's scale, exactly as the quantity is.
      */
     figures: jsonb("figures").notNull().default({}),
-    /**
-     * THE TAKEOFF'S FIRST LINK (ADR 0074), SUPERSEDED (ADR 0110). A trace now
-     * stands behind lines through `job_estimate_line_traces` — one row per
-     * (line, trace, figure), because one room traced once feeds the flooring
-     * by its area and the baseboard by its perimeter. These two columns are
-     * no longer written or read; the migration that made the table copied
-     * every link into it, and a later migration drops them (a drop goes out
-     * after its deploy).
-     */
-    estimateLineId: uuid("estimate_line_id"),
-    pushedQuantityThousandths: bigint("pushed_quantity_thousandths", { mode: "number" }),
+    // The takeoff's first link (ADR 0074) lived here as `estimate_line_id` / `pushed_quantity_thousandths`;
+    // ADR 0110 moved it into `job_estimate_line_traces` and migration 0423 dropped the two columns.
     createdByClerkUserId: text("created_by_clerk_user_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -75,7 +66,6 @@ export const jobSheetMarkups = pgTable(
     index("job_sheet_markups_tenant_sheet_idx").on(t.tenantId, t.sheetId),
     index("job_sheet_markups_tenant_project_idx").on(t.tenantId, t.projectId),
     index("job_sheet_markups_tenant_work_idx").on(t.tenantId, t.workItemId),
-    index("job_sheet_markups_tenant_line_idx").on(t.tenantId, t.estimateLineId),
     foreignKey({
       name: "job_sheet_markups_project_fk",
       columns: [t.tenantId, t.projectId],
@@ -92,12 +82,6 @@ export const jobSheetMarkups = pgTable(
       name: "job_sheet_markups_work_fk",
       columns: [t.tenantId, t.workItemId],
       foreignColumns: [workItems.tenantId, workItems.id],
-    }).onDelete("set null"),
-    // The same column-list SET NULL: a line taken off the estimate leaves the measurement, unpushed.
-    foreignKey({
-      name: "job_sheet_markups_line_fk",
-      columns: [t.tenantId, t.estimateLineId],
-      foreignColumns: [jobEstimateLines.tenantId, jobEstimateLines.id],
     }).onDelete("set null"),
     check("job_sheet_markups_kind_valid", sql`${t.kind} in ('cloud', 'arrow', 'text', 'pin', 'length', 'area', 'count')`),
     check("job_sheet_markups_color_valid", sql`${t.color} in ('red', 'blue', 'green', 'yellow', 'black')`),

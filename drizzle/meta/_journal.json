@@ -2962,6 +2962,13 @@
       "when": 1790084008767,
       "tag": "0422_job_estimate_line_traces_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 423,
+      "version": "7",
+      "when": 1790123779422,
+      "tag": "0423_drop_the_takeoffs_first_link",
+      "breakpoints": true
     }
   ]
 }

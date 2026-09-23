@@ -5077,7 +5077,6 @@ d("jobs ops", () => {
     // Claimed again with A-101 alone, A-102's trace lets go; claimed with nothing, everything does.
     const alone = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [down.id] }));
     expect([alone.quantityThousandths, alone.behind?.sheets.map((s) => s.sheetNumber)]).toEqual([93_500, ["A-101"]]);
-    expect((await run((tx) => listMarkups(tx, tenantId, a102.id))).find((r) => r.markup.id === up.id)!.markup.estimateLineId).toBeNull();
     const gone = await run((tx) => standBehind(tx, staffCtx, { lineId: flooring.id, markupIds: [] }));
     expect([gone.quantityThousandths, gone.behind]).toEqual([0, null]);
     expect((await run((tx) => measurementsBehind(tx, tenantId, est.id))).size).toBe(0);
@@ -5194,8 +5193,6 @@ d("jobs ops", () => {
       ["Slab", "volume", 1_108],
     ]);
     expect(rows.find((r) => r.markup.id === wall.id)!.takeoffs.map((t) => [t.lineDescription, t.figure])).toEqual([["Drywall", "wall"]]);
-    // The old columns stay unwritten.
-    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths]).toEqual([null, null]);
 
     // A figure a trace does not yield refuses by name; families never mix; the old id-only shape still means the trace's own figure.
     await expect(run((tx) => standBehind(tx, staffCtx, { lineId: line("Slab").id, picks: [{ markupId: wall.id, figure: "volume" }] }))).rejects.toMatchObject({
@@ -5365,8 +5362,8 @@ d("jobs ops", () => {
     const estNow = (await run((tx) => listEstimates(tx, tenantId, project.id))).find((e) => e.estimate.id === est.id)!.estimate;
     await run((tx) => updateEstimate(tx, staffCtx, est.id, { version: estNow.version, lines: kept }));
     rows = await run((tx) => listMarkups(tx, tenantId, sheet.id));
-    // The link went with the line (cascade, ADR 0110); the two columns the link used to live in are no longer written at all.
-    expect([rows.find((r) => r.markup.id === room.id)!.markup.estimateLineId, rows.find((r) => r.markup.id === room.id)!.markup.pushedQuantityThousandths, rows.find((r) => r.markup.id === room.id)!.takeoffs]).toEqual([null, null, []]);
+    // The link went with the line (cascade, ADR 0110).
+    expect(rows.find((r) => r.markup.id === room.id)!.takeoffs).toEqual([]);
     // An accepted estimate refuses a push: its quantities are the agreement.
     const contract = await run((tx) => createContract(tx, ctx, { projectId: project.id, kind: "construction", role: "prime" }));
     await run((tx) => acceptEstimate(tx, ctx, est.id, { contractId: contract.id, decidedOn: "2026-09-16" }));

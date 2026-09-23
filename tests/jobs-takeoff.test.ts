@@ -60,6 +60,12 @@ describe("the database agrees with the words", () => {
     expect(SQL_WHOLE).toMatch(/DROP CONSTRAINT "job_sheets_scale_whole"/);
     expect(SQL_WHOLE).toMatch(/job_sheets_scale_whole" CHECK [^;]*coalesce\("job_sheets"\."page_width_pt", 0\) > 0 and coalesce\("job_sheets"\."page_height_pt", 0\) > 0/);
     expect(SQL).toMatch(/"job_sheet_markups_line_fk"[^;]*REFERENCES "public"\."job_estimate_lines"\("tenant_id","id"\) ON DELETE SET NULL \("estimate_line_id"\)/);
+    // …and migration 0423 took that first link off the markups once ADR 0110's table had deployed: the key, its index, both columns.
+    const dropped = readFileSync("drizzle/0423_drop_the_takeoffs_first_link.sql", "utf8");
+    expect(dropped).toMatch(/DROP CONSTRAINT "job_sheet_markups_line_fk"/);
+    expect(dropped).toMatch(/DROP INDEX "job_sheet_markups_tenant_line_idx"/);
+    expect(dropped).toMatch(/DROP COLUMN "estimate_line_id"/);
+    expect(dropped).toMatch(/DROP COLUMN "pushed_quantity_thousandths"/);
     expect(SQL).not.toMatch(/ON DELETE set null ON UPDATE/);
     expect(SQL).toMatch(/DROP CONSTRAINT "job_sheet_markups_kind_valid"/);
   });

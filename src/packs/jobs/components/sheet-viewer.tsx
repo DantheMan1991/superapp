@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowRightToLine,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Cloud,
   Scissors,
+  Expand,
   Hand,
   Hash,
   Loader2,
@@ -15,9 +18,11 @@ import {
   Maximize,
   Minus,
   MoveUpRight,
+  PanelRight,
   Pencil,
   Plus,
   Ruler,
+  Shrink,
   Square,
   Trash2,
   Type,
@@ -52,6 +57,7 @@ import {
   formatMeasure,
   matchingStandard,
   measure,
+  parseFigures,
   sumMeasurements,
   takeoffUnitFor,
   toThousandths,
@@ -228,6 +234,10 @@ export function SheetViewer({
   estimates,
   codes,
   currencySymbol = null,
+  focusable = false,
+  neighbours = null,
+  subtitle = null,
+  me = "",
   measuringFor = null,
   forLine = null,
   onChanged,
@@ -244,6 +254,14 @@ export function SheetViewer({
   codes: Array<{ id: string; label: string }>;
   /** The tenant's money symbol, for the toast that says what a new line was priced at; null prints the amount alone. */
   currencySymbol?: string | null;
+  /** Whether the sheet may take the whole window: the drawings page says so; a dialog already holding the viewer says nothing. */
+  focusable?: boolean;
+  /** The sheets either side in the current set, for the top bar in focus. */
+  neighbours?: { previous: { href: string; number: string } | null; next: { href: string; number: string } | null } | null;
+  /** The set and its date, beside the sheet's number in focus. */
+  subtitle?: string | null;
+  /** How this viewer is named on a row it has just drawn, until the server says. */
+  me?: string;
   /** An estimate line is measuring (ADR 0109): tick boxes on its kind of trace, nothing else changes. */
   forLine?: MeasuringLine | null;
   /**
@@ -289,6 +307,38 @@ export function SheetViewer({
   /** The area an opening is being cut out of, while the deduct tool is up (ADR 0110). */
   const [deductFor, setDeductFor] = useState<string | null>(null);
   const [takeoffFor, setTakeoffFor] = useState<MarkupView | null>(null);
+  /**
+   * THE ROWS AS THIS VIEWER KNOWS THEM. Seeded from the server and taken
+   * fresh whenever the server sends a new list; every write lands here the
+   * moment its action returns, so a trace is in the list before the page has
+   * re-read itself and the refresh that follows only confirms it. A Finish
+   * used to wait on the whole page.
+   */
+  const [local, setLocal] = useState<{ base: MarkupView[]; rows: MarkupView[] }>({ base: markups, rows: markups });
+  if (local.base !== markups) setLocal({ base: markups, rows: markups });
+  const rows = local.base === markups ? local.rows : markups;
+  const setRows = (f: (prev: MarkupView[]) => MarkupView[]) => setLocal((l) => ({ base: l.base, rows: f(l.rows) }));
+  const patchRow = (id: string, patch: Partial<MarkupView> | ((m: MarkupView) => MarkupView)) =>
+    setRows((prev) => prev.map((m) => (m.id !== id ? m : typeof patch === "function" ? patch(m) : { ...m, ...patch })));
+  /**
+   * FOCUS: the sheet fills the window with the measurements in a rail beside
+   * it, and the page waits underneath. `?focus=1` on the address remembers
+   * it across a reload and onto the next sheet. Only where the page says it
+   * may — a dialog already holding the viewer never offers it.
+   */
+  const searchParams = useSearchParams();
+  const [focused, setFocused] = useState(() => focusable && searchParams?.get("focus") === "1");
+  const [railOpen, setRailOpen] = useState(true);
+  const [sheetUp, setSheetUp] = useState(false);
+  const narrow = useNarrow();
+  useEffect(() => {
+    if (!focused) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [focused]);
   const [saving, startTransition] = useTransition();
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pan = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; moved: boolean } | null>(null);
@@ -403,19 +453,29 @@ export function SheetViewer({
     return () => box.removeEventListener("wheel", onWheel);
   }, []);
 
+  /**
+   * Esc, nearest thing first: a tool goes back to moving about, a selection
+   * clears, and only a second Esc with nothing to cancel gives the page back.
+   * A dialog open on top takes the key itself, so nothing here moves then.
+   */
+  const dialogOpen = editing !== null || scaleOpen || calibration !== null || takeoffFor !== null || pending !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setTool("select");
-        setDraft(null);
-        setPointsDraft(null);
-        setSelectedId(null);
-        setDeductFor(null);
+      if (e.key !== "Escape" || dialogOpen) return;
+      const cancelling = tool !== "select" || draft !== null || pointsDraft !== null || selectedId !== null;
+      setTool("select");
+      setDraft(null);
+      setPointsDraft(null);
+      setSelectedId(null);
+      setDeductFor(null);
+      if (!cancelling && focused) {
+        setFocused(false);
+        setFocusParam(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [dialogOpen, tool, draft, pointsDraft, selectedId, focused]);
 
   // --- geometry ----------------------------------------------------------
   const cssW = Math.floor(boxWidth * zoom);
@@ -425,13 +485,13 @@ export function SheetViewer({
   /** Page units per CSS pixel: text and pins keep a screen size whatever the zoom. */
   const unit = cssW > 0 ? W / cssW : 1;
   const likes = useMemo(
-    () => markups.map((m) => ({ id: m.id, kind: m.kind, createdAt: m.createdOn, workItemId: m.workItemId, punchDone: m.punch?.done ?? null })),
-    [markups],
+    () => rows.map((m) => ({ id: m.id, kind: m.kind, createdAt: m.createdOn, workItemId: m.workItemId, punchDone: m.punch?.done ?? null })),
+    [rows],
   );
   const numbers = useMemo(() => pinNumbers(likes), [likes]);
   const summary = useMemo(() => summariseMarkups(likes), [likes]);
-  const yields = useMemo(() => new Map(markups.map((m) => [m.id, yieldsFor(m, scale)])), [markups, scale]);
-  const measurements = useMemo(() => new Map(markups.map((m) => [m.id, measurementOf(m, scale)])), [markups, scale]);
+  const yields = useMemo(() => new Map(rows.map((m) => [m.id, yieldsFor(m, scale)])), [rows, scale]);
+  const measurements = useMemo(() => new Map(rows.map((m) => [m.id, measurementOf(m, scale)])), [rows, scale]);
   const scaleLabel = scale ? (matchingStandard(scale)?.label ?? `${scale.pointsPerUnit.toFixed(2)} pt per ${scale.unit}`) : null;
 
   function toFraction(e: ReactPointerEvent): { x: number; y: number } {
@@ -572,7 +632,7 @@ export function SheetViewer({
     const points = pointsDraft.points;
     if (pointsDraft.kind === "deduct") {
       /** An opening cut out of an area (ADR 0110): one more ring on that trace's figures, and its net area moves. */
-      const target = deductFor ? markups.find((m) => m.id === deductFor) : null;
+      const target = deductFor ? rows.find((m) => m.id === deductFor) : null;
       setPointsDraft(null);
       setDeductFor(null);
       setTool("select");
@@ -590,6 +650,7 @@ export function SheetViewer({
           return;
         }
         toast.success("Opening cut out — the area reads net of it");
+        patchRow(target.id, (m) => ({ ...m, version: result.version, figures: { ...m.figures, deducts: [...(m.figures.deducts ?? []), points] } }));
         onChanged?.();
         router.refresh();
       });
@@ -620,6 +681,24 @@ export function SheetViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pointsDraft]);
 
+  /** The row a fresh markup will have once the server describes it, drawn now from what was sent. */
+  function madeView(id: string, workItemId: string | null, input: { kind: MarkupKind; geometry: Record<string, unknown>; text?: string; dueOn?: string }): MarkupView {
+    return {
+      id,
+      kind: input.kind,
+      color,
+      geometry: input.geometry,
+      text: input.text ?? "",
+      version: 1,
+      createdOn: today(),
+      createdBy: me,
+      workItemId,
+      punch: input.kind === "pin" && workItemId ? { title: input.text ?? "", done: false, dueOn: input.dueOn || null } : null,
+      takeoffs: [],
+      figures: {},
+    };
+  }
+
   function submit(
     input: { kind: MarkupKind; geometry: Record<string, unknown>; text?: string; raise?: boolean; dueOn?: string },
     onMade?: (id: string) => void,
@@ -634,6 +713,8 @@ export function SheetViewer({
         input.kind === "pin" ? (result.workItemId ? "Pin placed — it is on the punch list" : "Pin placed") : `${MARKUP_KIND_LABELS[input.kind]} drawn`,
       );
       setPending(null);
+      setRows((prev) => [...prev, madeView(result.id, result.workItemId, input)]);
+      setSelectedId(result.id);
       onMade?.(result.id);
       onChanged?.();
       router.refresh();
@@ -641,7 +722,7 @@ export function SheetViewer({
   }
 
   const cursor = !canEdit || tool === "select" ? "grab" : "crosshair";
-  const selected = markups.find((m) => m.id === selectedId) ?? null;
+  const selected = rows.find((m) => m.id === selectedId) ?? null;
   /**
    * The traces this walk could use, and what they come to together (X7).
    * A roof is three planes and a perimeter is one run; summing them here
@@ -651,9 +732,9 @@ export function SheetViewer({
   const forTheWalk = useMemo(
     () =>
       measuringFor
-        ? markups.filter((m) => m.kind === measuringFor.kind && measurements.get(m.id))
+        ? rows.filter((m) => m.kind === measuringFor.kind && measurements.get(m.id))
         : [],
-    [markups, measurements, measuringFor],
+    [rows, measurements, measuringFor],
   );
   const forTheWalkTotal = useMemo(() => {
     if (!measuringFor || forTheWalk.length < 2) return null;
@@ -674,10 +755,119 @@ export function SheetViewer({
       ? measure(pointsDraft.kind === "deduct" ? "area" : pointsDraft.kind, { points: pointsDraft.points }, scale)
       : null;
   const needsScale = (tool === "length" || tool === "area" || tool === "deduct") && !scale;
+  const enterFocus = () => {
+    setFocused(true);
+    setFocusParam(true);
+  };
+  const leaveFocus = () => {
+    setFocused(false);
+    setFocusParam(false);
+  };
+  const renderRow = (m: MarkupView, compact = false) => (
+    <MarkupRowView
+      key={m.id}
+      markup={m}
+      number={numbers.get(m.id)}
+      measurement={measurements.get(m.id) ?? null}
+      selected={m.id === selectedId}
+      canEdit={canEdit}
+      busy={saving}
+      projectId={projectId}
+      sheetId={sheetId}
+      hasEstimates={estimates.length > 0}
+      onSelect={() => {
+        setSelectedId(m.id);
+        scrollTo(m);
+      }}
+      onEdit={() => setEditing(m)}
+      onTakeoff={() => setTakeoffFor(m)}
+      measuringFor={measuringFor && m.kind === measuringFor.kind ? measuringFor : null}
+      forLine={forLine}
+      yields={yields.get(m.id) ?? []}
+      onDeduct={() => {
+        setDeductFor(m.id);
+        setSelectedId(m.id);
+        setPointsDraft(null);
+        setTool("deduct");
+      }}
+      onChanged={onChanged}
+      onRemoved={() => setRows((prev) => prev.filter((x) => x.id !== m.id))}
+      onPunched={(done) => patchRow(m.id, (x) => ({ ...x, punch: x.punch ? { ...x.punch, done } : x.punch }))}
+      onUnpushed={(link) => patchRow(m.id, (x) => ({ ...x, takeoffs: x.takeoffs.filter((t) => !(t.lineId === link.lineId && t.figure === link.figure)) }))}
+      compact={compact}
+    />
+  );
+  /** In focus the measurements sit in a rail, newest first, so the trace just finished is at the top. */
+  const measured = rows.filter((m) => isMeasureKind(m.kind)).reverse();
+  const rail =
+    focused && !narrow && railOpen ? (
+      <aside data-sheet-rail="" className="flex w-[340px] shrink-0 flex-col border-l bg-background">
+        <div className="flex items-center justify-between border-b px-3 py-2 text-sm">
+          <span className="font-medium">Measurements</span>
+          <span className="text-xs text-muted-foreground">{measured.length}</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {measured.length === 0 ? (
+            <p className="p-3 text-xs text-muted-foreground">Pick Length, Area or Count and draw on the sheet; each trace lands here with its Takeoff.</p>
+          ) : (
+            <ul className="divide-y text-sm">{measured.map((m) => renderRow(m, true))}</ul>
+          )}
+        </div>
+        <p className="border-t px-3 py-2 text-[11px] text-muted-foreground">Clouds, notes and pins stay on the page below focus.</p>
+      </aside>
+    ) : null;
+  const bottomSheet =
+    focused && narrow ? (
+      <div className="border-t bg-background">
+        <button
+          type="button"
+          className="flex w-full justify-center py-1.5"
+          onClick={() => setSheetUp((v) => !v)}
+          aria-expanded={sheetUp}
+          aria-label={sheetUp ? "Show the last measurement only" : "Show every measurement"}
+        >
+          <span className="block h-1 w-9 rounded-full bg-border" />
+        </button>
+        {measured.length === 0 ? (
+          <p className="px-3 pb-2 text-xs text-muted-foreground">Pick Length, Area or Count and draw on the sheet.</p>
+        ) : (
+          <div className={sheetUp ? "max-h-[60vh] overflow-y-auto" : "overflow-hidden"}>
+            <ul className="divide-y text-sm">{(sheetUp ? measured : measured.slice(0, 1)).map((m) => renderRow(m, true))}</ul>
+          </div>
+        )}
+        <div className="flex items-center justify-between px-3 py-1 text-[11px] text-muted-foreground">
+          <span>{measured.length} measured</span>
+          <button type="button" className="underline underline-offset-2" onClick={() => setSheetUp((v) => !v)}>
+            {sheetUp ? "The last one" : "All of them"}
+          </button>
+        </div>
+      </div>
+    ) : null;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className={focused ? "fixed inset-0 z-[45] flex flex-col bg-background" : "space-y-3"} data-sheet-focus={focused ? "" : undefined}>
+      {focused && (
+        <div className="flex items-center gap-2 border-b px-3 py-1.5 text-sm">
+          <span className="truncate font-medium">{label}</span>
+          {subtitle && <span className="hidden truncate text-xs text-muted-foreground sm:inline">{subtitle}</span>}
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {neighbours?.previous && (
+              <a href={`${neighbours.previous.href}?focus=1`} className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">
+                <ChevronLeft className="size-4" /> {neighbours.previous.number}
+              </a>
+            )}
+            {neighbours?.next && (
+              <a href={`${neighbours.next.href}?focus=1`} className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground">
+                {neighbours.next.number} <ChevronRight className="size-4" />
+              </a>
+            )}
+            <Button type="button" variant="outline" size="sm" className="h-7" onClick={leaveFocus} title="Give the page back">
+              <Shrink className="mr-1 size-3.5" /> Exit focus <span className="ml-1.5 text-[10px] text-muted-foreground">Esc</span>
+            </Button>
+          </span>
+        </div>
+      )}
+      <div className={`flex flex-wrap items-center justify-between gap-2${focused ? " px-3 pt-2" : ""}`}>
         {canEdit ? (
           <div className="flex flex-wrap items-center gap-1">
             <ToolButton active={tool === "select"} onClick={() => setTool("select")} label="Move about">
@@ -743,11 +933,31 @@ export function SheetViewer({
             <Maximize className="size-3.5" />
             <span className="sr-only">Fit the width</span>
           </Button>
+          {focusable && !focused && (
+            <Button type="button" variant="outline" size="sm" className="h-7 px-2" onClick={enterFocus} title="Focus: the sheet fills the window">
+              <Expand className="size-3.5" />
+              <span className="ml-1 hidden sm:inline">Focus</span>
+            </Button>
+          )}
+          {focused && !narrow && (
+            <Button
+              type="button"
+              variant={railOpen ? "default" : "outline"}
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setRailOpen((v) => !v)}
+              aria-pressed={railOpen}
+              title={railOpen ? "Hide the measurements" : "Show the measurements"}
+            >
+              <PanelRight className="size-3.5" />
+              <span className="ml-1 hidden sm:inline">List</span>
+            </Button>
+          )}
         </div>
       </div>
       {/* THE TOOL LINE IS ALWAYS THERE while the sheet can be drawn on, so picking a tool does not push the sheet down under the finger about to draw. */}
       {canEdit && (
-        <div className="flex min-h-7 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className={`flex min-h-7 flex-wrap items-center gap-2 text-xs text-muted-foreground${focused ? " px-3" : ""}`}>
           <span>
             {tool === "select"
               ? "Pick a tool to draw or measure; drag to move about, pinch or ctrl+wheel to zoom."
@@ -789,7 +999,16 @@ export function SheetViewer({
         </div>
       )}
 
-      <div ref={boxRef} className="relative max-h-[75vh] w-full min-w-0 overflow-auto rounded-md border bg-secondary/30" style={{ touchAction: "none" }}>
+      {/* The box and the rail share a row in focus; out of it the wrapper has no box of its own, so the page keeps its shape and the canvas is never remounted. */}
+      <div className={focused ? "flex min-h-0 flex-1" : "contents"}>
+      <div
+        ref={boxRef}
+        className={focused ? "relative min-h-0 flex-1 overflow-auto bg-secondary/30" : "relative mt-3 max-h-[75vh] w-full min-w-0 overflow-auto rounded-md border bg-secondary/30"}
+        style={{ touchAction: "none" }}
+        onDoubleClick={() => {
+          if (focusable && !focused && tool === "select") enterFocus();
+        }}
+      >
         {status !== "ready" && status !== "failed" && (
           <div className="flex h-40 items-center justify-center">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -824,8 +1043,11 @@ export function SheetViewer({
           )}
         </div>
       </div>
+      {rail}
+      </div>
+      {bottomSheet}
 
-      <div>
+      <div className={focused ? "hidden" : undefined}>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Markups</h3>
           <span className="text-xs text-muted-foreground">{markupSentence(summary)}</span>
@@ -874,7 +1096,7 @@ export function SheetViewer({
             </span>
           </div>
         )}
-        {markups.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {canEdit
               ? "Pick a tool above and draw on the sheet. A pin puts what needs doing on the job's punch list; a length, an area or a count is a quantity for the estimate."
@@ -882,38 +1104,7 @@ export function SheetViewer({
           </p>
         ) : (
           <ul className="divide-y rounded-md border text-sm">
-            {markups.map((m) => (
-              <MarkupRowView
-                key={m.id}
-                markup={m}
-                number={numbers.get(m.id)}
-                measurement={measurements.get(m.id) ?? null}
-                selected={m.id === selectedId}
-                canEdit={canEdit}
-                busy={saving}
-                projectId={projectId}
-                sheetId={sheetId}
-                hasEstimates={estimates.length > 0}
-                onSelect={() => {
-                  setSelectedId(m.id);
-                  scrollTo(m);
-                }}
-                onEdit={() => setEditing(m)}
-                onTakeoff={() => setTakeoffFor(m)}
-                measuringFor={
-                  measuringFor && m.kind === measuringFor.kind ? measuringFor : null
-                }
-                forLine={forLine}
-                yields={yields.get(m.id) ?? []}
-                onDeduct={() => {
-                  setDeductFor(m.id);
-                  setSelectedId(m.id);
-                  setPointsDraft(null);
-                  setTool("deduct");
-                }}
-                onChanged={onChanged}
-              />
-            ))}
+            {rows.map((m) => renderRow(m))}
           </ul>
         )}
         {selected && <p className="mt-1 text-xs text-muted-foreground">Selected: {describe(selected, numbers.get(selected.id), measurements.get(selected.id) ?? null)}. Esc clears.</p>}
@@ -926,7 +1117,7 @@ export function SheetViewer({
         onClose={() => setPending(null)}
         onSave={(text, raise, dueOn) => pending && submit({ kind: pending.kind, geometry: { x: pending.x, y: pending.y }, text, raise, dueOn })}
       />
-      <EditDialog markup={editing} projectId={projectId} sheetId={sheetId} onClose={() => setEditing(null)} onChanged={onChanged} />
+      <EditDialog markup={editing} projectId={projectId} sheetId={sheetId} onClose={() => setEditing(null)} onChanged={onChanged} onSaved={(id, patch) => patchRow(id, patch)} />
       <ScaleDialog
         open={scaleOpen}
         scale={scale}
@@ -952,7 +1143,7 @@ export function SheetViewer({
       />
       <TakeoffDialog
         markup={takeoffFor}
-        markups={markups}
+        markups={rows}
         yields={yields}
         scale={scale}
         estimates={estimates}
@@ -961,6 +1152,15 @@ export function SheetViewer({
         projectId={projectId}
         sheetId={sheetId}
         onChanged={onChanged}
+        onPushed={(lineId, links) =>
+          setRows((prev) =>
+            prev.map((m) => {
+              const own = links.get(m.id) ?? [];
+              const kept = m.takeoffs.filter((t) => t.lineId !== lineId);
+              return own.length === 0 && kept.length === m.takeoffs.length ? m : { ...m, takeoffs: [...kept, ...own] };
+            }),
+          )
+        }
         onClose={() => setTakeoffFor(null)}
       />
     </div>
@@ -979,6 +1179,27 @@ function describe(m: MarkupView, number: number | undefined, measurement: Measur
   if (m.kind === "text") return `note · ${m.text}`;
   if (isMeasureKind(m.kind)) return `${MARKUP_KIND_LABELS[m.kind].toLowerCase()}${measurement ? ` · ${formatMeasure(measurement)}` : ""}${m.text ? ` · ${m.text}` : ""}`;
   return `${MARKUP_KIND_LABELS[m.kind].toLowerCase()} in ${MARKUP_COLOR_LABELS[m.color].toLowerCase()}`;
+}
+
+/** Under 640px a rail would leave no sheet, so in focus the measurements come up from the bottom instead. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 639px)");
+    const apply = () => setNarrow(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+  return narrow;
+}
+
+/** `?focus=1` on the address while the sheet has the window, so a reload and the next sheet keep it. */
+function setFocusParam(on: boolean) {
+  const address = new URL(window.location.href);
+  if (on) address.searchParams.set("focus", "1");
+  else address.searchParams.delete("focus");
+  window.history.replaceState(window.history.state, "", address);
 }
 
 function ToolButton({ active, onClick, label, children }: { active: boolean; onClick: () => void; label: string; children: ReactNode }) {
@@ -1193,6 +1414,10 @@ function MarkupRowView({
   measuringFor,
   forLine,
   onChanged,
+  onRemoved,
+  onPunched,
+  onUnpushed,
+  compact = false,
 }: {
   markup: MarkupView;
   number?: number;
@@ -1215,6 +1440,12 @@ function MarkupRowView({
   /** Non-null while an estimate line is measuring (ADR 0109): the row offers every figure it yields of the line's family. */
   forLine: MeasuringLine | null;
   onChanged?: () => void;
+  /** The list keeps itself current from these, before the page has re-read the sheet. */
+  onRemoved?: () => void;
+  onPunched?: (done: boolean) => void;
+  onUnpushed?: (link: TakeoffLinkView) => void;
+  /** In a narrow rail the parts stack — words, chips, buttons — instead of squeezing the words beside the buttons. */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -1235,6 +1466,7 @@ function MarkupRowView({
         return;
       }
       toast.success(done ? "Punch item done" : "Punch item reopened");
+      onPunched?.(done);
       onChanged?.();
       router.refresh();
     });
@@ -1248,6 +1480,7 @@ function MarkupRowView({
         return;
       }
       toast.success(m.kind === "pin" && m.punch ? "Pin rubbed out — its punch item stays on the list" : "Rubbed out");
+      onRemoved?.();
       onChanged?.();
       router.refresh();
     });
@@ -1262,13 +1495,14 @@ function MarkupRowView({
         return;
       }
       toast.success("The line keeps its quantity; this measurement no longer stands behind it");
+      onUnpushed?.(link);
       onChanged?.();
       router.refresh();
     });
   }
 
   return (
-    <li className={`flex flex-wrap items-center gap-2 px-3 py-2 ${selected ? "bg-secondary/60" : ""}`}>
+    <li className={`${compact ? "flex flex-col items-stretch gap-1.5" : "flex flex-wrap items-center gap-2"} px-3 py-2 ${selected ? "bg-secondary/60" : ""}`}>
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ backgroundColor: hex }}>
           {m.kind === "pin" ? (number ?? "") : m.kind === "cloud" ? "◌" : m.kind === "arrow" ? "→" : m.kind === "text" ? "A" : m.kind === "length" ? "L" : m.kind === "area" ? "▱" : "#"}
@@ -1322,7 +1556,7 @@ function MarkupRowView({
           const now = yields.find((y) => y.figure === link.figure)?.measurement ?? null;
           const drifted = driftedSince(link.shareThousandths, now);
           return (
-            <span key={`${link.lineId}:${link.figure}`} className="flex items-center gap-1">
+            <span key={`${link.lineId}:${link.figure}`} className={compact ? "flex flex-wrap items-center gap-1" : "flex items-center gap-1"}>
               <StatusBadge tone={drifted ? "pending" : "good"}>
                 {`→ ${link.estimateNumber} · ${link.lineDescription} · ${thousandthsToQuantityString(link.lineQuantityThousandths)} ${link.lineUnit}`}
                 {link.figure !== m.kind ? ` · ${TRACE_FIGURE_LABELS[link.figure].toLowerCase()}` : ""}
@@ -1372,7 +1606,7 @@ function MarkupRowView({
         </Button>
       )}
       {canEdit && (
-        <span className="flex items-center gap-1">
+        <span className={compact ? "flex flex-wrap items-center gap-1" : "flex items-center gap-1"}>
           {m.kind === "area" && (
             <Button type="button" variant="ghost" size="sm" className="h-7" onClick={onDeduct} disabled={pending || busy || !measurement} title={!measurement ? "Set the scale first" : "Cut an opening out of this area"}>
               <Scissors className="mr-1 size-3.5" /> Cut an opening
@@ -1496,7 +1730,22 @@ function PointDialog({
  * a depth on an area, and the openings cut out of it. The pin's punch item
  * keeps its own words in Work.
  */
-function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup: MarkupView | null; projectId: string; sheetId: string; onClose: () => void; onChanged?: () => void }) {
+function EditDialog({
+  markup,
+  projectId,
+  sheetId,
+  onClose,
+  onChanged,
+  onSaved,
+}: {
+  markup: MarkupView | null;
+  projectId: string;
+  sheetId: string;
+  onClose: () => void;
+  onChanged?: () => void;
+  /** What was saved, as the row should now read it, with the version the server gave back. */
+  onSaved?: (id: string, patch: Pick<MarkupView, "text" | "color" | "figures" | "version">) => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState("");
@@ -1560,6 +1809,7 @@ function EditDialog({ markup, projectId, sheetId, onClose, onChanged }: { markup
         return;
       }
       toast.success("Markup saved");
+      onSaved?.(markup.id, { text: text.trim(), color, figures: measuring ? parseFigures(figuresPatch()) : markup.figures, version: result.version });
       onClose();
       onChanged?.();
       router.refresh();
@@ -1896,6 +2146,7 @@ function TakeoffDialog({
   projectId,
   sheetId,
   onChanged,
+  onPushed,
   onClose,
 }: {
   markup: MarkupView | null;
@@ -1905,6 +2156,8 @@ function TakeoffDialog({
   estimates: EstimateOption[];
   codes: Array<{ id: string; label: string }>;
   currencySymbol: string | null;
+  /** The links this push made on this sheet, so the rows can show them before the page has re-read itself. */
+  onPushed?: (lineId: string, links: Map<string, TakeoffLinkView[]>) => void;
   projectId: string;
   sheetId: string;
   onChanged?: () => void;
@@ -1992,6 +2245,23 @@ function TakeoffDialog({
           ? `Priced from memory — ${priceHint(result.priced, formatMoney(result.priced.unitCostCents, currencySymbol), today())}. Check it: a price can be a year old.`
           : undefined,
       });
+      const lineDescription = lineId === NEW_LINE ? description.trim() : (estimate.lines.find((l) => l.id === lineId)?.description ?? "");
+      const links = new Map<string, TakeoffLinkView[]>();
+      for (const c of chosen) {
+        const link: TakeoffLinkView = {
+          lineId: result.lineId,
+          figure: c.figure,
+          shareThousandths: toThousandths(c.yield.measurement.quantity),
+          estimateId: estimate.id,
+          estimateNumber: estimate.number,
+          estimateStatus: estimate.status,
+          lineDescription,
+          lineUnit: result.unit,
+          lineQuantityThousandths: result.quantityThousandths,
+        };
+        links.set(c.markupId, [...(links.get(c.markupId) ?? []), link]);
+      }
+      onPushed?.(result.lineId, links);
       setLoadedFor(null);
       onClose();
       onChanged?.();

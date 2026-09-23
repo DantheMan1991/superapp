@@ -1412,12 +1412,26 @@ Anybody on the {{project|lower}} may draw on a sheet. Above the drawing, a row o
 | {button:Note|outline} | Tap where the note goes, type it, {button:Add the note|primary}. The words sit on the sheet in the colour chosen. |
 | {button:Pin|outline} | Tap where the problem is. Type `What needs doing`; leave **Put it on the punch list** ticked and give it a `Due` date if it has one; {button:Place the pin|primary}. The pin is numbered in the order pins were placed. |
 | the five colours | Red, blue, green, yellow, black — the pen for the next thing you draw. |
+| {button:Focus|outline} | The sheet fills the window and the page waits underneath — see *Focus*, below. A double-tap on the sheet while moving about does the same. |
 
 A line under the tools says what the chosen tool wants; `Esc` goes back to moving about. The zoom is the same as before — {button:−|outline} {button:+|outline} and {button:⛶|outline} to fit the width — and what you draw at 3× is exactly where it is at 1×: a markup is stored as a place on the page, not on the screen.
 
+**Focus.** The drawing sits a long way down the page, under the {{project|lower}}'s header and tabs, and gets three quarters of a window at best. {button:Focus|outline} — or a double-tap on the sheet while moving about — gives it the whole window:
+
+| In focus | What it is |
+| --- | --- |
+| the top bar | The sheet's number and title, the set and its date, and {button:← S-201|ghost} {button:A-102 →|ghost} to walk the current set without leaving focus. {button:Exit focus|outline} gives the page back exactly where you left it. |
+| the tools | The same row, the same tool line, the same zoom. |
+| `Measurements` | A rail down the right with every length, area and count on the sheet, **newest first**, so the trace you have just finished is at the top and selected. Each row is the row from the list under the drawing — {button:Takeoff|outline}, the pencil, {button:Cut an opening|ghost}, {button:Rub out|ghost} — so a takeoff never needs the page. Clouds, notes and pins stay on the page below focus. |
+| {button:List|outline} | Hides the rail for the whole width of the sheet, and brings it back. |
+| on a phone | The rail becomes a sheet at the bottom: the last trace and its buttons, with *3 measured* under it; the handle or *All of them* brings up the rest, *The last one* puts it back. |
+| `Esc` | Nearest thing first: a tool goes back to moving about, a selection clears, and an `Esc` with nothing left to cancel leaves focus. |
+
+The address carries `?focus=1` while the sheet has the window, so a reload keeps it and the next sheet opens in focus too.
+
 **A pin is a punch item.** Placing one with the box ticked puts `What needs doing` on the {{project|lower}}'s punch list as a work item — the same row the **Punch list** on the Field page and Work show, with *On sheet A-101 · First floor plan* in its notes — and the pin follows it: the row in the list below the drawing says `On the punch list`, `Due 2026-09-30` or `Done`, and the tick beside it closes the item from here. A done pin shows ✓ on the sheet and fades. A pin placed with the box unticked is a marker and raises nothing.
 
-**The list under the drawing** — *1 cloud, 1 arrow, 1 note, 2 pins; 1 pin is still open on the punch list.* — has a row per markup: the kind, the words, who drew it and the day. Tap a row to find it on the sheet. The pencil opens its words and colour — {button:Save|primary} — and {button:Rub out|ghost} then {button:Rub out|destructive} removes it. Rubbing out a pin **leaves its punch item on the list**: the site still owes it. Clearing the item in Work leaves the pin on the sheet as a note, marked `Punch item gone`.
+**The list under the drawing** — *1 cloud, 1 arrow, 1 note, 2 pins; 1 pin is still open on the punch list.* — has a row per markup: the kind, the words, who drew it and the day. A markup is in the list the moment it is drawn, and a trace you have just finished is selected; the page reads itself again behind that, so nothing waits on it. Tap a row to find it on the sheet. The pencil opens its words and colour — {button:Save|primary} — and {button:Rub out|ghost} then {button:Rub out|destructive} removes it. Rubbing out a pin **leaves its punch item on the list**: the site still owes it. Clearing the item in Work leaves the pin on the sheet as a note, marked `Punch item gone`.
 
 **Which issue.** A markup belongs to the issue it was drawn on. When a set reissues the sheet, the new issue starts clean and the earlier one keeps what was drawn; **Issues of A-102** says `3 markups` beside an issue that carries some. Nothing is carried forward for you: the cloud may have been about the very thing the reissue fixed.
 

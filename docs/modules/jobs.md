@@ -127,6 +127,79 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-22 — Focus on the sheet, and a list that does not wait for the page (`claude/focus-on-the-sheet`)
+
+Step 5 of the drawings-takeoff pass, agreed by mockup: the two things the
+review left that the estimator feels on every trace.
+
+**Focus.** The viewer sat about 630px down the page under the project
+header, the tabs and the sheet's own header, and its box was capped at
+75vh: every measurement began with a scroll and the sheet got three
+quarters of a window at best. `SheetViewer` now takes `focusable` (the
+drawings page says so; the measure dialogs that already hold the viewer
+never offer it) and a *Focus* button — or a double-tap on the sheet while
+moving about — turns its root into a `fixed inset-0 z-[45]` column: a top
+bar (sheet number and title, set and date, the neighbours in the current
+set as links that keep `?focus=1`, *Exit focus*), the same toolbar and tool
+line, the canvas box as `flex-1` with no cap, and the **measurements in a
+340px rail**, newest first, so the trace just finished is at the top and
+selected. The rail's rows are the list's own `MarkupRowView` in a
+`compact` layout (words, chips and buttons stacked instead of squeezed
+beside each other), so Takeoff, the pencil, Cut an opening and Rub out
+never need the page; *List* hides the rail. Under 640px (`useNarrow`) the
+rail is a bottom sheet: the last trace and its buttons, *N measured*, the
+handle or *All of them* for the rest. Esc goes nearest-first — a tool back
+to moving about, a selection cleared, and only an Esc with nothing to
+cancel leaves focus; a dialog open on top takes the key itself. The page
+waits underneath (body scroll locked, nothing navigates), so leaving
+returns to the same scroll position; `?focus=1` on the address
+(`history.replaceState`, read by `useSearchParams` on mount) survives a
+reload and carries onto the next sheet. Dialogs stay above at z-50; the
+shell's floating tell button is below at z-40 and covered on purpose. The
+canvas box is never remounted on the way in or out: the wrapper that
+becomes the box-and-rail row is `display: contents` outside focus, and
+the box's `ResizeObserver` re-renders the PDF at its new width.
+
+**A list that does not wait for the page.** Every write — a Finish, a
+pencil save, an opening cut, a rub out, a punch tick, a push, an unpush —
+ended in `router.refresh()`, and the row only appeared or moved when the
+whole page had re-read itself (project, sheets, markups, members,
+estimates, what stands behind every line): a second or two per trace,
+felt most in focus. The viewer now keeps the rows as its own state,
+seeded from the server's list and taken fresh whenever the server sends
+a new one (the adjust-during-render pattern, no effect), and each action
+lands its result on the rows the moment it returns: `madeView` draws the
+new row from what was sent (the server's own row replaces it on refresh —
+`me` names the author until then), `updateMarkupAction` now returns the
+row's `version` so a second save does not conflict, the row reports
+`onRemoved` / `onPunched` / `onUnpushed`, the pencil `onSaved`, the
+Takeoff dialog `onPushed` with the links it made (a push is a statement,
+so the line's other links on the sheet are dropped as the server drops
+them). **The refresh still runs** — it is the server's truth and it
+reconciles names, the punch row and anything another person did — but
+nothing waits on it any more.
+
+**Driven** on the dev branch's Hilltop Farm 24-109 (A-101), on this
+worktree's own server. *Focus* put the sheet's box at 741px tall from 173px
+down against a 75vh cap on a page where it sat at 762px; the top bar read
+*A-101 · First floor plan · Permit set · 2026-06-01 · S-201 · A-102 · Exit
+focus Esc*, the address gained `?focus=1`, body scroll locked. *Area*
+picked then Esc: still in focus, the tool back to *Move about*; Esc again:
+out, the address clean, the page back at 762px. A double-click on the sheet
+while moving about entered focus. *List* took the rail away (the box 635px
+→ 935px wide) and brought it back. A reload with `?focus=1` opened in focus
+with the rail at 340px reading three compact rows, newest first. A length
+drawn in focus: **the row was in the rail 2.26s after Finish — the
+action's own round trip on the dev server — with the toast *Length
+drawn*, and the refresh behind it changed nothing**; *Rub out* from the
+rail took the row away as its action returned (1.6s) and the page agreed
+after the refresh (3 rows, 7 shapes, as before). At 375px the rail became
+the bottom sheet, 128px with the last trace and *3 measured · All of
+them*, 352px with all three and *The last one*; back at 935px the rail
+returned without a reload. Not driven: a push or a pencil save from the
+rail (the same rows and actions as the page's list), the walk's own
+dialog (no *Focus* there by design).
+
 ### 2026-09-22 — The takeoff finishes what it starts (`claude/the-takeoff-finishes-what-it-starts`)
 
 Step 4 of the drawings-takeoff pass: the rough edges the review left once

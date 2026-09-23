@@ -199,6 +199,13 @@ export default async function SheetPage({ params }: { params: Promise<{ id: stri
           estimates={openEstimates}
           codes={codeOptions}
           currencySymbol={ctx.tenant.currencySymbol}
+          focusable
+          neighbours={{
+            previous: previous ? { href: `${base}/${previous.sheet.id}`, number: previous.sheet.sheetNumber } : null,
+            next: next ? { href: `${base}/${next.sheet.id}`, number: next.sheet.sheetNumber } : null,
+          }}
+          subtitle={`${row.setName} · ${row.issuedOn}`}
+          me={names.get(ctx.userId) ?? ""}
         />
       </Panel>
 

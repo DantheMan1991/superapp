@@ -3709,9 +3709,9 @@ export async function updateMarkupAction(input: unknown) {
   try {
     const ctx = await drawingsGate();
     const { id, sheetId, projectId, ...patch } = parsed.data;
-    await withTenant(ctx.tenantId, (tx) => updateMarkup(tx, ctx, id, patch), { role: ctx.role, userId: ctx.userId });
+    const row = await withTenant(ctx.tenantId, (tx) => updateMarkup(tx, ctx, id, patch), { role: ctx.role, userId: ctx.userId });
     revalidateSheet(projectId, sheetId);
-    return { ok: true as const };
+    return { ok: true as const, version: row.version };
   } catch (err) {
     return toResult(err);
   }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { asc, isNotNull, sql as dsql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql as dsql } from "drizzle-orm";
 import { BookOpen } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { isRenderable } from "@/lib/features";
@@ -38,7 +38,8 @@ export default async function AdminModulesPage() {
         .from(schema.modules)
         .orderBy(asc(schema.modules.sortOrder)),
     ),
-    // Matrix rows: tenants with a real workspace (prospects have no org).
+    // Matrix rows: tenants with a real workspace (prospects have no org), and
+    // businesses only — a personal space is not a client (ADR 0111).
     withSystem((tx) =>
       tx
         .select({
@@ -47,7 +48,12 @@ export default async function AdminModulesPage() {
           status: schema.tenants.status,
         })
         .from(schema.tenants)
-        .where(isNotNull(schema.tenants.clerkOrgId))
+        .where(
+          and(
+            isNotNull(schema.tenants.clerkOrgId),
+            eq(schema.tenants.kind, "business"),
+          ),
+        )
         .orderBy(asc(schema.tenants.name)),
     ),
     withSystem((tx) => tx.select().from(schema.tenantModules)),

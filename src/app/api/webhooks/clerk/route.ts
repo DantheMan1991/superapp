@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
 import { logAudit } from "@/lib/audit";
 import {
+  DuplicatePersonalSpaceError,
   markTenantChurned,
   removeMembership,
   removeProfile,
@@ -81,7 +82,24 @@ export async function POST(req: NextRequest) {
         id: data.id,
         name: data.name,
         slug: data.slug,
+        // A personal space's mark (ADR 0111). This event can land BEFORE our
+        // own provisioning inserts the row, and without the metadata it would
+        // mirror somebody's private space as a business.
+        publicMetadata: data.public_metadata,
+      }).catch(async (err: unknown) => {
+        // A second personal organization for somebody who has one: an orphan
+        // of a failed create. Answered, not retried — no retry makes it valid.
+        if (err instanceof DuplicatePersonalSpaceError) {
+          await logAudit({
+            action: "personal_space.duplicate_refused",
+            actorLabel: "clerk-webhook",
+            meta: { clerkOrgId: err.clerkOrgId, ownerClerkUserId: err.ownerClerkUserId },
+          });
+          return null;
+        }
+        throw err;
       });
+      if (!tenant) break;
       if (type === "organization.created") {
         await logAudit({
           action: "tenant.created",
@@ -132,6 +150,20 @@ export async function POST(req: NextRequest) {
           { error: "dependency not yet synced", retry: true },
           { status: 503 },
         );
+      }
+      // Somebody who is not its owner, in a personal space (ADR 0111). Clerk's
+      // one-member cap should have stopped them; this is the lock behind it.
+      // Recorded and answered, never mirrored — and not retried, because no
+      // later delivery makes them the owner.
+      if (result.status === "refused") {
+        await logAudit({
+          action: "membership.refused_personal",
+          actorLabel: "clerk-webhook",
+          meta: {
+            clerkOrgId: data.organization?.id,
+            clerkUserId: data.public_user_data?.user_id,
+          },
+        });
       }
       break;
     }

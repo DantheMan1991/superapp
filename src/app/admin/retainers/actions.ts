@@ -7,6 +7,7 @@ import { withSystem, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { operatorRefusal } from "@/lib/operator-guard";
+import { personalRefusal } from "@/lib/personal-space-core";
 import { isValidIsoDate } from "@/modules/accounting/lib/money";
 import {
   currentMonth,
@@ -26,9 +27,11 @@ function revalidate(tenantId: string) {
 }
 
 /**
- * The operator tenant cannot hold a retainer with itself (ADR 0041). Every
- * action that would CREATE retainer state asks first; the ones that edit an
- * existing entry need not, because none can exist for it.
+ * The operator tenant cannot hold a retainer with itself (ADR 0041), and a
+ * personal space cannot hold one at all — a retainer is a service to a
+ * business (ADR 0111). Every action that would CREATE retainer state asks
+ * first; the ones that edit an existing entry need not, because none can
+ * exist for either.
  */
 async function operatorRetainerRefusal(
   tenantId: string,
@@ -36,10 +39,11 @@ async function operatorRetainerRefusal(
   const tenant = await withSystem((tx) =>
     tx.query.tenants.findFirst({
       where: eq(schema.tenants.id, tenantId),
-      columns: { isOperator: true },
+      columns: { isOperator: true, kind: true },
     }),
   );
-  return tenant ? operatorRefusal(tenant, "retainer") : "No such business.";
+  if (!tenant) return "No such business.";
+  return personalRefusal(tenant, "retainer") ?? operatorRefusal(tenant, "retainer");
 }
 
 /** Ensure the tenant's retainers row exists (lazy creation). */

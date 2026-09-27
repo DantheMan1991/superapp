@@ -133,17 +133,31 @@ The flag is read by the console to refuse its own buttons
 where a lead lands — and by nothing else. The plan that follows from this is
 [modules/back-office.md](modules/back-office.md).
 
-### Personal spaces (planned)
+### Personal spaces
 
 A person's own tools (workouts, then diet) live in a **tenant of kind
 `personal`**: a Clerk organization of exactly one member, one per person,
 provisioned by us rather than created in the business onboarding form (ADR
 [0111](decisions/0111-a-personal-space-is-a-workspace-of-one-and-support-view-never-opens-it.md)).
-To RLS it is an ordinary tenant, so nothing about `withTenant` changes. Three
-places will read `tenants.kind`: the rail, the module gate (a `personal` tool
-is never enabled on a business, nor a business module on a personal space) and
-support view, which **never** opens a personal space. Not built yet; the plan
-is [modules/personal-space.md](modules/personal-space.md).
+To RLS it is an ordinary tenant, so nothing about `withTenant` changes.
+`tenants.kind` is read in four places, and each has one job:
+
+- **The auth split.** `requireTenant()` and `resolveTenantContext()` refuse a
+  personal space (it is sent to `/personal`), so every business page, action
+  and route is closed to one by the helper it already calls. The personal half
+  lives under `/personal` and its door is `requirePersonalSpace()` /
+  `resolvePersonalContext()`, which refuse anything but the caller's own
+  personal space. Each half opens only for its own kind.
+- **The module gate.** `isModuleEnabled` (and so `requireModuleEnabled`,
+  `routeGate` and the rail's `getActiveModules`) answers false for a tool in
+  the wrong kind of workspace, whatever its `tenant_modules` row says:
+  `moduleFitsTenant` in `src/lib/personal-space-core.ts`.
+- **Support view**, which never opens one (security.md S14, S15).
+- **The console**, which does not list personal spaces as clients and refuses
+  its business buttons on one.
+
+Built in slice P0 (2026-09-27); the dossier is
+[modules/personal-space.md](modules/personal-space.md).
 
 ---
 

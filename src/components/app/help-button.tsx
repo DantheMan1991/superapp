@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/app/empty-state";
 import { GuidePointerContext } from "@/components/app/guide-control";
 import { GUIDES_HREF, type HelpPayload } from "@/lib/guides-core";
+import { PERSONAL_HOME } from "@/lib/personal-space-core";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,9 +43,10 @@ type Entry =
  * the screen the reader is on.
  *
  * It knows where it is from the pathname alone, so `PageHeader` can render it
- * without learning which page it is inside. Outside `/dashboard` — the admin
- * pages and the public share page use the same header — it renders nothing,
- * and on the Guides pages themselves it would only point at itself.
+ * without learning which page it is inside. Outside `/dashboard` and a
+ * personal space's `/personal` — the admin pages and the public share page use
+ * the same header — it renders nothing, and on the Guides pages themselves it
+ * would only point at itself.
  *
  * The query string is read at click time from `window.location`, not from
  * `useSearchParams`: that hook demands a Suspense boundary on any statically
@@ -73,7 +75,13 @@ export function HelpButton({ className }: { className?: string }) {
     return () => document.documentElement.classList.remove("help-docked");
   }, [open]);
 
-  if (!pathname.startsWith("/dashboard") || pathname.startsWith(GUIDES_HREF)) {
+  // A personal space (ADR 0111) has a "?" on its screens too, but not the
+  // business's Guides page, which will not open for it — so no links to it.
+  const personal = pathname === PERSONAL_HOME || pathname.startsWith(`${PERSONAL_HOME}/`);
+  if (
+    (!pathname.startsWith("/dashboard") && !personal) ||
+    pathname.startsWith(GUIDES_HREF)
+  ) {
     return null;
   }
 
@@ -164,19 +172,21 @@ export function HelpButton({ className }: { className?: string }) {
               </GuidePointerContext.Provider>
             )}
           </div>
-          <SheetFooter className="flex-row items-center justify-between border-t">
-            <Link
-              href={GUIDES_HREF}
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              All guides
-            </Link>
-            {guide && (
-              <Button asChild size="sm" variant="outline">
-                <Link href={`${GUIDES_HREF}/${guide.slug}`}>Open full guide</Link>
-              </Button>
-            )}
-          </SheetFooter>
+          {!personal && (
+            <SheetFooter className="flex-row items-center justify-between border-t">
+              <Link
+                href={GUIDES_HREF}
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                All guides
+              </Link>
+              {guide && (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`${GUIDES_HREF}/${guide.slug}`}>Open full guide</Link>
+                </Button>
+              )}
+            </SheetFooter>
+          )}
         </SheetContent>
       </Sheet>
     </>

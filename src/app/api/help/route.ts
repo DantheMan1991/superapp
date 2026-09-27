@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { resolveTenantContext } from "@/lib/auth";
+import { resolvePersonalContext, resolveTenantContext } from "@/lib/auth";
 import {
   canReadGuide,
   findGuideFor,
@@ -24,6 +24,11 @@ export const dynamic = "force-dynamic";
  * manifest. A read that returns prose is a GET, guarded the way every other
  * route here is: `resolveTenantContext()` for the caller, then the same
  * enablement gate the module page applies.
+ *
+ * The one route both halves of the product share (ADR 0111): the "?" is on
+ * every screen of a personal space too, so a personal space is answered
+ * through its own door when the business door refuses it. `canReadGuide`
+ * decides what each kind may read.
  */
 const Query = z.object({
   path: z.string().max(2048).default(""),
@@ -31,7 +36,7 @@ const Query = z.object({
 });
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const ctx = await resolveTenantContext();
+  const ctx = (await resolveTenantContext()) ?? (await resolvePersonalContext());
   if (!ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

@@ -1,5 +1,6 @@
 import { parseHeader, stripComments } from "./markdown-meta";
 import { pluralOf } from "./packs/resolve";
+import { PERSONAL_HOME } from "./personal-space-core";
 
 /**
  * Tenant guides — the pure half. Everything here runs anywhere: the API route,
@@ -17,6 +18,8 @@ export const GUIDES_HREF = "/dashboard/guides";
  * Folders that are not a feature. `workspace` is the shell itself (`/dashboard`,
  * `/dashboard/today`), `business` is hours and team, `settings` is the pages
  * only an owner sees — the same groups the sidebar uses, minus the modules.
+ * `personal` is a person's own space beside the business (ADR 0111): its home
+ * and its door, which are not a feature either.
  */
 export interface FixedSection {
   key: string;
@@ -24,12 +27,19 @@ export interface FixedSection {
   /** An `icon-registry.ts` name. */
   icon: string;
   ownerOnly?: boolean;
+  /**
+   * A section about the personal space rather than the business. Readable from
+   * EITHER kind of workspace, because the door into a personal space is opened
+   * from a business, and never listed on the business's Guides page.
+   */
+  personal?: boolean;
 }
 
 export const FIXED_SECTIONS: readonly FixedSection[] = [
   { key: "workspace", label: "Workspace", icon: "dashboard" },
   { key: "business", label: "Business", icon: "clock" },
   { key: "settings", label: "Settings", icon: "settings", ownerOnly: true },
+  { key: "personal", label: "Personal", icon: "dashboard", personal: true },
 ];
 
 export function fixedSection(key: string): FixedSection | null {
@@ -37,6 +47,12 @@ export function fixedSection(key: string): FixedSection | null {
 }
 
 // ---- Routes ----
+
+/**
+ * Where a guide may point: the business product, and a personal space's own
+ * tree (ADR 0111). Nothing else in the product carries the "?".
+ */
+const ROUTE_ROOTS = ["/dashboard", PERSONAL_HOME] as const;
 
 export interface RouteCondition {
   key: string;
@@ -75,7 +91,9 @@ export function parseRoutePattern(raw: string): RoutePattern | null {
   let pathname = cut === -1 ? text : text.slice(0, cut);
   const query = cut === -1 ? "" : text.slice(cut + 1);
   if (pathname.length > 1 && pathname.endsWith("/")) pathname = pathname.slice(0, -1);
-  if (pathname !== "/dashboard" && !pathname.startsWith("/dashboard/")) return null;
+  if (!ROUTE_ROOTS.some((root) => pathname === root || pathname.startsWith(`${root}/`))) {
+    return null;
+  }
 
   const segments = pathname.split("/").filter(Boolean);
   const last = segments.length - 1;

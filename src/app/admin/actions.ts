@@ -8,6 +8,7 @@ import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { operatorRefusal } from "@/lib/operator-guard";
+import { moduleRefusal, personalRefusal } from "@/lib/personal-space-core";
 import {
   ensureOperatorParty,
   RelationshipError,
@@ -57,6 +58,24 @@ async function enabledSlugs(tenantId: string): Promise<string[]> {
       ),
   );
   return rows.map((r) => r.moduleId);
+}
+
+/**
+ * The console's sentence for an act a personal space refuses (ADR 0111), or
+ * null when the tenant is a business. A missing tenant is refused too, so a
+ * caller can return this and stop.
+ */
+async function personalRefusalFor(
+  tenantId: string,
+  act: Parameters<typeof personalRefusal>[1],
+): Promise<string | null> {
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+      columns: { kind: true },
+    }),
+  );
+  return tenant ? personalRefusal(tenant, act) : "No such business.";
 }
 
 /** Display name for an error message, falling back to the slug. */
@@ -128,6 +147,24 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
     const refusal = tenant
       ? operatorRefusal(tenant, "moduleOff")
       : "No such business.";
+    if (refusal) return { error: refusal };
+  }
+
+  // A tool switched on in the wrong KIND of workspace (ADR 0111): a personal
+  // tool in a business, or a business tool in somebody's personal space. The
+  // gate would refuse it anyway (`isModuleEnabled`); refusing it here means
+  // the console never writes a row that means nothing.
+  if (enabled) {
+    const [facts] = await withSystem((tx) =>
+      tx
+        .select({ kind: schema.tenants.kind, category: schema.modules.category })
+        .from(schema.tenants)
+        .innerJoin(schema.modules, eq(schema.modules.id, moduleId))
+        .where(eq(schema.tenants.id, tenantId))
+        .limit(1),
+    );
+    if (!facts) return { error: "No such business or feature." };
+    const refusal = moduleRefusal(facts.category, facts.kind);
     if (refusal) return { error: refusal };
   }
 
@@ -293,6 +330,9 @@ export async function installProfile(
   const parsed = installProfileSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const { tenantId, profileSlug } = parsed.data;
+
+  const personal = await personalRefusalFor(tenantId, "profile");
+  if (personal) return { error: personal };
 
   const profile = getIndustryProfile(profileSlug);
   if (!profile) return { error: `No such industry profile: ${profileSlug}` };
@@ -500,6 +540,10 @@ type BackfillOutcome =
  * party yet. Prospect rows are left alone on purpose — slice 3 decides which
  * of them are real and which are test residue, and a party for the residue
  * would be junk in the operator's CRM.
+ *
+ * Businesses only: a personal space's owner is not a client, and one appearing
+ * in the operator's CRM because a backfill swept it up is exactly the leak a
+ * personal space exists to prevent (ADR 0111).
  */
 export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
   const { userId } = await requireSuperAdmin();
@@ -509,6 +553,7 @@ export async function createOperatorPartiesAction(): Promise<BackfillOutcome> {
         isNotNull(schema.tenants.clerkOrgId),
         isNull(schema.tenants.operatorPartyId),
         eq(schema.tenants.isOperator, false),
+        eq(schema.tenants.kind, "business"),
       ),
       columns: { id: true },
     }),
@@ -681,11 +726,14 @@ export async function openSupportViewAction(
   const tenant = await withSystem((tx) =>
     tx.query.tenants.findFirst({
       where: eq(schema.tenants.id, parsed.data.tenantId),
-      columns: { id: true, isOperator: true },
+      columns: { id: true, isOperator: true, kind: true },
     }),
   );
   if (!tenant) return { error: "No such business." };
-  const refusal = operatorRefusal(tenant, "support");
+  // Never a personal space (ADR 0111) — and `resolveSupport` ends a session
+  // that finds one anyway, because this is only the button.
+  const refusal =
+    personalRefusal(tenant, "support") ?? operatorRefusal(tenant, "support");
   if (refusal) return { error: refusal };
 
   const session = await openSupportSession({
@@ -797,6 +845,9 @@ export async function setTenantLabels(input: z.infer<typeof setLabelsSchema>) {
   const parsed = setLabelsSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const { tenantId, labels } = parsed.data;
+
+  const personal = await personalRefusalFor(tenantId, "labels");
+  if (personal) return { error: personal };
 
   // An empty value means "use the default word", so it is dropped rather than
   // stored — otherwise the override would render as a blank heading.

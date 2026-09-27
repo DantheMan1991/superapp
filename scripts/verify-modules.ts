@@ -35,6 +35,13 @@ import { MODULES } from "./seed-catalogue";
  * made in the superadmin console, not a deploy step: a pack existing in the
  * catalogue and a client having bought it are different facts, and a check that
  * conflated them would nag forever about every pack nobody has sold yet.
+ *
+ * **With one exception, and it IS a deploy step: personal tools** (ADR 0111).
+ * Every available personal tool is on in every personal space — nobody sells
+ * one, and nobody can switch one on by hand — and the seed is what puts it
+ * there for spaces made before it shipped. So a space missing one is the seed
+ * not having run, the same fault as a missing catalogue row, and it fails the
+ * same way.
  */
 
 function resolveTarget(): { url: string; label: string } | null {
@@ -85,6 +92,20 @@ async function main() {
     status: string;
     category: string;
   }>(`select id, status, category from modules`);
+  // Personal spaces missing an available personal tool — see the header.
+  const { rows: toolGaps } = await pool.query<{ module_id: string; spaces: number }>(`
+    select m.id as module_id, count(*)::int as spaces
+      from tenants t
+      cross join modules m
+     where t.kind = 'personal'
+       and m.category = 'personal'
+       and m.status = 'available'
+       and not exists (
+         select 1 from tenant_modules tm
+          where tm.tenant_id = t.id and tm.module_id = m.id
+       )
+     group by m.id
+  `);
   await pool.end();
 
   const liveById = new Map(live.map((r) => [r.id, r]));
@@ -126,6 +147,18 @@ async function main() {
     console.error("\nFix with:  npm run db:seed" + (process.argv.includes("--dev") ? " -- --dev" : ""));
   }
 
+  if (toolGaps.length === 0) {
+    console.log("✓ every personal space has every available personal tool.");
+  } else {
+    console.error(
+      `\n✗ personal spaces missing a personal tool — the seed has not run since it shipped:\n`,
+    );
+    for (const gap of toolGaps) {
+      console.error(`  - ${gap.module_id}: missing from ${gap.spaces} space(s)`);
+    }
+    console.error("\nFix with:  npm run db:seed" + (process.argv.includes("--dev") ? " -- --dev" : ""));
+  }
+
   if (extra.length > 0) {
     console.log(
       `\nNote: ${extra.length} row(s) in the database the code no longer defines — ` +
@@ -133,7 +166,7 @@ async function main() {
     );
   }
 
-  process.exit(missing.length + drifted.length === 0 ? 0 : 1);
+  process.exit(missing.length + drifted.length + toolGaps.length === 0 ? 0 : 1);
 }
 
 main().catch((err) => {

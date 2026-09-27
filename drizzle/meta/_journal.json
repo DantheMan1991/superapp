@@ -2969,6 +2969,20 @@
       "when": 1790123779422,
       "tag": "0423_drop_the_takeoffs_first_link",
       "breakpoints": true
+    },
+    {
+      "idx": 424,
+      "version": "7",
+      "when": 1790520492847,
+      "tag": "0424_tenant_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 425,
+      "version": "7",
+      "when": 1790520519997,
+      "tag": "0425_tenants_kind_immutable",
+      "breakpoints": true
     }
   ]
 }

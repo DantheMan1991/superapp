@@ -41,6 +41,12 @@ export interface ReconcileResult {
   corrected: number;
   /** Members that could not be synced this run. */
   failed: number;
+  /**
+   * People Clerk lists in a PERSONAL space who are not its owner (ADR 0111).
+   * Never mirrored, and never counted as synced: somebody is in an
+   * organization they should not be able to join, and the audit row says so.
+   */
+  refused: number;
   /** True when the roster was fully listed and is safe to treat as complete. */
   complete: boolean;
 }
@@ -52,6 +58,7 @@ const EMPTY: ReconcileResult = {
   removed: 0,
   corrected: 0,
   failed: 0,
+  refused: 0,
   complete: false,
 };
 
@@ -223,6 +230,16 @@ export async function reconcileTenantMemberships(tenant: {
       // this person's role, so `complete` drops but removals below stay safe.
       result.failed += 1;
       result.complete = false;
+      continue;
+    }
+    if (outcome.status === "refused") {
+      result.refused += 1;
+      await logAudit({
+        action: "membership.refused_personal",
+        tenantId: tenant.id,
+        actorLabel: "membership-reconcile",
+        meta: { clerkUserId: member.clerkUserId },
+      });
       continue;
     }
     result.synced += 1;

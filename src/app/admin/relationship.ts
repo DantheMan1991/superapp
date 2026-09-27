@@ -3,6 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "@/db";
 import { isModuleEnabled } from "@/lib/modules";
 import { getOperatorTenant } from "@/lib/operator-tenant";
+import { PERSONAL_REFUSALS, personalRefusal } from "@/lib/personal-space-core";
 import { createParty, loadParty, PartyError } from "@/lib/parties";
 import { addContactPoint } from "@/lib/parties/contacts";
 
@@ -47,7 +48,11 @@ export interface EnsureResult {
   created: boolean;
 }
 
-export type RelationshipRefusal = "NO_OPERATOR" | "NOT_FOUND" | "IS_OPERATOR";
+export type RelationshipRefusal =
+  | "NO_OPERATOR"
+  | "NOT_FOUND"
+  | "IS_OPERATOR"
+  | "IS_PERSONAL";
 
 export class RelationshipError extends Error {
   constructor(
@@ -68,6 +73,8 @@ export function relationshipMessage(code: RelationshipRefusal): string {
       return "No such business.";
     case "IS_OPERATOR":
       return "The operator tenant is not a client of itself.";
+    case "IS_PERSONAL":
+      return PERSONAL_REFUSALS.party;
   }
 }
 
@@ -89,6 +96,7 @@ export async function ensureOperatorParty(
         contactEmail: true,
         isOperator: true,
         operatorPartyId: true,
+        kind: true,
       },
     }),
   );
@@ -98,6 +106,11 @@ export async function ensureOperatorParty(
       "IS_OPERATOR",
       "the operator is not a client of itself",
     );
+  }
+  // Somebody's personal space is not a client, and its owner never becomes a
+  // party in the operator's CRM through it (ADR 0111).
+  if (personalRefusal(tenant, "party")) {
+    throw new RelationshipError("IS_PERSONAL", "a personal space is not a client");
   }
   if (tenant.operatorPartyId) {
     return { partyId: tenant.operatorPartyId, created: false };

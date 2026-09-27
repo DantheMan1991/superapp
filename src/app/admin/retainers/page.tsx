@@ -34,9 +34,11 @@ export default async function AdminRetainersPage() {
       tx.query.tenants.findMany({
         // Workspaces only, and never the operator: it cannot hold a retainer
         // with itself (ADR 0041), and a row for it here would invite a timer.
+        // Nor a personal space, which holds none (ADR 0111).
         where: and(
           isNotNull(schema.tenants.clerkOrgId),
           eq(schema.tenants.isOperator, false),
+          eq(schema.tenants.kind, "business"),
         ),
         orderBy: [asc(schema.tenants.name)],
       }),

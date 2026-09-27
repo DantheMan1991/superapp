@@ -48,8 +48,11 @@ let entityId: string;
 function synced(
   result: MembershipSyncResult,
 ): Extract<MembershipSyncResult, { status: "synced" }> {
-  if (result.status !== "synced") {
+  if (result.status === "deferred") {
     throw new Error(`expected a synced membership, got deferred: ${result.missing}`);
+  }
+  if (result.status === "refused") {
+    throw new Error(`expected a synced membership, got refused: ${result.reason}`);
   }
   return result;
 }

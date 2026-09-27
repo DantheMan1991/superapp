@@ -133,10 +133,17 @@ export function localiseGuide(guide: Guide, vocabulary: Vocabulary): Guide {
  * switched on for this tenant. A guide for a module the business never bought
  * is not a secret, but a URL that describes a screen the reader cannot reach
  * is a confusing one. `settings` guides are owner-only, like the pages.
+ *
+ * A PERSONAL space (ADR 0111) reads the `personal` section, and a business
+ * reads it too — the door into a personal space is opened from a business.
+ * The business's own sections are not a personal space's to read: none of
+ * their screens will open for it. A feature's guide follows the module gate,
+ * which already knows which kind of workspace runs which tools.
  */
 export async function canReadGuide(ctx: TenantContext, guide: GuideMeta): Promise<boolean> {
   const fixed = fixedSection(guide.feature);
-  if (fixed) return !fixed.ownerOnly || ctx.role === "owner";
+  if (fixed?.personal) return true;
+  if (fixed) return ctx.tenant.kind === "business" && (!fixed.ownerOnly || ctx.role === "owner");
   if (!(guide.feature in featureRegistry)) return false;
   return isModuleEnabled(ctx.tenant.id, guide.feature);
 }

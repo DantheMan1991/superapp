@@ -57,9 +57,15 @@ export default async function AdminClientsPage() {
       .orderBy(desc(schema.tenants.createdAt)),
   );
 
+  // PERSONAL SPACES are not listed at all (ADR 0111): each is one person's
+  // own space, not a client, and the console opens nothing inside one. They
+  // are counted, so the number is not a secret — only the list is not kept.
+  const businesses = rows.filter((r) => r.tenant.kind === "business");
+  const personalSpaces = rows.length - businesses.length;
+
   // The operator tenant — the platform's own workspace (ADR 0041) — is listed
   // but is not a client: it counts in nothing and pays nobody.
-  const clients = rows.filter((r) => !r.tenant.isOperator);
+  const clients = businesses.filter((r) => !r.tenant.isOperator);
   // Workspaces the operator's CRM does not know yet (ADR 0041, slice 1).
   // Prospect rows are not counted: they have no workspace, and slice 3 decides
   // which of them are real.
@@ -83,7 +89,7 @@ export default async function AdminClientsPage() {
 
   // Concern first, then the operator's own row, then newest — so the table
   // stops being a list of names in the order they arrived.
-  const ordered = [...rows].sort((a, b) => {
+  const ordered = [...businesses].sort((a, b) => {
     const sa = signals.get(a.tenant.id)?.concernScore ?? 0;
     const sb = signals.get(b.tenant.id)?.concernScore ?? 0;
     if (sb !== sa) return sb - sa;
@@ -139,6 +145,13 @@ export default async function AdminClientsPage() {
           Last seen is a member&apos;s own sign-in; the thirty days are what
           the audit log saw.
         </p>
+        {personalSpaces > 0 && (
+          <p className="mb-3 text-sm text-muted-foreground">
+            {personalSpaces} personal space{personalSpaces === 1 ? " is" : "s are"}{" "}
+            not listed. Each is one person&apos;s own, not a client, and the
+            console does not open them.
+          </p>
+        )}
         {unlinked > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
             <span className="text-muted-foreground">
@@ -162,7 +175,7 @@ export default async function AdminClientsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 && (
+              {businesses.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={7}

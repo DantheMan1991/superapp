@@ -13,6 +13,27 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — Personal spaces are not clients (`claude/personal-space-p0`)
+
+A tenant can now be somebody's PERSONAL space (ADR 0111,
+[personal-space.md](personal-space.md)), and the console treats one as what it
+is: a person, not a client.
+
+- **Support view never opens one** (security.md S14/S15). `openSupportViewAction`
+  refuses it with `PERSONAL_REFUSALS.support`, and `resolveSupport` ends any
+  session it finds on one, audited as `support.refused_personal`.
+- **`/admin` counts personal spaces and does not list them.** The client list,
+  its stats, its health signals and the "no party yet" count are all
+  businesses. The module matrix and the retainer list are businesses only.
+- **A personal space's tenant page is its own**, `personal-detail.tsx`: owner,
+  clock and tools. No relationship, retainer, billing, profile, vocabulary or
+  support form, and **no activity log**, because a personal space's audit rows
+  are the person's own activity.
+- **Every console act that makes a personal space into a client refuses it**:
+  the CRM party (`IS_PERSONAL`; the backfill now selects businesses only),
+  an industry profile, vocabulary, a retainer. `toggleModule` refuses a tool in
+  the wrong kind of workspace (`moduleRefusal`).
+
 ### 2026-09-10 — Slice 7d: Discovery leaves the console (`claude/back-office-7d-discovery-leaves-the-console`)
 
 **The last slice of the plan.** Discovery is now the

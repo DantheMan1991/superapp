@@ -133,6 +133,18 @@ The flag is read by the console to refuse its own buttons
 where a lead lands — and by nothing else. The plan that follows from this is
 [modules/back-office.md](modules/back-office.md).
 
+### Personal spaces (planned)
+
+A person's own tools (workouts, then diet) live in a **tenant of kind
+`personal`**: a Clerk organization of exactly one member, one per person,
+provisioned by us rather than created in the business onboarding form (ADR
+[0111](decisions/0111-a-personal-space-is-a-workspace-of-one-and-support-view-never-opens-it.md)).
+To RLS it is an ordinary tenant, so nothing about `withTenant` changes. Three
+places will read `tenants.kind`: the rail, the module gate (a `personal` tool
+is never enabled on a business, nor a business module on a personal space) and
+support view, which **never** opens a personal space. Not built yet; the plan
+is [modules/personal-space.md](modules/personal-space.md).
+
 ---
 
 ## 5. Request lifecycle

@@ -16,7 +16,9 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 ### 2026-09-27 — F1: the program, imported (`claude/fitness-f1`)
 
 Migrations `0426` (five tables, three enums; hand-reordered, see Decisions)
-and `0427` (their RLS). Workouts ships **`coming_soon`**: the founder chose
+and `0427` (their RLS), applied to the dev branch and to production before
+the merge (production on the founder's word, ADR 0014: additive only), and
+the catalogue row seeded on both. Workouts ships **`coming_soon`**: the founder chose
 "just me until workout mode", so it is in his personal space (a superadmin's
 space previews a `coming_soon` personal tool) and nobody else's, and the
 `Personal space` door stays shut to everyone but superadmins.

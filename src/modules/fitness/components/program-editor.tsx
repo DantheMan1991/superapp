@@ -60,7 +60,7 @@ import { DeleteProgramButton } from "./delete-program-button";
 export type EditorMode =
   | { kind: "import"; importId: string }
   | { kind: "new" }
-  | { kind: "edit"; programId: string; version: number };
+  | { kind: "edit"; programId: string; version: number; sessions: number };
 
 const HOME = "/personal/m/fitness";
 
@@ -183,6 +183,33 @@ export function ProgramEditor({ initial, mode }: { initial: ProgramInput; mode: 
             onChange={(min, max) => patch({ effortMin: min, effortMax: max })}
           />
         </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="program-breath-out">Breathing pace, in seconds</Label>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Input
+              id="program-breath-out"
+              inputMode="numeric"
+              className="w-20"
+              value={program.breathOutS}
+              onChange={(e) => patch({ breathOutS: e.target.value })}
+              placeholder="5"
+              aria-label="Breathing pace: seconds out"
+            />
+            <span className="text-muted-foreground">out,</span>
+            <Input
+              inputMode="numeric"
+              className="w-20"
+              value={program.breathInS}
+              onChange={(e) => patch({ breathInS: e.target.value })}
+              placeholder="5"
+              aria-label="Breathing pace: seconds in"
+            />
+            <span className="text-muted-foreground">in</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The breath pacer in a session keeps this pace. Left empty, it uses 5 and 5.
+          </p>
+        </div>
       </section>
 
       <p className="text-sm text-muted-foreground">
@@ -236,7 +263,11 @@ export function ProgramEditor({ initial, mode }: { initial: ProgramInput; mode: 
           <p className="text-sm text-muted-foreground">
             Removes the program and every phase and exercise in it. This cannot be undone.
           </p>
-          <DeleteProgramButton programId={mode.programId} name={program.name || "this program"} />
+          <DeleteProgramButton
+            programId={mode.programId}
+            name={program.name || "this program"}
+            sessions={mode.sessions}
+          />
         </section>
       )}
 

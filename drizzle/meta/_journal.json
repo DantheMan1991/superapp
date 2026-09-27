@@ -2997,6 +2997,20 @@
       "when": 1790524615854,
       "tag": "0427_fitness_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 428,
+      "version": "7",
+      "when": 1790532281400,
+      "tag": "0428_fitness_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 429,
+      "version": "7",
+      "when": 1790532330721,
+      "tag": "0429_fitness_sessions_rls",
+      "breakpoints": true
     }
   ]
 }

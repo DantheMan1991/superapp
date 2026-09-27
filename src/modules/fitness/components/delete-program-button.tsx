@@ -14,9 +14,21 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { deleteProgramAction } from "../actions";
+import { countOf } from "../core/program";
 
-/** Delete a program and everything in it, after asking by name. */
-export function DeleteProgramButton({ programId, name }: { programId: string; name: string }) {
+/**
+ * Delete a program and everything in it, after asking by name, and saying how
+ * many workouts go with it: deleting a program deletes its sessions too.
+ */
+export function DeleteProgramButton({
+  programId,
+  name,
+  sessions,
+}: {
+  programId: string;
+  name: string;
+  sessions: number;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -46,7 +58,9 @@ export function DeleteProgramButton({ programId, name }: { programId: string; na
         <DialogHeader>
           <DialogTitle>Delete {name}?</DialogTitle>
           <DialogDescription>
-            Every phase and exercise in it goes too. This cannot be undone.
+            {sessions > 0
+              ? `Every phase and exercise in it goes too, and the ${countOf(sessions, "workout", "workouts")} you have done with it. This cannot be undone.`
+              : "Every phase and exercise in it goes too. This cannot be undone."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

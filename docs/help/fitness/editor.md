@@ -14,7 +14,8 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 - **`Written by`.** Who wrote it, if anybody. Leave it empty for your own.
 - **`How the program works`.** The program's rules in a few sentences: how often, how hard, how to breathe, when to move on. It shows at the top of the program.
 - **`Sessions a week`.** How many sessions a week the program asks for, as one number or a range: `3` to `4`. Leave the second box empty for a single number.
-- **`Effort, out of 10`.** How hard the program says to work, on a scale of 1 to 10, as one number or a range.
+- **`Effort, out of 10`.** How hard the program says to work, on a scale of 1 to 10, as one number or a range. After each exercise in a session, this range is marked on the effort scale.
+- **`Breathing pace, in seconds`.** How long to breathe out and how long to breathe in, for example `5` out, `5` in. The breath pacer in a session keeps this pace. Left empty, it uses 5 and 5. An import fills it in when the program states a pace.
 - **The count line**, for example `4 phases · 14 exercises`.
 - **Each phase**, in its own box:
   - **`Phase 1`** and its name, for example `Weeks 1–2`.
@@ -67,7 +68,7 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 ## How to delete a program
 
 1. Open the program, click {button:Edit program|outline|pencil}, and scroll to `Delete this program`.
-2. Click {button:Delete program|destructive}. You are asked `Delete` and the program's name.
+2. Click {button:Delete program|destructive}. You are asked `Delete` and the program's name. When you have done workouts with it, the question says how many go with it, for example `and the 12 workouts you have done with it`.
 3. Click {button:Delete program|destructive} again to confirm, or {button:Keep it|ghost} to go back. You see `Program deleted` and the Workouts page opens.
 
 ## Messages
@@ -85,6 +86,8 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 | `Weeks 1–2, exercise 2: Write the start as minutes and seconds, like 0:42.` | `Start` or `End` could not be read. |
 | `Weeks 1–2, exercise 2: a video's end must come after its start.` | `End` is before `Start`. |
 | `Effort must be between 1 and 10.` | Effort is on a scale of 1 to 10. |
+| `Breathing pace must be between 1 and 30.` | Each part of the pace is a number of seconds, from 1 to 30. |
+| `Breathing out must be a whole number.` | Write the seconds as a whole number, like `5`. The same goes for breathing in. |
 | `This program changed since you opened it. Reload the page to see the latest, then make your change again.` | It was saved somewhere else, for example in another tab, after you opened it. Reload, then make your change again. |
 | `That program is not here any more. It may have been deleted.` | The program was deleted after you opened it. |
 | `The program could not be saved. Try again.` | Something went wrong. Click {button:Save program|primary} again. |

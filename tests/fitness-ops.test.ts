@@ -13,6 +13,8 @@ import {
   loadProgram,
   programToInput,
   saveProgram,
+  sessionPlan,
+  type LoadedProgram,
 } from "../src/modules/fitness/program-ops";
 import {
   INTERRUPTED,
@@ -26,6 +28,9 @@ import {
 } from "../src/modules/fitness/import-ops";
 import { DraftModelError } from "../src/modules/fitness/draft-model";
 import { ensurePersonalTools } from "../src/lib/personal-space";
+import { randomUUID } from "node:crypto";
+import { beginSession, recordSet, type SessionDoc } from "../src/modules/fitness/core/session";
+import { lastSession, saveSession, sessionCount } from "../src/modules/fitness/session-ops";
 
 /**
  * Workouts against a real database (docs/modules/fitness.md, F1): a program
@@ -51,6 +56,8 @@ function aProgram(): ProgramInput {
     sessionsPerWeekMax: 4,
     effortMin: 3,
     effortMax: 5,
+    breathOutS: 5,
+    breathInS: 4,
     phases: [
       {
         phaseId: null,
@@ -410,6 +417,129 @@ d("workouts: programs and imports", () => {
       }).catch((err) => {
         if (err !== Rollback) throw err;
       });
+    });
+  });
+
+  describe("workout sessions (F2a)", () => {
+    async function freshProgram(name: string): Promise<LoadedProgram> {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...aProgram(), name }, { programId: null, source: "own" }),
+      );
+      const program = await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId));
+      return program!;
+    }
+
+    function withSet(program: LoadedProgram, doc: SessionDoc, count: number): SessionDoc {
+      return recordSet(sessionPlan(program, 0), doc, {
+        itemIndex: 0,
+        count,
+        setId: randomUUID(),
+        exerciseId: randomUUID(),
+        now: new Date(),
+      });
+    }
+
+    async function setsOf(sessionId: string) {
+      return inTenant((tx) =>
+        tx
+          .select({ id: schema.fitnessSets.id, count: schema.fitnessSets.count })
+          .from(schema.fitnessSets)
+          .innerJoin(
+            schema.fitnessSessionExercises,
+            eq(schema.fitnessSessionExercises.id, schema.fitnessSets.sessionExerciseId),
+          )
+          .where(eq(schema.fitnessSessionExercises.sessionId, sessionId)),
+      );
+    }
+
+    it("keeps a session sent whole, again and again, and never lets an older copy undo a newer one", async () => {
+      const program = await freshProgram("Sessions, sent whole");
+      let doc = beginSession(sessionPlan(program, 0), { id: randomUUID(), now: new Date(), feelBefore: 4 });
+      doc = withSet(program, doc, 8);
+      expect(await inTenant((tx) => saveSession(tx, tenant.id, doc))).toEqual({ revision: 2, stale: false });
+      // The same document again (a phone that did not hear back): acknowledged, nothing new.
+      expect(await inTenant((tx) => saveSession(tx, tenant.id, doc))).toEqual({ revision: 2, stale: true });
+
+      const older = doc;
+      doc = withSet(program, doc, 7);
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      // The older copy, arriving late, is ignored.
+      expect(await inTenant((tx) => saveSession(tx, tenant.id, older))).toEqual({ revision: 3, stale: true });
+      expect((await setsOf(doc.id)).map((s) => s.count).sort()).toEqual([7, 8]);
+
+      // Following the program: one enrollment, made by the first session.
+      const enrollments = await inTenant((tx) =>
+        tx.select().from(schema.fitnessEnrollments).where(eq(schema.fitnessEnrollments.programId, program.id)),
+      );
+      expect(enrollments).toHaveLength(1);
+      expect(enrollments[0]).toMatchObject({ startedOn: doc.localDay, endedAt: null, side: null });
+
+      // A set taken back: the next revision without it deletes its row.
+      const takenBack: SessionDoc = {
+        ...doc,
+        revision: doc.revision + 1,
+        exercises: doc.exercises.map((exercise) => ({ ...exercise, sets: exercise.sets.slice(0, 1) })),
+      };
+      await inTenant((tx) => saveSession(tx, tenant.id, takenBack));
+      expect(await setsOf(doc.id)).toHaveLength(1);
+
+      const last = await inTenant((tx) => lastSession(tx, tenant.id, program.id));
+      expect(last).toMatchObject({ id: doc.id, sets: 1, feelBefore: 4, finishedAt: null, localDay: doc.localDay });
+      expect(last?.phaseName).toBe(program.phases[0].name);
+    });
+
+    it("refuses a session id another program's session holds, and a day ahead of any today", async () => {
+      const a = await freshProgram("Sessions, program A");
+      const b = await freshProgram("Sessions, program B");
+      const doc = beginSession(sessionPlan(a, 0), { id: randomUUID(), now: new Date(), feelBefore: null });
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      await expect(
+        inTenant((tx) => saveSession(tx, tenant.id, { ...doc, programId: b.id, revision: 5 })),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      const ahead = { ...beginSession(sessionPlan(a, 0), { id: randomUUID(), now: new Date(), feelBefore: null }), localDay: "2099-01-01" };
+      await expect(inTenant((tx) => saveSession(tx, tenant.id, ahead))).rejects.toMatchObject({ code: "INVALID" });
+    });
+
+    it("keeps a log when an edit removes what it logged, and deletes it with the program", async () => {
+      const program = await freshProgram("Sessions, edited");
+      let doc = beginSession(sessionPlan(program, 0), { id: randomUUID(), now: new Date(), feelBefore: null });
+      doc = withSet(program, doc, 8);
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+
+      // The exercise it logged is edited away: the log stays, its link nulled
+      // (the column-list SET NULL; a bare one could not run), its name kept.
+      const input = programToInput(program);
+      input.phases[0].items = input.phases[0].items.slice(1);
+      await inTenant((tx) => saveProgram(tx, tenant.id, input, { programId: program.id, version: program.version }));
+      const [logged] = await inTenant((tx) =>
+        tx
+          .select()
+          .from(schema.fitnessSessionExercises)
+          .where(eq(schema.fitnessSessionExercises.sessionId, doc.id)),
+      );
+      expect(logged).toMatchObject({ itemId: null, exerciseId: null, name: "Hip lift", unit: "breaths" });
+
+      // The phone sends it again, still naming the item that is gone: stored as null, not refused.
+      await inTenant((tx) => saveSession(tx, tenant.id, { ...doc, revision: doc.revision + 1 }));
+      expect(await setsOf(doc.id)).toHaveLength(1);
+
+      // Its whole phase edited away: the session keeps the phase's name.
+      const edited = await inTenant((tx) => loadProgram(tx, tenant.id, program.id));
+      const without = programToInput(edited!);
+      without.phases = without.phases.slice(1);
+      await inTenant((tx) => saveProgram(tx, tenant.id, without, { programId: program.id, version: edited!.version }));
+      const [session] = await inTenant((tx) =>
+        tx.select().from(schema.fitnessSessions).where(eq(schema.fitnessSessions.id, doc.id)),
+      );
+      expect(session).toMatchObject({ phaseId: null, phaseName: program.phases[0].name });
+
+      // Deleting the program takes its workouts with it, and the dialog can say how many.
+      expect(await inTenant((tx) => sessionCount(tx, tenant.id, program.id))).toBe(1);
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+      expect(
+        await inTenant((tx) => tx.select().from(schema.fitnessSessions).where(eq(schema.fitnessSessions.id, doc.id))),
+      ).toEqual([]);
+      expect(await setsOf(doc.id)).toEqual([]);
     });
   });
 });

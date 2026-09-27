@@ -75,6 +75,8 @@ export interface EditorProgram {
   sessionsPerWeekMax: string;
   effortMin: string;
   effortMax: string;
+  breathOutS: string;
+  breathInS: string;
   phases: EditorPhase[];
 }
 
@@ -142,6 +144,8 @@ export function toEditor(program: ProgramInput): EditorProgram {
     sessionsPerWeekMax: numberText(program.sessionsPerWeekMax),
     effortMin: numberText(program.effortMin),
     effortMax: numberText(program.effortMax),
+    breathOutS: numberText(program.breathOutS),
+    breathInS: numberText(program.breathInS),
     phases: program.phases.map(toEditorPhase),
   };
 }
@@ -257,11 +261,14 @@ export function fromEditor(
     sessionsPerWeekMax: need("Sessions a week (to)", editor.sessionsPerWeekMax, false),
     effortMin: need("Effort", editor.effortMin, false),
     effortMax: need("Effort (to)", editor.effortMax, false),
+    breathOutS: need("Breathing out", editor.breathOutS, false),
+    breathInS: need("Breathing in", editor.breathInS, false),
     phases,
   };
   problems.push(...programProblems(program));
   outOfRange(problems, "Sessions a week", [program.sessionsPerWeekMin, program.sessionsPerWeekMax], 14);
   outOfRange(problems, "Effort", [program.effortMin, program.effortMax], 10);
+  outOfRange(problems, "Breathing pace", [program.breathOutS, program.breathInS], 30);
   program.phases.forEach((phase, p) => {
     const phaseName = phase.name || `Phase ${p + 1}`;
     outOfRange(problems, `${phaseName}: days before moving on`, [phase.minDoneDays], 365);

@@ -4,15 +4,19 @@
 > **Route:** /personal/m/fitness/programs/*
 > **Order:** 30
 
-Open **Workouts** and click a program. Pick the phase you are on, then go down the exercises in order. Tap a video to play it here.
+Open **Workouts** and click a program. It opens on the phase of your last workout. Click {button:Start today's session|primary|play} to do the phase on screen, one exercise at a time. See [Doing a session](workout.md).
 
 ## What you see
 
 - **The program's name**, with who wrote it and where it came from: `Imported from a PDF` or `Built by hand`.
 - **{button:Edit program|outline|pencil}.** Opens the program to change or delete it. See [Building and editing a program](editor.md).
-- **The program's rules**, when it has them: badges like {badge:3–4 sessions a week|secondary} and {badge:effort 3–5 of 10|secondary}, and a few sentences on how the program works.
-- **The phases**, as a row of buttons, when there is more than one. The phase you are looking at is highlighted. Click another to open it.
+- **The program's rules**, when it has them: badges like {badge:3–4 sessions a week|secondary}, {badge:effort 3–5 of 10|secondary} and {badge:breathe 5 s out, 5 s in|secondary}, and a few sentences on how the program works.
+- **The phases**, as a row of buttons, when there is more than one. The phase you are looking at is highlighted. Click another to open it. The page opens on the phase of your last workout, or the first phase before your first.
 - **The phase's name**, with how many exercises it has, `in this order`, and how many days to do it before moving on, for example `14 days before moving on`.
+- **{button:Start today's session|primary|play}.** Starts a session for this phase. See [Doing a session](workout.md).
+  - When a session is still open on this phone, the button reads {button:Resume today's session|primary|play}, with a line like `Open for Phase 1: Weeks 1-2. It picks up at the set you were on.` It takes you back to that phase and that set.
+  - When a finished workout has not reached us yet, a line says so, for example `1 workout on this phone not sent yet. It goes when there is signal.` It is sent by itself while this page is open.
+- **`Last workout`**, once you have done one, for example `Last workout: yesterday · Phase 1: Weeks 1-2 · 12 sets · felt 4 before, 7 after`. It adds `not finished` for a session you left open.
 - **Each exercise**, in the order to do them:
   - **The video.** `Tap to play here` plays it on this page. When only part of the video is set to play, the times show beside it, for example `Tap to play here · 0:42–1:10`. One video plays at a time: tapping another stops the one already playing, and it starts from the beginning when you tap it again. A video that only plays on YouTube reads `This video only plays on YouTube.` with {button:Open in YouTube|link|external-link}.
   - **Its number and name**, with {badge:Optional} when it is extra.
@@ -25,14 +29,14 @@ Open **Workouts** and click a program. Pick the phase you are on, then go down t
 
 ## How to follow a session
 
-1. Open the program and click the phase you are on.
-2. Start with exercise 1. Tap its video if you want to watch it.
-3. Do the sets and count shown, checking yourself against `Doing it right`.
-4. Go down the list in order.
+1. Open the program. Check it is on the phase you are doing, or click that phase.
+2. Click {button:Start today's session|primary|play}.
+3. Follow the screen, one exercise at a time. See [Doing a session](workout.md).
+
+To read the program without starting, go down the exercises on this page. Tap a video to watch it.
 
 ## Not on this page
 
-- **A workout screen.** One exercise at a time, full screen, with the breaths paced and counted for you and each set logged, is next.
 - **Your progress.** Days done in each phase and when the next one opens come after that.
 
 ## Who can do what

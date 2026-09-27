@@ -3,7 +3,8 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { FitnessVideo } from "@/db/schema";
 import { FitnessError } from "./core/errors";
-import type { ItemInput, ProgramInput, VideoInput } from "./core/program";
+import { breathPace, type ItemInput, type ProgramInput, type VideoInput } from "./core/program";
+import type { SessionPlan } from "./core/session";
 
 /**
  * A PROGRAM: saving one from the editor, reading one back, deleting one. Every
@@ -150,6 +151,8 @@ function programColumns(input: ProgramInput) {
     sessionsPerWeekMax: input.sessionsPerWeekMax,
     effortMin: input.effortMin,
     effortMax: input.effortMax,
+    breathOutS: input.breathOutS,
+    breathInS: input.breathInS,
   };
 }
 
@@ -310,6 +313,8 @@ export interface LoadedProgram {
   sessionsPerWeekMax: number | null;
   effortMin: number | null;
   effortMax: number | null;
+  breathOutS: number | null;
+  breathInS: number | null;
   version: number;
   phases: LoadedPhase[];
 }
@@ -353,6 +358,8 @@ export async function loadProgram(
     sessionsPerWeekMax: program.sessionsPerWeekMax,
     effortMin: program.effortMin,
     effortMax: program.effortMax,
+    breathOutS: program.breathOutS,
+    breathInS: program.breathInS,
     version: program.version,
     phases: phases.map((phase) => ({
       id: phase.id,
@@ -395,6 +402,8 @@ export function programToInput(program: LoadedProgram): ProgramInput {
     sessionsPerWeekMax: program.sessionsPerWeekMax,
     effortMin: program.effortMin,
     effortMax: program.effortMax,
+    breathOutS: program.breathOutS,
+    breathInS: program.breathInS,
     phases: program.phases.map((phase) => ({
       phaseId: phase.id,
       name: phase.name,
@@ -423,5 +432,47 @@ export function programToInput(program: LoadedProgram): ProgramInput {
         notes: item.notes,
       })),
     })),
+  };
+}
+
+/**
+ * A phase of a loaded program as workout mode runs it (core/session.ts): the
+ * items in order with what each asks, the program's breathing pace and effort
+ * zone, and each exercise's first video, which is THE video.
+ */
+export function sessionPlan(program: LoadedProgram, phaseIndex: number): SessionPlan {
+  const phase = program.phases[phaseIndex];
+  return {
+    programId: program.id,
+    programName: program.name,
+    phaseId: phase.id,
+    phaseName: phase.name,
+    phaseIndex,
+    phaseCount: program.phases.length,
+    phases: program.phases.map((p) => ({ id: p.id, name: p.name })),
+    breath: breathPace(program),
+    effort:
+      program.effortMin != null ? { min: program.effortMin, max: program.effortMax ?? program.effortMin } : null,
+    items: phase.items.map((item) => {
+      const video = item.exercise.videos[0];
+      return {
+        itemId: item.id,
+        exerciseId: item.exercise.id,
+        name: item.exercise.name,
+        purpose: item.exercise.purpose,
+        cues: item.exercise.cues,
+        unit: item.exercise.unit,
+        perSide: item.perSide,
+        optional: item.optional,
+        setsMin: item.setsMin,
+        setsMax: item.setsMax,
+        targetMin: item.targetMin,
+        targetMax: item.targetMax,
+        notes: item.notes,
+        video: video
+          ? { id: video.id, startS: video.startS, endS: video.endS, embeddable: video.embeddable }
+          : null,
+      };
+    }),
   };
 }

@@ -4,8 +4,10 @@ import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { prescription } from "../core/program";
+import { breathPace, countOf, prescription } from "../core/program";
 import type { LoadedItem, LoadedProgram } from "../program-ops";
+import type { LastSession } from "../session-ops";
+import { StartSessionButton } from "./start-session-button";
 import { VideoPlayer } from "./video-player";
 
 /**
@@ -15,15 +17,30 @@ import { VideoPlayer } from "./video-player";
  * done right.
  *
  * A server component: the phase is `?phase=` in the URL, the house's device
- * for view state, so a link or a refresh lands on the same phase. Only the
- * video player is client code.
+ * for view state, so a link or a refresh lands on the same phase. Without it
+ * the page opens on the phase of the last workout, so every chip names its
+ * phase outright. Only the video player and the Start button are client code.
  */
-export function ProgramView({ program, phaseIndex }: { program: LoadedProgram; phaseIndex: number }) {
+export function ProgramView({
+  program,
+  phaseIndex,
+  lastSession,
+  today,
+}: {
+  program: LoadedProgram;
+  phaseIndex: number;
+  lastSession: LastSession | null;
+  /** The personal space's own today, `YYYY-MM-DD`. */
+  today: string;
+}) {
   const base = `/personal/m/fitness/programs/${program.id}`;
   const phase = program.phases[phaseIndex] ?? program.phases[0];
   const facts = [
     range(program.sessionsPerWeekMin, program.sessionsPerWeekMax, "session a week", "sessions a week"),
     program.effortMin != null ? `effort ${range(program.effortMin, program.effortMax, "", "")} of 10` : null,
+    program.breathOutS != null || program.breathInS != null
+      ? `breathe ${breathPace(program).outS} s out, ${breathPace(program).inS} s in`
+      : null,
   ].filter((fact): fact is string => fact !== null && fact !== "");
 
   return (
@@ -65,7 +82,7 @@ export function ProgramView({ program, phaseIndex }: { program: LoadedProgram; p
           {program.phases.map((p, i) => (
             <Link
               key={p.id}
-              href={i === 0 ? base : `${base}?phase=${i + 1}`}
+              href={`${base}?phase=${i + 1}`}
               aria-current={p.id === phase?.id ? "page" : undefined}
               className={cn(
                 "rounded-full border px-3 py-1 text-sm",
@@ -90,6 +107,25 @@ export function ProgramView({ program, phaseIndex }: { program: LoadedProgram; p
             </p>
             {phase.notes && <p className="mt-2 text-sm">{phase.notes}</p>}
           </div>
+          {phase.items.length > 0 && (
+            <div className="space-y-2">
+              <StartSessionButton
+                programId={program.id}
+                phaseIds={program.phases.map((p) => p.id)}
+                phaseNumber={phaseIndex + 1}
+              />
+              {lastSession && (
+                <p className="text-sm text-muted-foreground">
+                  Last workout: {dayWords(lastSession.localDay, today)} · {lastSession.phaseName || "a phase since removed"}{" "}
+                  · {countOf(lastSession.sets, "set", "sets")}
+                  {lastSession.feelBefore != null && lastSession.feelAfter != null
+                    ? ` · felt ${lastSession.feelBefore} before, ${lastSession.feelAfter} after`
+                    : ""}
+                  {lastSession.finishedAt ? "" : " · not finished"}
+                </p>
+              )}
+            </div>
+          )}
           <ol className="space-y-4">
             {phase.items.map((item, i) => (
               <ExerciseCard key={item.id} item={item} index={i} />
@@ -166,4 +202,17 @@ function range(min: number | null, max: number | null, one: string, many: string
   const span = max != null && max !== min ? `${min}–${max}` : String(min);
   const word = (max ?? min) === 1 ? one : many;
   return word ? `${span} ${word}` : span;
+}
+
+/** "today", "yesterday", or the date: when a workout was, in the person's own days. */
+function dayWords(localDay: string, today: string): string {
+  if (localDay === today) return "today";
+  const yesterday = new Date(`${today}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  if (localDay === yesterday.toISOString().slice(0, 10)) return "yesterday";
+  return new Date(`${localDay}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }

@@ -82,7 +82,7 @@ import {
   type PersonalOrgClerk,
 } from "../src/lib/personal-space";
 import { getActiveModules, isModuleEnabled } from "../src/lib/modules";
-import { personalOrgMetadata } from "../src/lib/personal-space-core";
+import { personalOrgMetadata, personalSlug } from "../src/lib/personal-space-core";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -93,8 +93,12 @@ const STAMP = `personal-db-${PID}`;
 const user = (tag: string) => `user_pdb${tag}${PID}`;
 const org = (tag: string) => `org_pdb${tag}${PID}`;
 
-/** A fake Clerk that makes organizations with our ids and records what it was asked. */
-function fakeClerk(opts: { beforeReturn?: (o: { id: string; name: string; slug: string }) => Promise<void> } = {}) {
+/**
+ * A fake Clerk that makes organizations with our ids and records what it was
+ * asked. Slugs come back null, as they do from the real instance, which has
+ * organization slugs switched off.
+ */
+function fakeClerk(opts: { beforeReturn?: (o: { id: string; name: string; slug: null }) => Promise<void> } = {}) {
   const created: Array<Parameters<PersonalOrgClerk["createOrganization"]>[0] & { id: string }> = [];
   const deleted: string[] = [];
   let n = 0;
@@ -103,7 +107,7 @@ function fakeClerk(opts: { beforeReturn?: (o: { id: string; name: string; slug: 
       n += 1;
       const id = `${org("fake")}x${n}${Math.random().toString(36).slice(2, 8)}`;
       created.push({ ...params, id });
-      const made = { id, name: params.name, slug: params.slug };
+      const made = { id, name: params.name, slug: null };
       if (opts.beforeReturn) await opts.beforeReturn(made);
       return { ...made, publicMetadata: params.publicMetadata };
     },
@@ -244,9 +248,13 @@ d("personal spaces: sync, provisioning, membership and the gate", () => {
         maxAllowedMemberships: 1,
         publicMetadata: personalOrgMetadata(user("prov")),
       });
-      expect(created[0].slug).toMatch(/^personal-[0-9a-f]{8}$/);
+      // Clerk is never sent a slug: the real instance refuses one with 403
+      // `organization_slugs_disabled`, which is how driving P0 first failed.
+      expect(created[0]).not.toHaveProperty("slug");
 
       const [row] = await tenantsByOrg(created[0].id);
+      // The slug is ours, from the organization id, and carries no name.
+      expect(row.slug).toBe(personalSlug(created[0].id));
       expect(row.kind).toBe("personal");
       expect(row.personalOwnerClerkUserId).toBe(user("prov"));
       expect(row.timezone).toBe("America/Chicago");
@@ -304,10 +312,10 @@ d("personal spaces: sync, provisioning, membership and the gate", () => {
       const deleted: string[] = [];
       let madeId = "";
       const clerk: PersonalOrgClerk = {
-        async createOrganization(params) {
+        async createOrganization() {
           madeId = `${org("fail")}${Math.random().toString(36).slice(2, 8)}`;
           // A null name cannot be inserted: the row fails after Clerk has said yes.
-          return { id: madeId, name: null as unknown as string, slug: params.slug, publicMetadata: {} };
+          return { id: madeId, name: null as unknown as string, slug: null, publicMetadata: {} };
         },
         async deleteOrganization(id) {
           deleted.push(id);

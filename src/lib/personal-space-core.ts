@@ -127,12 +127,26 @@ export function kindFromOrgMetadata(
 }
 
 /**
- * A personal space's slug. Random rather than the person's name: Clerk wants
- * organization slugs unique across the whole instance, a consumer product will
- * have a great many people called Dan, and a slug is no place for a name.
+ * A personal space's slug — OURS, derived from its Clerk organization id.
+ *
+ * Never sent to Clerk: this instance has organization slugs switched off, and
+ * Clerk refuses a create call that carries one (`organization_slugs_disabled`,
+ * 403 — found by driving P0, 2026-09-27; the console's business provisioning
+ * only survives it by retrying without). So the slug exists only in
+ * `tenants.slug`, where it must be unique and should carry no name — a
+ * consumer product will have a great many people called Dan.
+ *
+ * Derived rather than random so that the webhook and provisioning, racing to
+ * insert the same row (`insertTenantFromOrgInTx`), compute the same one. Two
+ * ids whose tails collide are still told apart by that function's suffix loop.
  */
-export function personalSlug(randomHex: string): string {
-  return `personal-${randomHex.toLowerCase()}`;
+export function personalSlug(clerkOrgId: string): string {
+  const tail = clerkOrgId
+    .replace(/^org_/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(-12);
+  return `personal-${tail || "space"}`;
 }
 
 /**

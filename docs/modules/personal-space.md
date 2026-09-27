@@ -36,12 +36,16 @@ tool.
   business and anybody but the owner.
 - **Provisioning** (`src/lib/personal-space.ts`, `provisionPersonalSpace`). It
   runs under a per-person advisory lock. It creates the Clerk organization
-  (named `Personal`, a random `personal-xxxxxxxx` slug,
-  `maxAllowedMemberships: 1`, and our mark in public metadata) and inserts the
-  row through the same `insertTenantFromOrgInTx` the webhook uses. It sets the
-  clock from the browser and switches on every available personal tool. If
-  anything fails after Clerk has said yes, it deletes the organization again.
-  The Clerk calls are injected, so the whole of it is tested without Clerk.
+  (named `Personal`, `maxAllowedMemberships: 1`, our mark in public metadata,
+  and NO slug) and inserts the row through the same `insertTenantFromOrgInTx`
+  the webhook uses. The slug is whatever Clerk invents even with slugs off
+  (seen: `personal-1790521342783675516`), and ours from the organization id
+  (`personalSlug`) when it invents none. It sets the clock from the browser and
+  switches on every available personal tool. If anything fails after Clerk has
+  said yes, it deletes the organization again. The Clerk calls are injected,
+  so the whole of it is tested without Clerk. The action then reconciles the
+  owner's membership at once, as onboarding does for a business, and the door
+  and onboarding do it again on the way in.
 - **The webhook race, both orders.** The organization's public metadata
   carries the mark (`yosherKind: "personal"`, `personalOwner`), so
   `organization.created` landing BEFORE our insert mirrors it as a personal
@@ -238,6 +242,21 @@ certifies it like any pair.
   create" has to be atomic per person. Otherwise a double click makes two Clerk
   organizations, and only one of them can ever be a row. The cost is a
   transaction held open across one HTTP call, once per person, ever.
+- **Clerk is never sent a slug.** This Clerk instance has organization slugs
+  switched off, and it answers a create that carries one with 403
+  `organization_slugs_disabled`. The first drive of P0 failed exactly there
+  (the catch-all "could not be made"; the log said why). The fake Clerk in the
+  tests had happily accepted the slug, which is the lesson: a fake only knows
+  what you told it. The console's business provisioning survives the same
+  refusal by accident, retrying without the slug after logging an error.
+  Clerk still invents a slug of its own, and both racers read that same one
+  off the organization; `personalSlug`, from the organization id, is the
+  fallback when it does not.
+- **A personal space's owner needs a `memberships` row, and localhost gets no
+  webhooks.** The first drive made a space with nobody in `memberships`. Nothing
+  in P0 reads it, but the digest and every background job find people through
+  it. So the create action reconciles at once (as onboarding does for a
+  business), and the door and onboarding reconcile again on the way in.
 - **A server component cannot dot into a client module.** `UserButton.MenuItems`
   from the dashboard layout fails ("you can only pass the imported name
   through"), hence `AccountMenu`.

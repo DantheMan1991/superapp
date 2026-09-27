@@ -57,6 +57,9 @@ export default async function OnboardingPage() {
           />
         );
       }
+      // The owner's own membership, as for a business below — it only ever
+      // mirrors the owner, anybody else is refused.
+      await reconcileTenantMemberships(tenant);
       redirect(PERSONAL_HOME);
     }
     /**

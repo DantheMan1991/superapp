@@ -1,5 +1,4 @@
 import "server-only";
-import { randomBytes } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { clerkClient } from "@clerk/nextjs/server";
 import { withSystem, schema, type Tx } from "@/db";
@@ -14,7 +13,6 @@ import {
   PERSONAL_CATEGORY,
   PERSONAL_ORG_NAME,
   personalOrgMetadata,
-  personalSlug,
   personalSpacesOpen,
 } from "@/lib/personal-space-core";
 
@@ -35,9 +33,13 @@ import {
  * the console's one Clerk call.
  */
 export interface PersonalOrgClerk {
+  /**
+   * No `slug`, on purpose: this Clerk instance has organization slugs off and
+   * answers a create that carries one with 403 `organization_slugs_disabled`.
+   * The space's slug is ours (`personalSlug`), made from the id Clerk returns.
+   */
   createOrganization(params: {
     name: string;
-    slug: string;
     createdBy: string;
     maxAllowedMemberships: number;
     publicMetadata: Record<string, unknown>;
@@ -180,7 +182,6 @@ export async function provisionPersonalSpace(
     const metadata = personalOrgMetadata(input.clerkUserId);
     const org = await clerk.createOrganization({
       name: PERSONAL_ORG_NAME,
-      slug: personalSlug(randomBytes(4).toString("hex")),
       createdBy: input.clerkUserId,
       // The first of the three locks on the door (docs/modules/personal-space.md):
       // Clerk itself will not let a second person in.

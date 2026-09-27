@@ -85,9 +85,19 @@ describe("the mark a personal organization carries in Clerk", () => {
 });
 
 describe("a personal space's slug", () => {
-  it("is random, lower-case and carries no name", () => {
-    expect(personalSlug("A1B2C3D4")).toBe("personal-a1b2c3d4");
-    expect(personalSlug("0f0f0f0f")).toMatch(/^personal-[0-9a-f]{8}$/);
+  it("comes from the organization id, lower-case, and carries no name", () => {
+    expect(personalSlug("org_2AbCdEf123456789XyZ")).toBe("personal-123456789xyz");
+    expect(personalSlug("org_2short")).toBe("personal-2short");
+    // Whatever Clerk's id holds, the slug is only letters and digits.
+    expect(personalSlug("org_ab-c_D.e")).toBe("personal-abcde");
+  });
+
+  it("is the same every time for the same organization, which is what lets two racers agree", () => {
+    expect(personalSlug("org_2AbCdEf123456789XyZ")).toBe(personalSlug("org_2AbCdEf123456789XyZ"));
+  });
+
+  it("never comes out bare", () => {
+    expect(personalSlug("org_")).toBe("personal-space");
   });
 });
 

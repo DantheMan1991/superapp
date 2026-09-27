@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { isSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { reconcileTenantMemberships } from "@/lib/membership-sync";
 import { PersonalSpaceError, provisionPersonalSpace } from "@/lib/personal-space";
 
 const openSchema = z.object({
@@ -49,6 +50,16 @@ export async function createPersonalSpaceAction(
         actorLabel: "personal-space",
       });
     }
+    /**
+     * The owner's membership row, now, not whenever the webhook lands — the
+     * same reason onboarding reconciles a business it has just made. Found by
+     * driving P0: on a machine no webhook reaches, the space existed with
+     * nobody in `memberships`, and that table is how the digest and every
+     * background job find a person. Best-effort by design (it reports rather
+     * than throws), and it only ever mirrors the owner: anybody else is
+     * `refused` (`upsertMembership`).
+     */
+    await reconcileTenantMemberships(tenant);
     if (!tenant.clerkOrgId) {
       return { error: "Your personal space could not be opened. Try again in a moment." };
     }

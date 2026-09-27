@@ -4,7 +4,7 @@ import { withSystem, schema, type Tx } from "@/db";
 import { slugify } from "@/lib/slug";
 import { ensurePrimaryCalendar } from "@/lib/schedule/provision";
 import { ensureDefaultWorkList } from "@/lib/work/provision";
-import { kindFromOrgMetadata } from "@/lib/personal-space-core";
+import { kindFromOrgMetadata, personalSlug } from "@/lib/personal-space-core";
 import type { Membership, Tenant } from "@/db/schema";
 
 /**
@@ -110,8 +110,13 @@ export async function insertTenantFromOrgInTx(
     if (other) throw new DuplicatePersonalSpaceError(org.id, mark.owner);
   }
 
-  // Ensure slug uniqueness with a numeric suffix if needed.
-  const base = slugify(org.slug || org.name);
+  // Ensure slug uniqueness with a numeric suffix if needed. A personal space
+  // with no slug from Clerk — which is every one: this instance has slugs off —
+  // takes one derived from its organization id, never from the name
+  // ("Personal"), which every personal space shares.
+  const base = slugify(
+    org.slug || (mark.kind === "personal" ? personalSlug(org.id) : org.name),
+  );
   let slug = base;
   for (let i = 2; ; i++) {
     const clash = await tx.query.tenants.findFirst({

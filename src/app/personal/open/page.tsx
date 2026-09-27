@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { isSuperAdmin } from "@/lib/auth";
 import { findPersonalSpace, personalSpacesOpenFor } from "@/lib/personal-space";
+import { reconcileTenantMemberships } from "@/lib/membership-sync";
 import { OpenPersonalSpace } from "./open-personal-space";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export default async function OpenPersonalSpacePage() {
   if (!existing && !(await personalSpacesOpenFor(await isSuperAdmin()))) {
     redirect("/dashboard");
   }
+  // The documented idempotent fallback, as onboarding is for a business: a
+  // membership the webhook never delivered is mirrored the next time the
+  // owner comes through the door. It only ever mirrors the owner.
+  if (existing) await reconcileTenantMemberships(existing);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-muted/40 p-6">

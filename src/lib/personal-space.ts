@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { and, eq, sql } from "drizzle-orm";
 import { clerkClient } from "@clerk/nextjs/server";
 import { withSystem, schema, type Tx } from "@/db";
@@ -118,10 +119,42 @@ export async function personalSpacesOpenFor(isSuperAdmin: boolean): Promise<bool
  * catalogue reaching only the spaces created after it would be exactly the
  * "seeded rows do not follow the seed" trap.
  */
-export async function ensurePersonalTools(tx: Tx, tenantId: string): Promise<number> {
-  const added = await tx.execute(ensurePersonalToolsSql(tenantId));
+export async function ensurePersonalTools(
+  tx: Tx,
+  tenantId: string,
+  opts: { preview?: boolean } = {},
+): Promise<number> {
+  const added = await tx.execute(ensurePersonalToolsSql(tenantId, opts));
   return added.rows.length;
 }
+
+/**
+ * The door's half (`/personal/open`): a space made before a tool shipped —
+ * or, for a superadmin, before a tool was even `available` — gets it the next
+ * time its owner comes through the door. The space's layout asks too, for a
+ * superadmin's preview only, since the workspace switcher never passes the
+ * door. The seed does the same for `available` tools in every space; this is
+ * what reaches a preview.
+ */
+export async function ensurePersonalToolsFor(
+  tenantId: string,
+  opts: { preview: boolean },
+): Promise<number> {
+  return withSystem((tx) => ensurePersonalTools(tx, tenantId, opts));
+}
+
+/**
+ * A superadmin's preview, switched on ONCE per request, before anything
+ * reads the space's tools. The layout (the rail) and the page (the home's
+ * `Your tools`) render side by side, so each awaits this same promise (React
+ * `cache`) before it reads. The first drive of it did it in the layout alone,
+ * and the home, reading at the same moment, said "Nothing is switched on here
+ * yet" under a rail that listed Workouts: the founder's first visit after it
+ * shipped. Nothing for anybody who is not a superadmin.
+ */
+export const previewPersonalTools = cache(async (tenantId: string, admin: boolean): Promise<void> => {
+  if (admin) await ensurePersonalToolsFor(tenantId, { preview: true });
+});
 
 /** The same, for every personal space at once. The seed's half. */
 export async function enablePersonalToolsEverywhere(tx: Tx): Promise<number> {
@@ -208,6 +241,11 @@ export async function provisionPersonalSpace(
           .set({ timezone, updatedAt: new Date() })
           .where(eq(schema.tenants.id, tenant.id));
       }
+      // AVAILABLE tools only, for everybody. A superadmin's preview of the
+      // `coming_soon` ones is switched on where the space is opened (the door,
+      // the layout and the home: `previewPersonalTools`), never here, so
+      // provisioning, which every consumer's space goes through, keeps the
+      // one rule the seed keeps.
       await ensurePersonalTools(tx, tenant.id);
       return { tenant: { ...tenant, timezone: timezone ?? tenant.timezone }, created: true };
     } catch (err) {

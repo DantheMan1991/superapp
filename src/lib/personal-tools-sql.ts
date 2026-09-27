@@ -12,18 +12,35 @@ import { PERSONAL_CATEGORY } from "./personal-space-core";
  * have and some do not.
  *
  * Both only ever ADD rows — `on conflict do nothing` — so a tool the person has
- * switched off (a row with `enabled = false`) stays off. And both only enable
- * `available` tools: a `coming_soon` row is an empty slot, never a screen.
+ * switched off (a row with `enabled = false`) stays off. And both enable
+ * `available` tools only, with ONE exception below.
+ *
+ * **A superadmin's own space previews `coming_soon` personal tools.** The
+ * people building a tool use it before anybody else does — the same rule that
+ * opens the "Personal space" door to superadmins first (`personalSpacesOpen`).
+ * Fitness shipped this way (F1, 2026-09-27): the founder's space only, until
+ * workout mode. The seed never previews; it reaches every space, so it waits
+ * for `available`.
  */
 
-/** Every available personal tool, on, in ONE space. Returns the ids it added. */
-export function ensurePersonalToolsSql(tenantId: string): SQL {
+/**
+ * Every available personal tool — and, with `preview`, every coming-soon one —
+ * on, in ONE space. Returns the ids it added.
+ */
+export function ensurePersonalToolsSql(
+  tenantId: string,
+  opts: { preview?: boolean } = {},
+): SQL {
+  const statuses = opts.preview ? ["available", "coming_soon"] : ["available"];
   return sql`
     insert into tenant_modules (tenant_id, module_id, enabled, enabled_at)
     select ${tenantId}::uuid, m.id, true, now()
       from modules m
      where m.category = ${PERSONAL_CATEGORY}
-       and m.status = 'available'
+       and m.status::text in (${sql.join(
+         statuses.map((s) => sql`${s}`),
+         sql`, `,
+       )})
     on conflict (tenant_id, module_id) do nothing
     returning module_id
   `;

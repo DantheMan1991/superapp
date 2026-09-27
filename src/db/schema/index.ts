@@ -47,6 +47,9 @@ export * from "./social";
 // What a client says is broken or missing, and the conversation that answers
 // it. A tenant table read by one console across every tenant — ADR 0053.
 export * from "./feedback";
+// Personal tools — tables that only ever hold rows in a PERSONAL space
+// (ADR 0111). To RLS they are ordinary tenant tables. Workouts first.
+export * from "./fitness";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

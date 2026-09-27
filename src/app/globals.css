@@ -274,6 +274,16 @@
    */
   --accent-jobs: oklch(0.52 0.13 155);
 
+  /**
+   * PERSONAL TOOLS (ADR 0111). They never share a rail with a business tool —
+   * a personal space runs only these, a business never runs one — so the
+   * crowding the notes above guard against does not reach them. Fitness takes
+   * 185, the widest gap left between accounting (170) and scheduling (200),
+   * which the jobs note turned down only because jobs sits beside scheduling
+   * all day; Workouts never does.
+   */
+  --accent-fitness: oklch(0.53 0.12 185);
+
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
   --sidebar-primary: oklch(0.67 0.12 170);
@@ -354,6 +364,7 @@
   --accent-production: oklch(0.78 0.12 55);
   --accent-retail: oklch(0.74 0.13 15);
   --accent-jobs: oklch(0.76 0.14 155);
+  --accent-fitness: oklch(0.74 0.12 185);
   --chart-1: oklch(0.6 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.68 0.14 150);
@@ -405,6 +416,7 @@
   --accent-production: oklch(0.78 0.12 55);
   --accent-retail: oklch(0.74 0.13 15);
   --accent-jobs: oklch(0.76 0.14 155);
+  --accent-fitness: oklch(0.74 0.12 185);
 }
 
 @layer base {

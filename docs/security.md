@@ -467,6 +467,8 @@ Every path into the system, and what makes it trustworthy.
 | `placePhotoAction` (`src/modules/marketing/page-actions.ts`) | Clerk session, owner, Marketing enabled | One photo into one spot of one page (Marketing 18): the page row and the photo row are read under RLS and the photo must be the same site's; the spot key is parsed, applied to the draft as it is now and refused with the reason when it no longer fits; the result is saved through the editor's own `savePageDraft`, so a version is kept, and audited as `marketing.site.photo_placed` with identifiers only |
 | Vercel Domains API | `VERCEL_API_TOKEN`, project-scoped | Outbound only, from owner actions; every response Zod-parsed (S5). The token adds and removes domains on THIS project and nothing else |
 | JMAP → Stalwart | Per-mailbox credentials | Outbound; responses are untrusted input → Zod (S5) |
+| A workout program's draft (`draftProgramAction`, `src/modules/fitness/`) | Clerk session → `requirePersonalSpace()`, Workouts enabled | **What leaves the platform** (Fitness F1, ADR 0112): the words and link URLs the person's own browser read from their PDF, with its name and page count; never the file, which is not uploaded. What comes back is one forced tool, held loosely and parsed through the program schema into a DRAFT on `fitness_imports`; nothing reaches the program tables until the person saves it from the editor. One draft at a time per space (`BUSY`) |
+| YouTube oEmbed (`checkVideo`, `src/modules/fitness/embeds.ts`) | None (public endpoint) | Outbound only, when a program is drafted or saved. The video id has already been reduced by `parseYouTubeUrl` to its eleven characters, so the host and path are fixed and nothing a person typed becomes a URL. The answer is untrusted: a status code (plays here or not) and a title, trimmed and clipped to a label's 60 characters |
 | AI responses | None | Model output is **never** trusted. Validate, never `eval`, never let it choose a tenant id |
 
 Two recurring traps:
@@ -484,7 +486,10 @@ Two recurring traps:
   photographed page reaches the "Paste a list" dialog the same way (ADR
   0036): the model may only propose rows, every row is read by a person
   before it exists, and the module's own verb writes it — a line in a herd
-  book that reads like an instruction is a row nobody ticks.
+  book that reads like an instruction is a row nobody ticks. A workout
+  program's pages reach Workouts' drafter the same way (ADR 0112): the system
+  prompt says the pages are data, the model may only record a program through
+  its one tool, and the person reads the draft before any of it exists.
 
 ---
 

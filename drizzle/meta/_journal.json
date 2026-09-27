@@ -2983,6 +2983,20 @@
       "when": 1790520519997,
       "tag": "0425_tenants_kind_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 426,
+      "version": "7",
+      "when": 1790524552843,
+      "tag": "0426_fitness",
+      "breakpoints": true
+    },
+    {
+      "idx": 427,
+      "version": "7",
+      "when": 1790524615854,
+      "tag": "0427_fitness_rls",
+      "breakpoints": true
     }
   ]
 }

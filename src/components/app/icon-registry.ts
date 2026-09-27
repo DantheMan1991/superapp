@@ -10,6 +10,7 @@ import {
   Clock,
   Contact,
   CreditCard,
+  Dumbbell,
   Factory,
   FolderOpen,
   HardHat,
@@ -91,6 +92,9 @@ export const ICONS: Record<string, LucideIcon> = {
   clock: Clock,
   contact: Contact,
   dashboard: LayoutDashboard,
+  // Workouts, the first personal tool (ADR 0111). Added WITH the tool, per the
+  // header above.
+  dumbbell: Dumbbell,
   factory: Factory,
   folder: FolderOpen,
   // Jobs. Added WITH the pack, per the header above: five packs once shipped

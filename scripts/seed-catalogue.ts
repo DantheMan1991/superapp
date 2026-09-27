@@ -302,4 +302,29 @@ export const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 270,
   },
+
+  // ---------------------------------------------------------------------
+  // Personal tools (ADR 0111, docs/modules/personal-space.md). Same table,
+  // `category = 'personal'`: switched on only in a person's own personal
+  // space, never in a business (`moduleFitsTenant`), and every `available`
+  // one is switched on in every personal space — at creation, and by this
+  // seed for spaces made before it shipped (`personal-tools-sql.ts`).
+  //
+  // `coming_soon` is a PREVIEW here, not an empty slot: a superadmin's own
+  // space gets a coming_soon personal tool, everybody else waits for
+  // `available` — and the day the first one is `available`, the "Personal
+  // space" door opens for every user (`personalSpacesOpen`).
+  // ---------------------------------------------------------------------
+  {
+    id: "fitness",
+    name: "Workouts",
+    description:
+      "Follow a program you were given, or build your own, with the exercise videos playing right here.",
+    category: "personal",
+    // `coming_soon` from F1 (2026-09-27), the founder's call: his own space
+    // only, until F2's workout mode makes it a workout app and a health-data
+    // privacy policy exists. See docs/modules/fitness.md.
+    status: "coming_soon",
+    sortOrder: 300,
+  },
 ];

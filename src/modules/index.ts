@@ -3,6 +3,7 @@ import { AccountingModule } from "./accounting/AccountingModule";
 import { CrmModule } from "./crm/CrmModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
+import { FitnessModule } from "./fitness/FitnessModule";
 import { HelloModule } from "./hello/HelloModule";
 import { MarketingModule } from "./marketing/MarketingModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
@@ -231,6 +232,17 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Time",
     icon: "clock",
     Component: TimeModule,
+  },
+  // THE FIRST PERSONAL TOOL (ADR 0111, docs/modules/fitness.md). Its catalogue
+  // row is `category: "personal"`, so it is only ever on in somebody's own
+  // personal space, and it renders at `/personal/m/fitness` — never under
+  // `/dashboard`, whose door refuses a personal space. `coming_soon` from F1:
+  // a superadmin's own space previews it until workout mode ships.
+  fitness: {
+    slug: "fitness",
+    name: "Workouts",
+    icon: "dumbbell",
+    Component: FitnessModule,
   },
 };
 

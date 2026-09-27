@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { loadPdfjs } from "@/lib/pdf/browser";
 
 /**
  * PDF rendering, WITHOUT an iframe.
@@ -23,21 +24,12 @@ import { cn } from "@/lib/utils";
  * place where PDF rendering can be wrong.
  */
 
-/** Loaded once per process, lazily — pdf.js is large and most pages never need it. */
-let pdfjs: typeof import("pdfjs-dist") | null = null;
-
-export async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
-  if (pdfjs) return pdfjs;
-  const lib = await import("pdfjs-dist");
-  // The worker keeps parsing off the main thread; without it a large drawing
-  // set freezes the tab while it renders.
-  lib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
-  pdfjs = lib;
-  return lib;
-}
+/**
+ * The loader lives in `src/lib/pdf/browser.ts` since 2026-09-27, when a second
+ * module (Workouts) needed it; re-exported here so this file's callers — this
+ * component and the jobs pack's readers — did not have to change.
+ */
+export { loadPdfjs };
 
 interface RenderState {
   status: "idle" | "loading" | "ready" | "failed";

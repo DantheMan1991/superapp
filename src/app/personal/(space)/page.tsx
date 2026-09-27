@@ -7,7 +7,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { requirePersonalSpace } from "@/lib/auth";
+import Link from "next/link";
+import { isSuperAdmin, requirePersonalSpace } from "@/lib/auth";
+import { getRenderableFeature } from "@/lib/features";
+import { getActiveModules } from "@/lib/modules";
+import { previewPersonalTools } from "@/lib/personal-space";
+import { getIcon } from "@/components/app/icon-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +29,13 @@ export const dynamic = "force-dynamic";
 export default async function PersonalHomePage() {
   // The layout checked this already; a page that reads the tenant asks for
   // itself rather than trusting that it is inside that layout.
-  await requirePersonalSpace();
+  const ctx = await requirePersonalSpace();
+  // The same list the rail reads, so this card and the sidebar never disagree:
+  // after the same preview the layout waits for, read the same way.
+  await previewPersonalTools(ctx.tenant.id, await isSuperAdmin());
+  const tools = (await getActiveModules(ctx.tenant.id))
+    .map(({ module }) => ({ module, feature: getRenderableFeature(module.id) }))
+    .filter((tool) => tool.feature);
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
@@ -59,17 +70,46 @@ export default async function PersonalHomePage() {
             <Dumbbell className="size-4 text-muted-foreground" aria-hidden />
             Your tools
           </CardTitle>
-          <CardDescription>Nothing is switched on here yet.</CardDescription>
+          <CardDescription>
+            {tools.length === 0 ? "Nothing is switched on here yet." : "Open one to start."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          <p>
-            Workouts come first. Follow a program you were given, or build your
-            own, with the exercise videos playing right here.
-          </p>
-          <p>
-            Recipes and meal planning come after that. Each tool appears on this
-            page and in the sidebar as soon as it is ready.
-          </p>
+          {tools.length === 0 ? (
+            <>
+              <p>
+                Workouts come first. Follow a program you were given, or build your
+                own, with the exercise videos playing right here.
+              </p>
+              <p>
+                Recipes and meal planning come after that. Each tool appears on this
+                page and in the sidebar as soon as it is ready.
+              </p>
+            </>
+          ) : (
+            <>
+              <ul className="space-y-2">
+                {tools.map(({ module, feature }) => {
+                  const Icon = getIcon(feature?.icon);
+                  return (
+                    <li key={module.id}>
+                      <Link
+                        href={`/personal/m/${module.id}`}
+                        className="flex items-start gap-3 rounded-xl border border-border px-3 py-2 hover:bg-muted"
+                      >
+                        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                        <span>
+                          <span className="font-medium">{module.name}</span>
+                          <span className="block text-muted-foreground">{module.description}</span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="text-muted-foreground">Recipes and meal planning come next.</p>
+            </>
+          )}
         </CardContent>
       </Card>
 

@@ -14,6 +14,35 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — The first tool in it: Workouts (`claude/fitness-f1`)
+
+Fitness F1 ([fitness.md](fitness.md)) is the first personal tool, so it
+brought the plumbing P0 left for it. No migration here; F1's are its own.
+
+- **`/personal/m/[slug]`** renders a personal tool: the space's own door
+  (`requirePersonalSpace`), then the same module gate as a business tool,
+  which answers not-found for anything that is not a personal tool
+  (`moduleFitsTenant`), so `/personal/m/accounting` is a 404 even for somebody
+  whose business runs Accounting. A tool's deeper screens are real routes
+  beside it (`m/fitness/...`), each gating itself. `m/layout.tsx` re-exports
+  the dashboard's module layout, so `--module-accent` works the same (the slug
+  is the third path segment under either root).
+- **The rail and the home list the space's tools**: the rail loops
+  `getActiveModules` (renderable ones only) to `/personal/m/<slug>`, and the
+  home's `Your tools` lists the same, or says there are none yet.
+- **A superadmin's own space previews a `coming_soon` personal tool.**
+  `ensurePersonalToolsSql` takes `preview`; `/personal/open` passes it for a
+  superadmin, and also switches on, for anybody, a tool that became available
+  after their space was made. The space's layout and home page ask too, for a
+  superadmin only, because the workspace switcher lands in the space without
+  passing the door; they share one call per request (`previewPersonalTools`,
+  React `cache`), since they render side by side and the home, done in the
+  layout alone, read its list before the layout's insert and said "Nothing is
+  switched on here yet" under a rail that listed Workouts. The seed never
+  previews. So Workouts, shipped
+  `coming_soon` (the founder's decision, until workout mode), is in his space
+  and nobody else's, and the door stays shut to everyone but superadmins.
+
 ### 2026-09-27 — P0: the container (`claude/personal-space-p0`)
 
 Migrations `0424` (the column, the index, two CHECKs) and `0425` (the trigger).
@@ -148,9 +177,9 @@ The build log above has the detail. Where the build moved from the plan:
 - **The entry is the account menu**, `Personal space`, not the switcher. The
   switcher lists organizations the person already has, and until they open one
   there is none to list.
-- **The rail is Home alone** until F1 brings the first tool and the
-  `/personal/m/<slug>` route that renders one. No guides page and no settings
-  yet: there is nothing to set.
+- **The rail was Home alone** until F1 brought the first tool and the
+  `/personal/m/<slug>` route that renders one (build log, above). No guides
+  page and no settings yet: there is nothing to set.
 
 ### P1 — the consumer door
 
@@ -264,10 +293,19 @@ certifies it like any pair.
   person's own activity. A future screen that lists audit rows by tenant has
   to keep that.
 - **`personalSpacesOpen` reads the catalogue, not a flag.** The door opens for
-  everyone the day any personal tool is `available`, which is the day F1's
-  seed runs. Test code must never leave an `available` personal module behind:
-  it would open the door on that database. The db test uses a `coming_soon`
-  row, and a rolled-back transaction for the one `available` case.
+  everyone the day any personal tool is `available`. F1 shipped Workouts
+  `coming_soon`, so that day is the one its row is flipped, planned for after
+  workout mode (F2). Test code must never leave an `available` personal module
+  behind: it would open the door on that database. The db test uses a
+  `coming_soon` row, and a rolled-back transaction for the one `available`
+  case.
+- **Preview is a superadmin's own space, never the seed.** A `coming_soon`
+  tool reaches a superadmin's space through `/personal/open` and the space's
+  layout (`ensurePersonalToolsFor(id, { preview: true })`; the layout because
+  the switcher never passes the door); the seed, which touches every space,
+  enables `available` tools only. A preview row stays after the
+  tool ships, which is what should happen: it is the same row the seed would
+  have made.
 
 ## Open items
 

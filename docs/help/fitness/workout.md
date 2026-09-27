@@ -1,6 +1,6 @@
 # Doing a session
 
-> The screen for the workout itself: one exercise at a time, the breaths paced and counted for you, each set logged, and a quick check after every exercise. It works with no signal and picks up where you left off.
+> The screen for the workout itself: one exercise at a time, the demo looping above the count, the breaths paced and counted for you, a coach's voice for when you cannot look, each set logged, and a quick check after every exercise. It works with no signal and picks up where you left off.
 > **Route:** /personal/m/fitness/programs/*/session
 > **Order:** 40
 
@@ -12,8 +12,9 @@ At the top, on every step:
 
 - **{icon:x}.** Leaves the session and goes back to the program. The session stays open. The program then shows {button:Resume today's session|primary|play}, which brings you back to the set you were on.
 - **Where you are**, for example `Exercise 2 of 4`, or `Today's session` before you start.
-- **Whether it is saved**: `Saved` {icon:check}, `Saving`, or `Kept on this phone` {icon:cloud-off} when there is no signal. Nothing is lost while it says `Kept on this phone`. It goes up by itself when the phone has signal again.
-- **{icon:volume-2}.** Turns the sounds off. It becomes {icon:volume-x}; click it again to turn them back on. Your phone remembers the choice.
+- **Under it, whether it is saved**: `Saved` {icon:check}, `Saving`, or `Kept on this phone` {icon:cloud-off} when there is no signal. Nothing is lost while it says `Kept on this phone`. It goes up by itself when the phone has signal again.
+- **{icon:megaphone}.** Turns the coach's voice off. The tones stay on. It becomes {icon:megaphone-off}; click it again to turn the voice back on. It is only there when your phone can speak. Your phone remembers the choice.
+- **{icon:volume-2}.** Turns every sound off: the tones, the buzz and the coach's voice. It becomes {icon:volume-x}; click it again to turn them back on. Your phone remembers the choice.
 - **{icon:circle-question-mark}.** Opens this guide beside the screen.
 
 ### Before you start
@@ -26,7 +27,7 @@ At the top, on every step:
 
 ### During an exercise
 
-- **The exercise's video**, when it has one. Tap it to play it here.
+- **The exercise's demo**, when it has a video. It starts by itself with no sound and plays the part of the video that shows the movement, over and over, so a glance from the floor shows you how it goes. See [The demo](#the-demo).
 - **The exercise's name**, with {badge:Optional} when the program says it is extra.
 - **The set line**, for example `Set 1 of 2 · Right side · 2 × 8 breaths per side`. For an exercise done per side, you do the right side, then the left, for each set.
 - **One of the program's checks** in large type, for example `Low back relaxed`. It changes with each set.
@@ -80,15 +81,51 @@ All three questions are optional. The button works with none of them answered.
 - **`Before 4, after 7.`**, when you answered both.
 - **{button:Finish|primary|check}.** Ends the session and takes you back to the program. You see `Saving your session…`, then `Session saved`.
 
+## The demo
+
+The demo is the exercise's own video from YouTube, playing on this screen. When the program sets a `Start` and an `End` for the video, the demo goes round the part between them. With no end, it goes round from the start to the end of the video. Under it:
+
+- **{icon:pause}.** Pauses the demo. It becomes {icon:play}; click it to play it again.
+- **`0.5×`, `0.75×` and `1×`.** The demo's speed. The one lit is the speed it plays at. Your phone remembers the choice.
+- **{button:With sound|outline|volume-2}.** Plays the part once from its start, at normal speed and with the sound on, so you can hear the author explain it. Then it goes back to going round with no sound. While it plays, the button reads {button:Back to the loop|outline|volume-x}, and the speeds are grayed out. When a set begins, after its countdown, the sound goes off too, so the demo never talks over the count.
+
+The demo pauses while less than half of it is on the screen, or while the phone's screen is off, and carries on when you come back to it. It stays on the same video from one set to the next.
+
+Some phones wait for a tap before they play any video. The demo then says `This phone waits for a tap before it plays a video. Tap play.` Click {icon:play} under it.
+
+When the demo cannot play here, the box says why instead:
+
+| Message | What it means |
+| --- | --- |
+| `This video only plays on YouTube.` | Whoever posted the video does not let it play in other apps. {button:Open in YouTube|link|external-link} opens it on YouTube. |
+| `This video is not on YouTube any more.` | The video was taken down. Change it in the program's editor; see [Building and editing a program](editor.md). |
+| `The demo could not play here.` | YouTube would not play it on this screen. {button:Open in YouTube|link|external-link} opens it on YouTube. |
+
+If YouTube's player cannot load at all, you get the program page's player instead: `Tap to play here` plays the video with its sound and YouTube's own controls.
+
+## The coach's voice
+
+A voice tells you what the screen says at the moments you cannot see it: when you are on the floor, between sets, and when a set ends by itself.
+
+- **When a set appears**, what it is. On an exercise's first set, its name, what to do and which side to start on, for example `Side-lying pullback. 2 sets of 5 to 8 breaths, each side. Right side first.` After that, `Now the left side.` or `Set 2 of 3. Right side.` For an exercise counted in reps or rolls, one of its checks comes straight after, for example `Slow, about an inch a second.`
+- **During a set counted in breaths**, one of the exercise's checks as the middle breath starts, and `Last one.` as the last breath starts. The tones still mark every breath.
+- **During a hold**, one of the checks halfway through, and `Ten seconds left.` when the hold is 30 seconds or more.
+- **After the last set of an exercise**, `Exercise done.` That is your cue to pick up the phone for the three questions.
+
+It never talks over itself. `Last one.` cuts in on a check, and anything that could not be said in time is left unsaid rather than said late. The screen still shows everything the voice says.
+
+The voice is your phone's own. If you reload the page in the middle of a session, it may stay quiet until you tap anywhere on the screen. To turn it off, click {icon:megaphone} at the top. To turn off every sound, click {icon:volume-2}.
+
 ## How to do a session
 
 1. Open the program and click the phase you are on.
 2. Click {button:Start today's session|primary|play}.
 3. Choose how your body feels, if you like, and click {button:Start|primary|play}.
-4. Get into position and click {button:Start|primary|play}. Breathe with the circle.
-5. When a set finishes, stay where you are. The next side or set counts down and starts by itself.
-6. After the last set, answer the three questions and click the next exercise's button.
-7. At the end, choose how your body feels now and click {button:Finish|primary|check}.
+4. Listen for what the exercise is, or watch the demo. To hear the author explain it, click {button:With sound|outline|volume-2} under the demo.
+5. Get into position and click {button:Start|primary|play}. Breathe with the circle.
+6. When a set finishes, stay where you are. The voice says the next side or set, and it counts down and starts by itself.
+7. When you hear `Exercise done.`, pick up the phone. Answer the three questions and click the next exercise's button.
+8. At the end, choose how your body feels now and click {button:Finish|primary|check}.
 
 ## How to stop and come back later
 
@@ -124,7 +161,7 @@ Everything is kept on your phone as you go. With no signal, the top of the scree
 
 ## Not on this page
 
-- **Spoken cues and a looping demo.** A voice that says the side and a check mid-set, and the video looping the movement above the count, come next.
+- **Choosing what the voice says, or which voice.** It is your phone's own voice. You can turn it off, but not change what it says.
 - **Splitting a day's sets between morning and evening.** Each session is complete on its own for now.
 - **Your progress.** Days done in each phase and when the next one opens come after that.
 - **Which side to favor.** The program's left-or-right self-assessment is not built yet. Every per-side exercise does both sides, right first.

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEMO_SPEEDS,
+  demoPlayerVars,
   embedUrl,
   formatTimestamp,
+  isDemoSpeed,
+  loopDue,
+  loopStart,
   parseTimestamp,
   parseYouTubeUrl,
   watchUrl,
@@ -94,6 +99,26 @@ describe("YouTube links", () => {
     expect(watchUrl({ id: "kd-Ram-Y6gc", startS: 42, endS: null })).toBe(
       "https://www.youtube.com/watch?v=kd-Ram-Y6gc&t=42s",
     );
+  });
+
+  it("loops workout mode's demo from the clip's start, just short of its end (F2b)", () => {
+    const clip = { id: "kd-Ram-Y6gc", startS: 42, endS: 70 };
+    // No autoplay and no end: the page starts it muted and brings it round
+    // before YouTube would stop it. No controls: the buttons sit below it.
+    expect(demoPlayerVars(clip)).toEqual({ playsinline: 1, rel: 0, controls: 0, start: 42 });
+    expect(demoPlayerVars({ ...clip, startS: null })).toEqual({ playsinline: 1, rel: 0, controls: 0 });
+    expect(loopStart(clip)).toBe(42);
+    expect(loopStart({ ...clip, startS: null })).toBe(0);
+    expect(loopDue(69.5, clip)).toBe(false);
+    expect(loopDue(69.8, clip)).toBe(true);
+    expect(loopDue(75, clip)).toBe(true);
+    // No end, or an end before the start: YouTube's own end brings it round.
+    expect(loopDue(999, { ...clip, endS: null })).toBe(false);
+    expect(loopDue(50, { ...clip, endS: 30 })).toBe(false);
+    expect(DEMO_SPEEDS).toEqual([0.5, 0.75, 1]);
+    expect(isDemoSpeed(0.75)).toBe(true);
+    expect(isDemoSpeed(2)).toBe(false);
+    expect(isDemoSpeed(Number("junk"))).toBe(false);
   });
 });
 

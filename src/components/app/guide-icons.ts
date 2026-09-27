@@ -57,6 +57,8 @@ import {
   Monitor,
   MoreHorizontal,
   Paperclip,
+  Megaphone,
+  MegaphoneOff,
   Pause,
   Pencil,
   PenLine,
@@ -197,6 +199,10 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   // the switch that turns that off (tell.md, slice D1).
   "volume-2": Volume2,
   "volume-x": VolumeX,
+  // Workout mode's coach's voice, on and off; the pair above is its sounds
+  // (fitness.md, F2b).
+  megaphone: Megaphone,
+  "megaphone-off": MegaphoneOff,
   // A personal register's card (ADR 0034) wears this instead of the bank mark.
   wallet: Wallet,
   x: X,

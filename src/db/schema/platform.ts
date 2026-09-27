@@ -38,6 +38,19 @@ export const tenantStatus = pgEnum("tenant_status", [
 ]);
 
 /**
+ * WHAT A WORKSPACE IS FOR (ADR 0111). `business` is every tenant there was
+ * before 2026-09-27. `personal` is a person's own space beside their business:
+ * a Clerk organization of exactly one member, provisioned by us, one per
+ * person, where their own tools live (docs/modules/personal-space.md).
+ *
+ * Set when the row is created and NEVER changed — a trigger refuses it
+ * (`tenants_kind_immutable`), because the auth split reads it on every request
+ * and a workspace that could change kind could change which half of the
+ * product is allowed to open it.
+ */
+export const tenantKind = pgEnum("tenant_kind", ["business", "personal"]);
+
+/**
  * "owner"/"staff" mirror the Clerk org role; "expert" (outside accountant)
  * is a LOCAL overlay set by the tenant owner on the Team page — any writer
  * of memberships.role must preserve an existing "expert" value (see
@@ -181,6 +194,19 @@ export const tenants = pgTable(
      * reads as "gone", the `site_enquiries.party_id` precedent.
      */
     operatorPartyId: uuid("operator_party_id"),
+    /** `business` or `personal` — see `tenantKind` above. Never updated. */
+    kind: tenantKind("kind").notNull().default("business"),
+    /**
+     * WHOSE PERSONAL SPACE THIS IS: the one Clerk user who may open it. Set
+     * exactly when `kind = 'personal'` (a CHECK), unique among personal spaces
+     * (an index), and never updated (the same trigger as `kind`).
+     *
+     * A Clerk user id and not a `profiles` FK, the way `support_sessions` and
+     * every `*_by_clerk_user_id` column name a person: the profile row can
+     * arrive after the organization does (Clerk does not order its webhooks),
+     * and the space must be ownable in that window.
+     */
+    personalOwnerClerkUserId: text("personal_owner_clerk_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -195,6 +221,20 @@ export const tenants = pgTable(
     uniqueIndex("tenants_operator_idx")
       .on(t.isOperator)
       .where(sql`${t.isOperator} = true`),
+    // One personal space per person (ADR 0111), proved the same way.
+    uniqueIndex("tenants_personal_owner_idx")
+      .on(t.personalOwnerClerkUserId)
+      .where(sql`${t.kind} = 'personal'`),
+    // A personal space has an owner, and a business never does.
+    check(
+      "tenants_personal_owner_check",
+      sql`(${t.kind} = 'personal') = (${t.personalOwnerClerkUserId} is not null)`,
+    ),
+    // The operator runs the platform as a business; it is never somebody's own space.
+    check(
+      "tenants_operator_is_business_check",
+      sql`not (${t.isOperator} and ${t.kind} = 'personal')`,
+    ),
   ],
 );
 

@@ -6,6 +6,7 @@ import type { Module, TenantModule } from "@/db/schema";
 import { deniedFor } from "@/lib/access/current";
 import { reaches } from "@/lib/access/can";
 import { areaForPath } from "@/lib/access/areas";
+import { moduleFitsTenant } from "@/lib/personal-space-core";
 import { headers } from "next/headers";
 
 export interface ActiveModule {
@@ -13,18 +14,30 @@ export interface ActiveModule {
   tenantModule: TenantModule;
 }
 
-/** Modules switched on for a tenant, in nav order. Tenant-context query. */
+/**
+ * Modules switched on for a tenant, in nav order. Tenant-context query.
+ *
+ * **AND ONLY THE ONES THAT BELONG IN THIS KIND OF WORKSPACE** (ADR 0111): a
+ * personal tool never reaches a business's rail, nor a business tool a
+ * personal space's, whatever a `tenant_modules` row says. `isModuleEnabled`
+ * below applies the same predicate, so the rail and the gate cannot disagree.
+ */
 export async function getActiveModules(
   tenantId: string,
 ): Promise<ActiveModule[]> {
   return withTenant(tenantId, async (tx) => {
     const rows = await tx
-      .select({ module: schema.modules, tenantModule: schema.tenantModules })
+      .select({
+        module: schema.modules,
+        tenantModule: schema.tenantModules,
+        kind: schema.tenants.kind,
+      })
       .from(schema.tenantModules)
       .innerJoin(
         schema.modules,
         eq(schema.tenantModules.moduleId, schema.modules.id),
       )
+      .innerJoin(schema.tenants, eq(schema.tenants.id, schema.tenantModules.tenantId))
       .where(
         and(
           eq(schema.tenantModules.tenantId, tenantId),
@@ -32,23 +45,37 @@ export async function getActiveModules(
         ),
       )
       .orderBy(asc(schema.modules.sortOrder));
-    return rows;
+    return rows
+      .filter((row) => moduleFitsTenant(row.module.category, row.kind))
+      .map(({ module, tenantModule }) => ({ module, tenantModule }));
   });
 }
 
+/**
+ * Whether a tool is on for a tenant: its row is enabled AND it is the kind of
+ * tool this kind of workspace runs (`moduleFitsTenant`). The second half is
+ * what every `requireModuleEnabled` and `routeGate` caller inherits without
+ * being edited.
+ */
 export async function isModuleEnabled(
   tenantId: string,
   moduleId: string,
 ): Promise<boolean> {
   return withTenant(tenantId, async (tx) => {
-    const row = await tx.query.tenantModules.findFirst({
-      where: and(
-        eq(schema.tenantModules.tenantId, tenantId),
-        eq(schema.tenantModules.moduleId, moduleId),
-        eq(schema.tenantModules.enabled, true),
-      ),
-    });
-    return !!row;
+    const [row] = await tx
+      .select({ category: schema.modules.category, kind: schema.tenants.kind })
+      .from(schema.tenantModules)
+      .innerJoin(schema.modules, eq(schema.modules.id, schema.tenantModules.moduleId))
+      .innerJoin(schema.tenants, eq(schema.tenants.id, schema.tenantModules.tenantId))
+      .where(
+        and(
+          eq(schema.tenantModules.tenantId, tenantId),
+          eq(schema.tenantModules.moduleId, moduleId),
+          eq(schema.tenantModules.enabled, true),
+        ),
+      )
+      .limit(1);
+    return !!row && moduleFitsTenant(row.category, row.kind);
   });
 }
 

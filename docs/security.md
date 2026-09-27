@@ -295,6 +295,9 @@ header and for NOTHING else — every server action and every other method is
 refused while one is live, never answered under another tenant. The method
 and path are stamped by the middleware, never read from the client; the RLS
 role is `staff`; every render is audited with its path; sixty minutes.
+**And it never opens a personal space** (S15): the console refuses to open one
+on it, and `resolveSupport` ends any session it finds on one and answers as
+if there were none.
 
 **S13 — The operator tenant is an ordinary tenant.**
 Yosher runs on its own platform (ADR
@@ -305,6 +308,22 @@ pair. Nothing in RLS, `withTenant` or the isolation suite may special-case
 it. The flag (`tenants.is_operator`) exists so the CONSOLE can refuse its own
 buttons and so a public door can find where a lead lands — and that is all it
 may ever be read for.
+
+**S15 — A personal space opens for its owner, and for nothing else.**
+A person's own space beside their business (ADR
+[0111](decisions/0111-a-personal-space-is-a-workspace-of-one-and-support-view-never-opens-it.md))
+is a tenant of kind `personal`: to RLS an ordinary tenant, certified by
+`tests/isolation/personal-space.test.ts` like any pair. What guards it is the
+AUTH SPLIT: `requireTenant`/`resolveTenantContext` refuse a personal space
+(so every business page, action and route is closed to one without being
+edited), and `requirePersonalSpace`/`resolvePersonalContext` refuse anything
+but the caller's own personal space. Three locks keep a second person out: the
+Clerk organization's one-member cap, the webhook refusing to mirror anyone but
+the owner, and the owner check in the door itself. Support view never opens
+one (S14). `kind` and the owner never change, which a trigger enforces even
+under `withSystem`. **What "never" covers is the product**: `withSystem` code
+and the database owner can still read the rows, and nothing written for a
+person may claim otherwise.
 
 ---
 

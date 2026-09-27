@@ -32,6 +32,7 @@ import {
   OpenInOperatorButton,
 } from "../../relationship-controls";
 import { SupportViewForm } from "../../support-controls";
+import { PersonalTenantDetail } from "./personal-detail";
 import { PlatformRevenueButtons } from "../../platform-revenue-controls";
 import { loadPlatformRevenue, SKIP_REASONS } from "@/lib/platform-revenue";
 import { describeAgo } from "@/lib/last-seen";
@@ -63,6 +64,18 @@ export default async function TenantDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
+  // A personal space has its own, much smaller page (ADR 0111): none of what
+  // follows — relationship, retainer, billing, profile, vocabulary, support
+  // view, the activity log — applies to one, or should be shown for one.
+  const kind = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, id),
+      columns: { kind: true },
+    }),
+  );
+  if (!kind) notFound();
+  if (kind.kind === "personal") return <PersonalTenantDetail tenantId={id} />;
 
   const data = await withSystem(async (tx) => {
     const tenant = await tx.query.tenants.findFirst({

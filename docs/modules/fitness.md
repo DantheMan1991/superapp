@@ -65,6 +65,15 @@ person's own space, the way a pack must never carry one business's price list
 
 ### F1 — the program, imported
 
+- **The first personal tool, so it brings the plumbing P0 left for it**
+  ([personal-space.md](personal-space.md)): the `/personal/m/[slug]` route
+  that renders a personal tool (`requirePersonalSpace` +
+  `requireModuleEnabled`, whose gate already refuses a tool in the wrong kind
+  of workspace), the rail loop in `src/app/personal/(space)/layout.tsx`, a
+  `fitness` catalogue row with `category: "personal"`, and the seed run on
+  both databases. The seed also switches it on in every existing personal
+  space, and the day that row is `available` the `Personal space` door opens
+  for everybody (`personalSpacesOpen`).
 - **Upload the PDF** into the personal space. The server reads it with pdfjs
   page by page: the text AND the link annotations. Documents' extracted text is
   not enough: it drops the annotations, and every video URL in this PDF is an

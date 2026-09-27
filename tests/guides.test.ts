@@ -126,6 +126,18 @@ describe("route patterns", () => {
       "**",
     ]);
   });
+
+  it("accepts a personal space's own tree, and nothing that merely starts like it (ADR 0111)", () => {
+    expect(parseRoutePattern("/personal")?.segments).toEqual(["personal"]);
+    expect(parseRoutePattern("/personal/m/fitness/**")?.segments).toEqual([
+      "personal",
+      "m",
+      "fitness",
+      "**",
+    ]);
+    expect(parseRoutePattern("/personalish")).toBeNull();
+    expect(parseRoutePattern("/admin/personal")).toBeNull();
+  });
 });
 
 describe("matchGuide", () => {

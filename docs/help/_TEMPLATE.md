@@ -9,13 +9,15 @@ HOW A GUIDE WORKS. This comment never reaches the reader; the renderer strips it
 Copy this file to docs/help/<folder>/<topic>.md and delete the comment.
 
 WHERE IT LIVES. <folder> is a feature slug — accounting, documents, email, land,
-and the rest of src/modules/index.ts and src/packs/index.ts — or one of three
+and the rest of src/modules/index.ts and src/packs/index.ts — or one of four
 fixed sections: workspace (/dashboard and /dashboard/today), business (hours,
-team), settings (owners only). A file whose name starts with "_" or "." is
-ignored, which is why this template is not a guide.
+team), settings (owners only), personal (a personal space's own home, under
+/personal, ADR 0111). A file whose name starts with "_" or "." is ignored,
+which is why this template is not a guide.
 
-ROUTE. Where the "?" on a screen finds this guide. Exact by default, because a
-wrong guide is worse than none:
+ROUTE. Where the "?" on a screen finds this guide. Every route starts with
+/dashboard, or with /personal for a screen in a personal space. Exact by
+default, because a wrong guide is worse than none:
   /dashboard/m/land            this screen only
   /dashboard/m/land/*          any screen exactly one level below it
   /dashboard/m/land/**         this screen and everything beneath it

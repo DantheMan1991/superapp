@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
+import { OrganizationSwitcher } from "@clerk/nextjs";
 import {
   AppShell,
   type NavGroup,
@@ -40,6 +40,8 @@ import { TellLauncher } from "@/components/app/tell-launcher";
 import { FeedbackProvider } from "@/components/app/report-button";
 import { countUnreadReplies } from "@/lib/feedback/read";
 import { isServerSpeechConfigured } from "@/lib/speech/providers";
+import { personalSpacesOpenFor } from "@/lib/personal-space";
+import { AccountMenu } from "@/components/app/account-menu";
 import { SupportBanner } from "./support-banner";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +91,12 @@ export default async function DashboardLayout({
       */
       ctx.support ? Promise.resolve(0) : countUnreadReplies(ctx),
     ]);
+  /**
+   * "Personal space" in the account menu (ADR 0111) — while the door is open
+   * for this person, and never inside a support view: the superadmin looking
+   * at a client's workspace is not the client, and the menu is theirs.
+   */
+  const personalSpace = ctx.support ? false : await personalSpacesOpenFor(admin);
 
   /**
    * Only features that are both switched on AND renderable appear in nav. A
@@ -411,7 +419,7 @@ export default async function DashboardLayout({
               hidePersonal
               afterSelectOrganizationUrl="/dashboard"
             />
-            <UserButton />
+            <AccountMenu personalSpace={personalSpace} />
             {/* Inside the mobile app: ask for notifications and register the phone. Nothing in a browser. */}
             <PushRegistration />
           </AfterHydration>

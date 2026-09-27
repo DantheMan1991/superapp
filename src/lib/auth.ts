@@ -14,6 +14,8 @@ import {
 } from "@/lib/support-view";
 import { decideSupportView } from "@/lib/support-view-decide";
 import { shouldStampSeen } from "@/lib/last-seen";
+import { logAudit } from "@/lib/audit";
+import { PERSONAL_HOME } from "@/lib/personal-space-core";
 
 /**
  * Server-side authorization helpers. Every page/action that touches data goes
@@ -83,6 +85,12 @@ export async function requireSuperAdmin(): Promise<{ userId: string }> {
  * A live support session comes first (below): it is answered before the
  * active organization is even looked at, because a support view needs no
  * organization of the viewer's own.
+ *
+ * **A BUSINESS WORKSPACE ONLY** (ADR 0111). A personal space is sent to its
+ * own home, and that one line is what closes every business page, action and
+ * route to it — they all come through here, so none of them had to be edited
+ * and none written later can forget. The personal half has its own door,
+ * `requirePersonalSpace`, which refuses a business the same way round.
  */
 export async function requireTenant(): Promise<TenantContext> {
   const { userId, orgId, orgRole } = await auth();
@@ -97,6 +105,7 @@ export async function requireTenant(): Promise<TenantContext> {
   // Org exists in Clerk but hasn't synced yet (webhook lag) — send through
   // onboarding, which creates the row idempotently.
   if (!found.resolved) redirect("/onboarding");
+  if (found.resolved.tenant.kind === "personal") redirect(PERSONAL_HOME);
 
   await stampSeen(found.resolved.membership);
   return {
@@ -243,6 +252,25 @@ async function resolveSupport(
     await endSupportSession(userId);
     return { kind: "none" };
   }
+  /**
+   * SUPPORT VIEW NEVER OPENS A PERSONAL SPACE (ADR 0111). The console refuses
+   * to open a session on one, so this should be unreachable — which is exactly
+   * why it is here: this is the call that would otherwise HAND OVER the rows,
+   * and the console is only the button. A session found on one is ended,
+   * recorded, and answered as if it were not there.
+   */
+  if (tenant.kind === "personal") {
+    await endSupportSession(userId);
+    await logAudit({
+      action: "support.refused_personal",
+      tenantId: tenant.id,
+      actorClerkUserId: userId,
+      actorLabel: "support-view",
+      targetType: "support_session",
+      targetId: session.id,
+    });
+    return { kind: "none" };
+  }
   await recordViewOnce(session.id, tenant.id, userId, h.get("x-yosher-path") ?? "");
   return {
     kind: "view",
@@ -287,6 +315,8 @@ export async function resolveTenantContext(): Promise<TenantContext | null> {
   if (support.kind === "refuse") return null;
   if (support.kind === "view") return support.ctx;
   if (!found.resolved) return null;
+  // A business workspace only, as for `requireTenant` (ADR 0111).
+  if (found.resolved.tenant.kind === "personal") return null;
   await stampSeen(found.resolved.membership);
   return {
     tenant: found.resolved.tenant,
@@ -294,6 +324,50 @@ export async function resolveTenantContext(): Promise<TenantContext | null> {
     userId,
     support: null,
   };
+}
+
+/**
+ * THE PERSONAL SPACE'S OWN DOOR (ADR 0111): the caller's active organization,
+ * when it is a personal space and it is theirs. The mirror of `requireTenant`,
+ * which refuses a personal space; this refuses everything else.
+ *
+ * - A business is sent to the business product.
+ * - A personal space that is not the caller's is sent to onboarding, which
+ *   says so and offers the switcher. Clerk caps the organization at one
+ *   member, so reaching this line means that lock failed, and this is the one
+ *   behind it.
+ * - **Support view plays no part.** A superadmin's live session opens a
+ *   business, never this (`resolveSupport` ends one found on a personal
+ *   space); here the caller is always the owner, as the owner.
+ * - No last-seen stamp: that is the console's signal about CLIENTS, and a
+ *   person's private space is not a client.
+ */
+export async function requirePersonalSpace(): Promise<TenantContext> {
+  const { userId, orgId } = await auth();
+  if (!userId) redirect("/sign-in");
+  if (!orgId) redirect("/onboarding");
+  const tenant = await tenantForOrg(orgId);
+  if (!tenant) redirect("/onboarding");
+  if (tenant.kind !== "personal") redirect("/dashboard");
+  if (tenant.personalOwnerClerkUserId !== userId) redirect("/onboarding");
+  return { tenant, userId, role: "owner", support: null };
+}
+
+/** `requirePersonalSpace` for a route handler: null instead of a redirect. */
+export async function resolvePersonalContext(): Promise<TenantContext | null> {
+  const { userId, orgId } = await auth();
+  if (!userId || !orgId) return null;
+  const tenant = await tenantForOrg(orgId);
+  if (!tenant || tenant.kind !== "personal") return null;
+  if (tenant.personalOwnerClerkUserId !== userId) return null;
+  return { tenant, userId, role: "owner", support: null };
+}
+
+async function tenantForOrg(orgId: string): Promise<Tenant | null> {
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({ where: eq(schema.tenants.clerkOrgId, orgId) }),
+  );
+  return tenant ?? null;
 }
 
 /** Like requireTenant, but restricted to the business owner. */

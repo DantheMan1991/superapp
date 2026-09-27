@@ -7,6 +7,25 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-09-27 — A personal space has a "?" too (`claude/personal-space-p0`)
+
+Personal spaces (ADR 0111) live under `/personal`, outside the business
+product, and every screen still gets a guide from its first day.
+
+- **A second route root.** `parseRoutePattern` accepts `/personal` and
+  `/personal/...` as well as `/dashboard` (`ROUTE_ROOTS`), and still refuses
+  anything that merely starts like them (`/personalish`).
+- **A fourth fixed section, `personal`**, readable from EITHER kind of
+  workspace, because the door into a personal space is opened from a
+  business. It is never listed on the business's Guides page, and a personal
+  space cannot read the business's own sections (`canReadGuide`).
+- **`/api/help` answers a personal space** through `resolvePersonalContext`
+  when the business door refuses it.
+- **The "?" renders under `/personal`**, without `All guides` and
+  `Open full guide`, which point at a page a personal space cannot open.
+- The first guide is `docs/help/personal/overview.md`. `_TEMPLATE.md` names
+  the fourth section and the second root.
+
 ### 2026-09-13 — A core guide may now use a placeholder (`claude/core-declares-its-party-words`)
 
 `_TEMPLATE.md` said *"core-tool guides (accounting, documents, mail and the rest)

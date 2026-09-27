@@ -11,6 +11,29 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — A workspace of one (`claude/personal-space-p0`)
+
+Personal spaces (ADR 0111, [personal-space.md](personal-space.md)) changed
+three things here.
+
+- **`upsertTenantFromOrg` learns the kind from the organization.** A personal
+  organization carries our mark in its PUBLIC metadata (only our backend can
+  write it), and the insert reads it. The update path never touches kind or
+  owner, and a trigger would refuse it if it tried. The insert moved into
+  `insertTenantFromOrgInTx`, the one place a tenant row is made from an
+  organization, so the webhook, onboarding and personal-space provisioning
+  agree. It is race-safe now (`on conflict (clerk_org_id) do nothing`, then
+  read the winner), because the webhook and provisioning race by design.
+- **`upsertMembership` has a third outcome, `refused`**, for anybody but its
+  owner in a personal space. It is final, not deferred: the webhook records
+  it and answers 200, and the reconcile counts it (`ReconcileResult.refused`)
+  and audits it. It never becomes a row.
+- **A membership in a personal space brings no business rows.** The calendar
+  and the default work list (`provisionBusinessRows`) are for businesses only.
+
+The role inside a personal space is always `owner`: `requirePersonalSpace`
+hands the context over as its owner, and nobody else can come through it.
+
 ### 2026-09-12 — A phone that may only tell (`claude/device-grants`)
 
 Voice slice 0, [ADR 0048](../decisions/0048-a-phone-holds-a-grant-that-may-only-tell.md).

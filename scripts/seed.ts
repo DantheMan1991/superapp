@@ -6,6 +6,7 @@ import ws from "ws";
 import { configureNeonForLocalProxy } from "./lib/neon-local";
 import * as schema from "../src/db/schema";
 import { MODULES } from "./seed-catalogue";
+import { enablePersonalToolsEverywhereSql } from "../src/lib/personal-tools-sql";
 
 
 /**
@@ -59,7 +60,7 @@ async function main() {
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool, { schema });
 
-  await db.transaction(async (tx) => {
+  const personalToolRows = await db.transaction(async (tx) => {
     // Seed runs as trusted system code; RLS requires an explicit context.
     await tx.execute(sql`select set_config('app.role', 'superadmin', true)`);
     for (const mod of MODULES) {
@@ -77,12 +78,25 @@ async function main() {
           },
         });
     }
+    /**
+     * A PERSONAL TOOL REACHES EVERY PERSONAL SPACE (ADR 0111). A space made
+     * before a tool shipped would otherwise never get it — the catalogue row
+     * is new, the space's rows are old, and nothing else revisits them. Only
+     * adds: a tool somebody switched off stays off.
+     */
+    const added = (await tx.execute(enablePersonalToolsEverywhereSql)) as unknown as {
+      rows: unknown[];
+    };
+    return added.rows.length;
   });
 
   // Host only. The connection string carries the password and must never be
   // printed, logged, or pasted into a transcript.
   console.log(
-    `Seeded ${MODULES.length} modules into the ${target.label} (${new URL(url).host}).`,
+    `Seeded ${MODULES.length} modules into the ${target.label} (${new URL(url).host}).` +
+      (personalToolRows > 0
+        ? ` Switched on ${personalToolRows} personal tool row${personalToolRows === 1 ? "" : "s"}.`
+        : ""),
   );
   await pool.end();
 }

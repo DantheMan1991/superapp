@@ -13,6 +13,73 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — F2a: workout mode, the session (`claude/fitness-f2`)
+
+Migrations `0428` (four tables, two enums, the breathing pace on programs;
+hand-reordered, with three column-list SET NULL keys, see Decisions) and
+`0429` (their RLS), applied to the dev branch and to production before the
+merge (production on the founder's word, ADR 0014: additive only). No seed:
+the catalogue did not change. The founder approved the screens from a mockup
+and the slice order F2a → F2b (coach voice, looping demo) → F2c (split days).
+
+- **`Start today's session`** under a phase on the program page runs that
+  phase full screen and dark (`/personal/m/fitness/programs/[id]/session`):
+  a feel check (0–10), one exercise at a time, three taps after each, and a
+  finish with the feel after. The program page opens on the phase of the last
+  workout, says `Last workout: today · … · felt 4 before, 7 after`, and turns
+  the button into `Resume today's session` while one is open on the phone.
+- **The pacer** counts breaths at the program's own pace: a new breathing pace
+  on the program, which the importer fills from the book and the editor
+  changes (5 s and 5 s when empty). A circle shrinks on the breath out and
+  grows on the breath in, a tone marks each turn, and the set finishes itself
+  at the top of the range with a chime and a buzz; `Finish set` works from the
+  bottom of it, `One didn't count` takes a breath back, and it pauses. Holds
+  count down. Reps and rolls confirm the target (his call). The first set of
+  an exercise waits for Start; every later set and side counts down five
+  seconds and starts itself.
+- **After each exercise**: effort 1–10 with the program's zone outlined and a
+  word when it is exceeded, the exercise's own checks to tick, and `Anything
+  hurt?` with where; `One more set` up to the program's maximum.
+- **Kept on the phone, sent whole** ([ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)):
+  the session is a document in the phone's storage, changed by pure functions
+  (`core/session.ts`) and sent after every change to `saveSessionAction`,
+  which makes the database match it. No signal: the top says `Kept on this
+  phone`, and it goes up on its own when the phone comes back, or the next
+  time the program page is open. A session left open closes the next day at
+  its last set.
+- **The screen stays on** (Screen Wake Lock) while a session is open.
+- **A log outlives an edit**: a session keeps its phase's name and each
+  exercise its name, unit and per-side, and their keys to the program set null
+  when an edit removes what they logged. Deleting the program still deletes
+  its workouts, and the delete dialog now says how many.
+- **Seams for the founder's posture tool**, which he is building himself: the
+  exercise screen's top slot (the video today), the enrollment's `side`, and
+  F2b's one voice.
+
+**Driven** on the dev branch in the founder's space, on his imported program,
+with the breathing pace set to 1 s and 1 s for speed and cleared after: a
+whole session of four exercises and seven sets. It covered rolls confirmed
+and one taken off, both sides of a per-side exercise, the pacer running two
+sets of 8 by itself, a 5–8 set stopped at 5 with a pause and a breath taken
+back, effort 7 above the zone with its warning, and a pinch with where. A
+reload mid-exercise landed on the same side. A set done with the network
+failing showed `Kept on this phone` (revision 11 on the phone, 10 sent) and
+went up on its own when the network came back. Finish saved and returned to
+the program with `Last workout: today · Phase 1: Weeks 1-2 · 7 sets · felt 4
+before, 7 after`, and the rows read back from the dev database matched. The
+drive found three bugs, all fixed: "3–5is the program's zone" (the compiled
+JSX dropped a space), sound never unlocked after a reload (any tap now
+unlocks it), and `Kept on this phone` lingering after a send had got through.
+
+Tests: `tests/fitness-session.test.ts` (pure: a session walked from Start to
+Finish, a double tap refused, one more set, skipping, resuming from storage,
+the schema), `tests/fitness-core.test.ts` (the pace through the draft and the
+form), `tests/fitness-ops.test.ts` (a session sent whole again and again, a
+late older copy ignored, a set taken back, an id from another program's
+session and a day ahead refused, a log outliving the edit of its exercise
+and its phase, deleting the program), `tests/isolation/fitness.test.ts` (the
+four tables between two spaces).
+
 ### 2026-09-27 — F1: the program, imported (`claude/fitness-f1`)
 
 Migrations `0426` (five tables, three enums; hand-reordered, see Decisions)
@@ -231,6 +298,35 @@ below is for that person.
   when the connection comes back, the way a device grant's offline queue is
   (ADR 0048's idempotency key per set).
 
+#### F2 as it is being built
+
+The founder approved the four screens from a mockup (2026-09-27: the feel
+check, one exercise at a time with the pacer, the three taps, the finish) and
+the order **F2a the session → F2b the coach's voice and the looping demo →
+F2c split days**. His call on counting: **reps and rolls confirm the target**
+(Done records it, minus for a set that came up short); breaths are the
+pacer's. The build log has F2a. Where it moved from the list above:
+
+- **Big buttons, not the whole screen as one.** A screen-wide "set done"
+  target was too easy to hit by accident while getting into position; the
+  first set of an exercise waits for Start, and every later set counts down
+  five seconds and starts itself (breaths and holds).
+- **No roll metronome.** Rolls confirm the target instead (his call), so
+  nothing needs to keep their tempo.
+- **Cues shown, not spoken, in F2a**: one of the exercise's checks in large
+  type, changing each set. Speaking them is F2b, through ONE voice queue:
+  today's `sayIt` cancels whatever it is saying on every new line, which is
+  right for the tell box and wrong for a pacer, a cue and (later) the
+  founder's posture feedback all wanting to speak in the same minute.
+- **Offline is a document, not an idempotency key per set**
+  ([ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)).
+
+His posture tool (camera, feedback) is his to build, in parallel. F2 builds
+nothing camera-related and leaves three seams for it: the exercise screen's
+top **stage** (the video today, a camera view during a set later), the one
+**voice** (F2b), and the enrollment's **side**, where a left-or-right
+assessment lands.
+
 ### F3 — progress and the gate
 
 - **The phase bar**: "6 of 14 done days · Phase 2 opens when you reach 14".
@@ -301,23 +397,26 @@ The founder does not want to leave the app to watch a demo.
 
 Every table carries `tenant_id` with FORCE RLS (the two ordinary policies,
 `0427`) and composite FKs `(tenant_id, x)`, all `on delete cascade`. The first
-five are built (F1, migration `0426`); the rest are planned.
+first five are F1's (migration `0426`), the next four F2a's (`0428`); the
+rest are planned. F2a's three keys from a log to the program it logged are the
+column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `fitness_programs` | A program: name, author, source (`imported` / `own`), notes (its rules in words), sessions a week and effort as ranges, `archived_at`, `version` | `version` guards an edit from a second tab. One active at a time will be the UI's rule, not the table's |
+| `fitness_programs` | A program: name, author, source (`imported` / `own`), notes (its rules in words), sessions a week and effort as ranges, the breathing pace (`breath_out_s`, `breath_in_s`, 1–30; F2a), `archived_at`, `version` | `version` guards an edit from a second tab. One active at a time will be the UI's rule, not the table's |
 | `fitness_phases` | Ordered phases (`position`) with `min_done_days` (1–365, or none) and notes | |
 | `fitness_exercises` | name, purpose, cues (jsonb list), unit (`reps` / `breaths` / `rolls` / `seconds`), videos (jsonb list), notes | **`program_id` NOT NULL for now**: an exercise belongs to the program that made it. A library shared between programs is F5, and relaxing this column is where it starts |
 | `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). Alternative-of and the side rule are F4 |
 | `fitness_imports` | A PDF on its way to being a program: file name, pages, links, status (`drafting` / `draft` / `failed` / `saved` / `discarded`), the draft, the error, the program it became | Holds the draft json and the counts, never the book's text; the draft is dropped once saved |
+| `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
+| `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several; the morning-evening slot is F2c |
+| `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished | F2a. The three taps after an exercise live here, per exercise, not per set |
+| `fitness_sets` | A set: its number, side, `target` (the least asked) and `count` (what was done), `done_at` | F2a. The id is the phone's, so there is no separate idempotency key. Load (weight) is F5 |
 | `fitness_progressions` | A ladder of exercises on an item with its advance rule | F4 |
-| `fitness_enrollments` | Following a program: started on, current phase, side | F2/F3 |
-| `fitness_sessions` | A session: local day, slot, started/finished, feel before/after, note | F2. A day can hold several |
-| `fitness_sets` | A logged set: item, exercise, side, count, load (F5), effort, cues felt, pain, idempotency key | F2. Written from the device's queue |
 
 ## Key files & seams
 
-- `src/db/schema/fitness.ts` — the five tables, the enums, `FitnessVideo`.
+- `src/db/schema/fitness.ts` — the nine tables, the enums, `FitnessVideo`.
 - `src/modules/fitness/core/` — the pure half: `youtube.ts` (links,
   timestamps, the embed URL), `program.ts` (the save's schema and rules,
   `prescription`), `draft.ts` (the `record_program` tool, the prompt,
@@ -328,20 +427,34 @@ five are built (F1, migration `0426`); the rest are planned.
 - `src/modules/fitness/import-ops.ts` — `draftProgram` and the import's life.
 - `src/modules/fitness/program-ops.ts` — `saveProgram` (by id, under
   `version`), `loadProgram`, `listPrograms`, `deleteProgram`.
-- `src/modules/fitness/actions.ts` — the four server actions, each behind
+- `src/modules/fitness/actions.ts` — the five server actions, each behind
   `requirePersonalSpace` and the module gate.
+- `src/modules/fitness/core/session.ts` — workout mode's pure half (F2a): the
+  session document's schema, `nextStep` (where the session is, from what it
+  holds), the changes (`beginSession`, `recordSet`, `oneMoreSet`,
+  `finishExercise`, `skipExercise`, `finishSession`), `sessionSummary`.
+- `src/modules/fitness/session-ops.ts` — `saveSession` (the database made to
+  match a document), `lastSession`, `sessionCount`. `program-ops.ts` has
+  `sessionPlan`, a phase as workout mode runs it.
+- `src/modules/fitness/components/workout/` — the workout screen
+  (`workout-screen.tsx`), `breath-pacer.tsx`, `hold-timer.tsx`,
+  `confirm-count.tsx`, `feel-scale.tsx`, the phone's store
+  (`session-store.ts`) and its sync (`use-session-sync.ts`),
+  `use-wake-lock.ts`, and `sound.ts`. `start-session-button.tsx` is the
+  program page's Start/Resume.
 - `src/modules/fitness/components/` — `read-program-pdf.ts` (pdfjs on the
   device), `import-form.tsx`, `program-editor.tsx`, `program-view.tsx`,
   `video-player.tsx`, and the discard and delete buttons.
 - `src/modules/fitness/FitnessModule.tsx` — the Workouts page.
 - `src/app/personal/(space)/m/` — the tool's routes: `[slug]` (the front page),
   `fitness/import`, `fitness/import/[id]`, `fitness/new`,
-  `fitness/programs/[id]`, `fitness/programs/[id]/edit`.
+  `fitness/programs/[id]`, `fitness/programs/[id]/edit`,
+  `fitness/programs/[id]/session` (workout mode).
 - `src/lib/pdf/browser.ts` — `loadPdfjs`, shared with Documents.
-- `tests/fitness-core.test.ts`, `tests/fitness-ops.test.ts`,
-  `tests/isolation/fitness.test.ts`.
+- `tests/fitness-core.test.ts`, `tests/fitness-session.test.ts`,
+  `tests/fitness-ops.test.ts`, `tests/isolation/fitness.test.ts`.
 - `docs/help/fitness/` — `overview.md` (`**Route:** /personal/m/fitness/**`),
-  `import.md`, `editor.md`, `program.md`.
+  `import.md`, `editor.md`, `program.md`, `workout.md`.
 
 ## Decisions & gotchas
 
@@ -373,6 +486,35 @@ five are built (F1, migration `0426`); the rest are planned.
 - **Only a row still `drafting` takes Claude's answer.** `finishImport` and
   `failImport` are guarded on the status, so a draft the person discarded as
   interrupted stays discarded however late the answer comes.
+- **A session is a document the phone keeps and sends whole** (F2a,
+  [ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)),
+  not an event per set: the phone's own ids, a `revision` that only goes up,
+  and the children made to match. The phone's store is a LIST of documents,
+  so an unsent session from yesterday is never overwritten by today's.
+- **A log outlives an edit, by column-list SET NULL.** The program stays
+  editable after it has been done, so `fitness_sessions.phase_id` and
+  `fitness_session_exercises.item_id` / `exercise_id` are
+  `ON DELETE SET NULL ("x")`, hand-written in `0428` (a bare SET NULL would
+  null `tenant_id` and can never run on a composite key). The schema says
+  `.onDelete("set null")` and the snapshot records the same, so `db:generate`
+  leaves them be. The names and units the log needs are kept on it.
+  `saveSession` also stores a reference the program no longer has as null
+  rather than refusing the workout.
+- **No current phase on the enrollment.** Each session names its phase; the
+  program page opens on the last workout's phase. Moving on is F3's gate.
+- **Timers read state through effect events.** The lint here is the React
+  compiler's (errors: no setState in an effect body, no reading the clock in
+  render, no ref reads in render). The pacer's timers call `useEffectEvent`
+  functions, so a re-render (a save's status changing) or a corrected count
+  never restarts the breath in progress, and the summary's minutes come from
+  the last set, not from `now`.
+- **The compiled JSX dropped a space.** `{zone} is the program's zone.`
+  rendered as "3–5is" when the text ran on to a line break before the next
+  expression; that sentence is one template string now. Check a rendered
+  sentence, not its source.
+- **Sound needs a tap.** A browser starts audio only from a user gesture, and
+  a session resumed after a reload has had no Start tap, so any tap on the
+  workout screen unlocks it.
 
 ## Open items
 
@@ -380,18 +522,25 @@ five are built (F1, migration `0426`); the rest are planned.
   far was in a browser. Until one plays inside the app on a phone, the
   referrer and the WebView's handling of the frame are assumptions (Inline
   video, above).
-- **Delete becomes archive when logs exist.** F1 deletes a program outright,
-  and every row under it cascades. Once F2 logs sets against its items, the
-  edit screen's `Delete program` must put the program away (`archived_at`,
-  already a column and already filtered by `listPrograms`) instead.
+- **Delete should become archive now that logs exist.** F2a logs workouts,
+  and deleting a program still deletes them with it; the dialog now says how
+  many. Putting a program away (`archived_at`, already a column and already
+  filtered by `listPrograms`) with its history kept is the better answer, and
+  it needs a place to find put-away programs again.
+- **Workout mode in the Android app.** The pacer's buzz needs the VIBRATE
+  permission, which the app does not have: the phone's browser buzzes, the app
+  will not until a new build, best made together with the CAMERA permission
+  the founder's posture tool needs. Screen Wake Lock inside the app's WebView
+  has not been watched either.
+- **Nobody has heard the pacer on a phone.** The drive ran in a browser pane;
+  the tones, their volume and the buzz are unproven on a real phone.
+- **An unsent workout goes up only while a session or a program's page is
+  open**, not from the Workouts home.
 - **Scanned PDFs are refused** (`NO_TEXT`). Reading pictures of pages would
   need OCR; nobody has asked.
 - **A save is one statement per row.** Fine next to the database; from a
   laptop to Neon a fifteen-exercise program took several seconds to save on
   the drive. Batch the inserts if a program ever feels slow in production.
-- Whether each set's count should be entered or only confirmed. Workout mode
-  counts breaths itself; a person who did 7 instead of 8 needs one tap to say
-  so.
 - Apple Health / Google Fit: writing a session as a workout. Not before F3.
 - A trainer or physio who wants to see the log (the PDF points at the author's
   coaches) is a read-only share of a personal space, and ADR 0111 has no

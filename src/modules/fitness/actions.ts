@@ -8,7 +8,9 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { draftRequestSchema } from "./core/draft";
 import { FitnessError, fitnessMessage } from "./core/errors";
 import { programInputSchema, programProblems } from "./core/program";
+import { sessionDocSchema } from "./core/session";
 import { markVideos } from "./embeds";
+import { saveSession } from "./session-ops";
 import { discardImport, draftProgram, markImportSaved } from "./import-ops";
 import { deleteProgram, saveProgram } from "./program-ops";
 
@@ -122,6 +124,30 @@ export async function discardImportAction(
     return { ok: true };
   } catch (err) {
     return failure(err, "The draft could not be discarded. Try again.");
+  }
+}
+
+/**
+ * Keep a workout session. The phone sends the whole of it after every set,
+ * and again whenever it could not get through (session-ops.ts), so this is
+ * safe to repeat; a failure is said quietly, because the session is still on
+ * the phone and will be sent again.
+ */
+export async function saveSessionAction(input: unknown): Promise<Outcome<{ revision: number }>> {
+  const ctx = await gate();
+  const parsed = sessionDocSchema.safeParse(input);
+  if (!parsed.success) return { error: "This session could not be read. It is still on this phone." };
+  try {
+    const saved = await withTenant(ctx.tenant.id, (tx) => saveSession(tx, ctx.tenant.id, parsed.data), {
+      role: ctx.role,
+    });
+    if (parsed.data.finishedAt) {
+      revalidatePath(HOME);
+      revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
+    }
+    return { ok: true, revision: saved.revision };
+  } catch (err) {
+    return failure(err, "The session could not be saved just now. It is kept on this phone and will be sent again.");
   }
 }
 

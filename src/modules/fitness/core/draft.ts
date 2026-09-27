@@ -93,6 +93,15 @@ export const recordProgramTool = {
       sessionsPerWeekMax: { ...nullableInt, description: "Most sessions a week it suggests; null if it names one number or none." },
       effortMin: { ...nullableInt, description: "Lowest effort it asks for, on a 1–10 scale; null if it says nothing about effort." },
       effortMax: { ...nullableInt, description: "Highest effort it allows, 1–10; null if it says nothing about effort." },
+      breathOutSeconds: {
+        ...nullableInt,
+        description:
+          "When the program gives a breathing pace, the seconds to breathe OUT (\"about 5 seconds out\" is 5); null if it gives none.",
+      },
+      breathInSeconds: {
+        ...nullableInt,
+        description: "The seconds to breathe IN, from the same pace (\"5 seconds softly in\" is 5); null if it gives none.",
+      },
       phases: {
         type: "array",
         description: "The phases (weeks, stages, blocks) in the order the program is done.",
@@ -186,6 +195,8 @@ export const recordProgramTool = {
       "sessionsPerWeekMax",
       "effortMin",
       "effortMax",
+      "breathOutSeconds",
+      "breathInSeconds",
       "phases",
     ],
   },
@@ -275,6 +286,8 @@ const modelDraftSchema = z.object({
   sessionsPerWeekMax: looseInt,
   effortMin: looseInt,
   effortMax: looseInt,
+  breathOutSeconds: looseInt,
+  breathInSeconds: looseInt,
   phases: z.array(
     z.object({
       name: looseText,
@@ -358,6 +371,10 @@ export function normalizeDraft(raw: unknown): ProgramInput {
     sessionsPerWeekMax: sessions.max,
     effortMin: effort.min,
     effortMax: effort.max,
+    // A pace outside 1–30 seconds is a misreading, not a pace: left for the
+    // person to fill rather than kept.
+    breathOutS: seconds(draft.breathOutSeconds),
+    breathInS: seconds(draft.breathInSeconds),
     phases: phases.slice(0, 24),
   };
   // The last word: the same schema the save action holds the editor to.
@@ -381,6 +398,10 @@ function bounded(
 }
 
 /** An optional range: nothing without a floor, and a top only above it. */
+function seconds(value: number | null): number | null {
+  return value != null && value >= 1 && value <= 30 ? value : null;
+}
+
 function optionalRange(
   min: number | null,
   max: number | null,

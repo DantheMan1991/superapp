@@ -67,8 +67,31 @@ export const programInputSchema = z.object({
   sessionsPerWeekMax: count(14).nullable(),
   effortMin: count(10).nullable(),
   effortMax: count(10).nullable(),
+  /**
+   * The breathing pace the program asks for, in whole seconds. `default(null)`
+   * so a draft stored before F2 still opens.
+   */
+  breathOutS: count(30).nullable().default(null),
+  breathInS: count(30).nullable().default(null),
   phases: z.array(phaseInputSchema).max(24),
 });
+
+/**
+ * The pacer's pace when a program gives none: five seconds out, five in, the
+ * founder's program's own and a common one for this kind of work.
+ */
+export const DEFAULT_BREATH = { outS: 5, inS: 5 } as const;
+
+/** The pace workout mode's pacer keeps: the program's own, or the default. */
+export function breathPace(program: { breathOutS: number | null; breathInS: number | null }): {
+  outS: number;
+  inS: number;
+} {
+  return {
+    outS: program.breathOutS ?? DEFAULT_BREATH.outS,
+    inS: program.breathInS ?? DEFAULT_BREATH.inS,
+  };
+}
 
 export type VideoInput = z.infer<typeof videoInputSchema>;
 export type ItemInput = z.infer<typeof itemInputSchema>;
@@ -162,6 +185,8 @@ export function emptyProgram(): ProgramInput {
     sessionsPerWeekMax: null,
     effortMin: null,
     effortMax: null,
+    breathOutS: null,
+    breathInS: null,
     phases: [emptyPhase(0)],
   };
 }

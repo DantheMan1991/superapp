@@ -28,6 +28,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -106,6 +107,13 @@ export const fitnessPrograms = pgTable(
     /** "3/10, never beyond 5/10": the effort the program asks for, 1–10. */
     effortMin: integer("effort_min"),
     effortMax: integer("effort_max"),
+    /**
+     * The breathing pace the program asks for ("about 5 seconds out, 5 seconds
+     * softly in"), which workout mode's pacer keeps (F2). Null when the program
+     * gives none; the pacer then uses 5 and 5.
+     */
+    breathOutS: integer("breath_out_s"),
+    breathInS: integer("breath_in_s"),
     /** Put away, not deleted: F2's logs will hang off it. */
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     version: integer("version").notNull().default(1),
@@ -125,6 +133,11 @@ export const fitnessPrograms = pgTable(
       "fitness_programs_effort_range",
       sql`(${t.effortMin} is null or ${t.effortMin} between 1 and 10)
         and (${t.effortMax} is null or (${t.effortMin} is not null and ${t.effortMax} between ${t.effortMin} and 10))`,
+    ),
+    check(
+      "fitness_programs_breath_pace",
+      sql`(${t.breathOutS} is null or ${t.breathOutS} between 1 and 30)
+        and (${t.breathInS} is null or ${t.breathInS} between 1 and 30)`,
     ),
   ],
 );
@@ -302,8 +315,211 @@ export const fitnessImports = pgTable(
   ],
 );
 
+/* ── WORKOUT MODE (F2): following a program, and what was done ─────────────
+ *
+ * A session is made ON THE DEVICE and sent whole (`saveSession`): its id, and
+ * the ids of everything in it, are the phone's, so a phone that lost signal
+ * and sends again sends the SAME rows, never a second session; `revision`
+ * counts the phone's changes, so an older copy arriving late never overwrites
+ * a newer one.
+ *
+ * A log outlives an edit. The program stays editable after it has been done
+ * (F1 saves by id), so a session names its phase, and each exercise in it its
+ * item and exercise, by keys that SET NULL (column-list form: a bare SET NULL
+ * would try to null `tenant_id` too) when an edit removes them, and keeps
+ * their names and units as they were. Deleting the whole program still
+ * cascades through its enrollment to every session.
+ */
+
+/** Which side a set was done on, and which side a program favours for a person (F4). */
+export const fitnessSide = pgEnum("fitness_side", ["left", "right"]);
+
+/** "Anything hurt?", answered after each exercise. */
+export const fitnessHurt = pgEnum("fitness_hurt", ["none", "pinch", "yes"]);
+
+/**
+ * FOLLOWING A PROGRAM: made by the first session, ended when the person stops
+ * or starts it over. One open enrollment per program. F3 counts done days
+ * inside it; `side` is where the program's left-or-right self-assessment
+ * lands (F4, or the founder's posture tool), null meaning both sides, the
+ * program's own default.
+ */
+export const fitnessEnrollments = pgTable(
+  "fitness_enrollments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    programId: uuid("program_id").notNull(),
+    /** The person's own calendar day the first session was on. */
+    startedOn: date("started_on").notNull(),
+    side: fitnessSide("side"),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_enrollments_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("fitness_enrollments_open_idx")
+      .on(t.tenantId, t.programId)
+      .where(sql`${t.endedAt} is null`),
+    foreignKey({
+      name: "fitness_enrollments_program_fk",
+      columns: [t.tenantId, t.programId],
+      foreignColumns: [fitnessPrograms.tenantId, fitnessPrograms.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/** ONE WORKOUT: a phase done on a day, with how the body felt before and after. */
+export const fitnessSessions = pgTable(
+  "fitness_sessions",
+  {
+    /** The phone's id for it (see the header). */
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    enrollmentId: uuid("enrollment_id").notNull(),
+    /** Null once an edit removes the phase; `phase_name` still says which it was. */
+    phaseId: uuid("phase_id"),
+    phaseName: text("phase_name").notNull().default(""),
+    /** The person's own calendar day, as the phone said it. F3's done days count these. */
+    localDay: date("local_day").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    /** Null while the session is still going (or was never finished). */
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** "How does your body feel?", 0–10, before the first exercise and after the last. */
+    feelBefore: integer("feel_before"),
+    feelAfter: integer("feel_after"),
+    note: text("note").notNull().default(""),
+    /** The phone's count of changes to it (see the header). */
+    revision: integer("revision").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_sessions_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("fitness_sessions_tenant_enrollment_day_idx").on(t.tenantId, t.enrollmentId, t.localDay),
+    foreignKey({
+      name: "fitness_sessions_enrollment_fk",
+      columns: [t.tenantId, t.enrollmentId],
+      foreignColumns: [fitnessEnrollments.tenantId, fitnessEnrollments.id],
+    }).onDelete("cascade"),
+    // Hand-edited in the migration to the column-list form `ON DELETE SET NULL ("phase_id")`:
+    // a bare SET NULL would try to null tenant_id too and can never run on a composite key.
+    foreignKey({
+      name: "fitness_sessions_phase_fk",
+      columns: [t.tenantId, t.phaseId],
+      foreignColumns: [fitnessPhases.tenantId, fitnessPhases.id],
+    }).onDelete("set null"),
+    check("fitness_sessions_feel_before_range", sql`${t.feelBefore} is null or ${t.feelBefore} between 0 and 10`),
+    check("fitness_sessions_feel_after_range", sql`${t.feelAfter} is null or ${t.feelAfter} between 0 and 10`),
+    check("fitness_sessions_revision_positive", sql`${t.revision} >= 1`),
+  ],
+);
+
+/**
+ * AN EXERCISE AS IT WAS DONE IN A SESSION, with the three taps after it:
+ * effort, the "doing it right" cues felt, and anything that hurt. Its name,
+ * unit and per-side are kept as they were, because the program's exercise may
+ * be edited or removed later.
+ */
+export const fitnessSessionExercises = pgTable(
+  "fitness_session_exercises",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").notNull(),
+    itemId: uuid("item_id"),
+    exerciseId: uuid("exercise_id"),
+    /** 0-based order within the session. */
+    position: integer("position").notNull(),
+    name: text("name").notNull(),
+    unit: fitnessUnit("unit").notNull(),
+    perSide: boolean("per_side").notNull().default(false),
+    /** 1–10; the program's own zone is on the program. */
+    effort: integer("effort"),
+    /** The cues ticked as felt, in the exercise's own words. */
+    cuesFelt: jsonb("cues_felt").$type<string[]>().notNull().default([]),
+    hurt: fitnessHurt("hurt"),
+    hurtNote: text("hurt_note").notNull().default(""),
+    skipped: boolean("skipped").notNull().default(false),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_session_exercises_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("fitness_session_exercises_tenant_session_idx").on(t.tenantId, t.sessionId),
+    index("fitness_session_exercises_tenant_item_idx").on(t.tenantId, t.itemId),
+    foreignKey({
+      name: "fitness_session_exercises_session_fk",
+      columns: [t.tenantId, t.sessionId],
+      foreignColumns: [fitnessSessions.tenantId, fitnessSessions.id],
+    }).onDelete("cascade"),
+    // Hand-edited in the migration to the column-list form `ON DELETE SET NULL ("item_id")`.
+    foreignKey({
+      name: "fitness_session_exercises_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [fitnessPhaseItems.tenantId, fitnessPhaseItems.id],
+    }).onDelete("set null"),
+    // And `ON DELETE SET NULL ("exercise_id")`.
+    foreignKey({
+      name: "fitness_session_exercises_exercise_fk",
+      columns: [t.tenantId, t.exerciseId],
+      foreignColumns: [fitnessExercises.tenantId, fitnessExercises.id],
+    }).onDelete("set null"),
+    check("fitness_session_exercises_position_nonnegative", sql`${t.position} >= 0`),
+    check("fitness_session_exercises_effort_range", sql`${t.effort} is null or ${t.effort} between 1 and 10`),
+    check("fitness_session_exercises_cues_array", sql`jsonb_typeof(${t.cuesFelt}) = 'array'`),
+  ],
+);
+
+/** ONE SET: its number, its side, what was asked and what was done. */
+export const fitnessSets = pgTable(
+  "fitness_sets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    sessionExerciseId: uuid("session_exercise_id").notNull(),
+    /** 1-based. Both sides of a per-side set share its number. */
+    number: integer("number").notNull(),
+    side: fitnessSide("side"),
+    /** What was asked: 8 breaths, 15 rolls. */
+    target: integer("target").notNull(),
+    /** What was done. The pacer counts breaths; reps and rolls confirm the target, or fewer. */
+    count: integer("count").notNull(),
+    /** When the phone says it was done. */
+    doneAt: timestamp("done_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_sets_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("fitness_sets_tenant_session_exercise_idx").on(t.tenantId, t.sessionExerciseId),
+    foreignKey({
+      name: "fitness_sets_session_exercise_fk",
+      columns: [t.tenantId, t.sessionExerciseId],
+      foreignColumns: [fitnessSessionExercises.tenantId, fitnessSessionExercises.id],
+    }).onDelete("cascade"),
+    check("fitness_sets_number_range", sql`${t.number} between 1 and 20`),
+    check("fitness_sets_target_range", sql`${t.target} between 1 and 1000`),
+    check("fitness_sets_count_range", sql`${t.count} between 0 and 1000`),
+  ],
+);
+
 export type FitnessProgram = typeof fitnessPrograms.$inferSelect;
 export type FitnessPhase = typeof fitnessPhases.$inferSelect;
 export type FitnessExercise = typeof fitnessExercises.$inferSelect;
 export type FitnessPhaseItem = typeof fitnessPhaseItems.$inferSelect;
 export type FitnessImport = typeof fitnessImports.$inferSelect;
+export type FitnessEnrollment = typeof fitnessEnrollments.$inferSelect;
+export type FitnessSession = typeof fitnessSessions.$inferSelect;
+export type FitnessSessionExercise = typeof fitnessSessionExercises.$inferSelect;
+export type FitnessSet = typeof fitnessSets.$inferSelect;

@@ -23,11 +23,10 @@ Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This pa
 1. Click {button:Import a program|primary|upload}.
 2. Choose the PDF. It is read on your device, and Claude drafts the program from its words and links.
 3. Check the draft, fix anything that is wrong, and click {button:Save program|primary}.
-4. You land on the program, ready to follow.
+4. You land on the program. Click {button:Start today's session|primary|play} to do your first session. See [Doing a session](workout.md).
 
 ## Not on this page
 
-- **Doing a workout.** A screen for the session itself, with the breaths counted for you and your sets logged, is next. Until then, open the program and follow it exercise by exercise.
 - **Your progress.** Days done, the week against the program's target, and when the next phase opens come after that.
 - **Putting a program away without deleting it.** Not built. You can delete a program from its edit screen.
 

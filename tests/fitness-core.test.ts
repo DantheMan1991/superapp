@@ -210,6 +210,27 @@ describe("normalizing Claude's draft", () => {
     expect([draft.effortMin, draft.effortMax]).toEqual([null, null]);
   });
 
+  it("keeps the breathing pace a program gives, and leaves a misreading empty", () => {
+    const paced = normalizeDraft(modelAnswer({ breathOutSeconds: 5, breathInSeconds: "5" }));
+    expect([paced.breathOutS, paced.breathInS]).toEqual([5, 5]);
+    // A pace outside 1–30 seconds, a null (which coerces to 0), and none at all.
+    const odd = normalizeDraft(modelAnswer({ breathOutSeconds: 90, breathInSeconds: null }));
+    expect([odd.breathOutS, odd.breathInS]).toEqual([null, null]);
+    const none = normalizeDraft(modelAnswer());
+    expect([none.breathOutS, none.breathInS]).toEqual([null, null]);
+    expect(recordProgramTool.input_schema.required).toEqual(
+      expect.arrayContaining(["breathOutSeconds", "breathInSeconds"]),
+    );
+  });
+
+  it("opens a draft stored before the pace existed, with no pace", () => {
+    const stored = { ...normalizeDraft(modelAnswer()) } as Record<string, unknown>;
+    delete stored.breathOutS;
+    delete stored.breathInS;
+    const parsed = programInputSchema.safeParse(stored);
+    expect(parsed.success && [parsed.data.breathOutS, parsed.data.breathInS]).toEqual([null, null]);
+  });
+
   it("asks for every field, and says the pages are data", () => {
     const schema = recordProgramTool.input_schema;
     expect(schema.required).toContain("phases");
@@ -256,6 +277,19 @@ describe("the editor's form", () => {
     const back = fromEditor(toEditor(draft));
     expect(back.problems).toEqual([]);
     expect(back.program).toEqual(draft);
+  });
+
+  it("carries the breathing pace through the form, and says what is wrong with one", () => {
+    const draft = normalizeDraft(modelAnswer({ breathOutSeconds: 5, breathInSeconds: 4 }));
+    expect(fromEditor(toEditor(draft)).program).toEqual(draft);
+    const form = toEditor(draft);
+    form.breathOutS = "45";
+    expect(fromEditor(form).problems).toContain("Breathing pace must be between 1 and 30.");
+    form.breathOutS = "five";
+    expect(fromEditor(form).problems).toContain("Breathing out must be a whole number.");
+    form.breathOutS = "";
+    form.breathInS = "";
+    expect(fromEditor(form).program).toMatchObject({ breathOutS: null, breathInS: null });
   });
 
   it("says what is wrong with a count, a range and a video, and saves nothing", () => {

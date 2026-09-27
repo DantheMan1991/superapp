@@ -5,7 +5,9 @@ import { withTenant, withSystem, schema } from "../../src/db";
 import { d } from "./_shared";
 
 /**
- * WORKOUTS' FIVE TABLES ARE ORDINARY TENANT TABLES (docs/modules/fitness.md).
+ * WORKOUTS' NINE TABLES ARE ORDINARY TENANT TABLES (docs/modules/fitness.md):
+ * F1's program, phases, exercises, items and imports, and F2's enrollments,
+ * sessions, session exercises and sets.
  *
  * They only ever hold rows in a personal space, but to the database a personal
  * space is a tenant like any other (ADR 0111) — so this proves what
@@ -18,7 +20,17 @@ const STAMP = `iso-fitness-${process.pid}`;
 
 let a: string;
 let b: string;
-const ids = { program: "", phase: "", exercise: "", item: "", import: "" };
+const ids = {
+  program: "",
+  phase: "",
+  exercise: "",
+  item: "",
+  import: "",
+  enrollment: "",
+  session: "",
+  sessionExercise: "",
+  set: "",
+};
 
 async function names(err: Promise<unknown>): Promise<string> {
   try {
@@ -82,12 +94,48 @@ d("workouts tables (RLS)", () => {
           createdByClerkUserId: `user_isofita${process.pid}`,
         })
         .returning();
+      const [enrollment] = await tx
+        .insert(schema.fitnessEnrollments)
+        .values({ tenantId: a, programId: program.id, startedOn: "2026-09-27" })
+        .returning();
+      const [session] = await tx
+        .insert(schema.fitnessSessions)
+        .values({
+          tenantId: a,
+          enrollmentId: enrollment.id,
+          phaseId: phase.id,
+          phaseName: "Weeks 1–2",
+          localDay: "2026-09-27",
+          startedAt: new Date(),
+          feelBefore: 4,
+        })
+        .returning();
+      const [sessionExercise] = await tx
+        .insert(schema.fitnessSessionExercises)
+        .values({
+          tenantId: a,
+          sessionId: session.id,
+          itemId: item.id,
+          exerciseId: exercise.id,
+          position: 0,
+          name: "Hip lift",
+          unit: "breaths",
+        })
+        .returning();
+      const [set] = await tx
+        .insert(schema.fitnessSets)
+        .values({ tenantId: a, sessionExerciseId: sessionExercise.id, number: 1, target: 8, count: 8, doneAt: new Date() })
+        .returning();
       Object.assign(ids, {
         program: program.id,
         phase: phase.id,
         exercise: exercise.id,
         item: item.id,
         import: draft.id,
+        enrollment: enrollment.id,
+        session: session.id,
+        sessionExercise: sessionExercise.id,
+        set: set.id,
       });
     });
   });
@@ -96,19 +144,27 @@ d("workouts tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.tenants).where(inArray(schema.tenants.id, [a, b])));
   });
 
-  it("A reads its own program, phase, exercise, item and import", async () => {
+  it("A reads its own program, phase, exercise, item and import, and its workouts", async () => {
     const seen = await withTenant(a, async (tx) => ({
       programs: await tx.select({ id: schema.fitnessPrograms.id }).from(schema.fitnessPrograms),
       phases: await tx.select({ id: schema.fitnessPhases.id }).from(schema.fitnessPhases),
       exercises: await tx.select({ id: schema.fitnessExercises.id }).from(schema.fitnessExercises),
       items: await tx.select({ id: schema.fitnessPhaseItems.id }).from(schema.fitnessPhaseItems),
       imports: await tx.select({ id: schema.fitnessImports.id }).from(schema.fitnessImports),
+      enrollments: await tx.select({ id: schema.fitnessEnrollments.id }).from(schema.fitnessEnrollments),
+      sessions: await tx.select({ id: schema.fitnessSessions.id }).from(schema.fitnessSessions),
+      sessionExercises: await tx.select({ id: schema.fitnessSessionExercises.id }).from(schema.fitnessSessionExercises),
+      sets: await tx.select({ id: schema.fitnessSets.id }).from(schema.fitnessSets),
     }));
     expect(seen.programs.map((r) => r.id)).toEqual([ids.program]);
     expect(seen.phases.map((r) => r.id)).toEqual([ids.phase]);
     expect(seen.exercises.map((r) => r.id)).toEqual([ids.exercise]);
     expect(seen.items.map((r) => r.id)).toEqual([ids.item]);
     expect(seen.imports.map((r) => r.id)).toEqual([ids.import]);
+    expect(seen.enrollments.map((r) => r.id)).toEqual([ids.enrollment]);
+    expect(seen.sessions.map((r) => r.id)).toEqual([ids.session]);
+    expect(seen.sessionExercises.map((r) => r.id)).toEqual([ids.sessionExercise]);
+    expect(seen.sets.map((r) => r.id)).toEqual([ids.set]);
   });
 
   it("B cannot read any of A's rows, even by id", async () => {
@@ -118,6 +174,13 @@ d("workouts tables (RLS)", () => {
       ...(await tx.select().from(schema.fitnessExercises).where(eq(schema.fitnessExercises.id, ids.exercise))),
       ...(await tx.select().from(schema.fitnessPhaseItems).where(eq(schema.fitnessPhaseItems.id, ids.item))),
       ...(await tx.select().from(schema.fitnessImports).where(eq(schema.fitnessImports.id, ids.import))),
+      ...(await tx.select().from(schema.fitnessEnrollments).where(eq(schema.fitnessEnrollments.id, ids.enrollment))),
+      ...(await tx.select().from(schema.fitnessSessions).where(eq(schema.fitnessSessions.id, ids.session))),
+      ...(await tx
+        .select()
+        .from(schema.fitnessSessionExercises)
+        .where(eq(schema.fitnessSessionExercises.id, ids.sessionExercise))),
+      ...(await tx.select().from(schema.fitnessSets).where(eq(schema.fitnessSets.id, ids.set))),
     ]);
     expect(seen).toHaveLength(0);
   });
@@ -136,6 +199,13 @@ d("workouts tables (RLS)", () => {
         .returning()),
       ...(await tx.delete(schema.fitnessPhaseItems).where(eq(schema.fitnessPhaseItems.id, ids.item)).returning()),
       ...(await tx.delete(schema.fitnessImports).where(eq(schema.fitnessImports.id, ids.import)).returning()),
+      ...(await tx
+        .update(schema.fitnessSessions)
+        .set({ feelBefore: 0 })
+        .where(eq(schema.fitnessSessions.id, ids.session))
+        .returning()),
+      ...(await tx.delete(schema.fitnessSets).where(eq(schema.fitnessSets.id, ids.set)).returning()),
+      ...(await tx.delete(schema.fitnessEnrollments).where(eq(schema.fitnessEnrollments.id, ids.enrollment)).returning()),
     ]);
     expect(changed).toHaveLength(0);
     const [program] = await withSystem((tx) =>
@@ -172,6 +242,55 @@ d("workouts tables (RLS)", () => {
         ),
       ),
     ).toContain("fitness_imports_program_fk");
+  });
+
+  it("B cannot hang a workout of its own off A's program, enrollment, session or exercise", async () => {
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessEnrollments).values({ tenantId: b, programId: ids.program, startedOn: "2026-09-27" }),
+        ),
+      ),
+    ).toContain("fitness_enrollments_program_fk");
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessSessions).values({
+            tenantId: b,
+            enrollmentId: ids.enrollment,
+            localDay: "2026-09-27",
+            startedAt: new Date(),
+          }),
+        ),
+      ),
+    ).toContain("fitness_sessions_enrollment_fk");
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessSessionExercises).values({
+            tenantId: b,
+            sessionId: ids.session,
+            position: 0,
+            name: "Mine",
+            unit: "reps",
+          }),
+        ),
+      ),
+    ).toContain("fitness_session_exercises_session_fk");
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessSets).values({
+            tenantId: b,
+            sessionExerciseId: ids.sessionExercise,
+            number: 1,
+            target: 5,
+            count: 5,
+            doneAt: new Date(),
+          }),
+        ),
+      ),
+    ).toContain("fitness_sets_session_exercise_fk");
   });
 
   it("B cannot write a row claiming to be A's", async () => {

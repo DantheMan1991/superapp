@@ -303,7 +303,10 @@ certifies it like any pair.
   tool reaches a superadmin's space through `/personal/open` and the space's
   layout (`ensurePersonalToolsFor(id, { preview: true })`; the layout because
   the switcher never passes the door); the seed, which touches every space,
-  enables `available` tools only. A preview row stays after the
+  enables `available` tools only, and so does provisioning. F1's first push
+  previewed in provisioning too, and CI caught it: `personal-space-db`'s gate
+  test provisions as a superadmin and then inserts its own `coming_soon` test
+  tool, which the preview had already switched on (a unique-key clash). A preview row stays after the
   tool ships, which is what should happen: it is the same row the seed would
   have made.
 

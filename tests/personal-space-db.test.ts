@@ -124,7 +124,12 @@ async function tenantsByOrg(clerkOrgId: string) {
   );
 }
 
-/** A `coming_soon` personal module: harmless if a run dies before cleanup — nothing enables it. */
+/**
+ * A `coming_soon` personal module: harmless if a run dies before cleanup. The
+ * one thing that switches a `coming_soon` tool on is a superadmin's own preview
+ * where their space is opened (`previewPersonalTools`), never provisioning or
+ * the seed, and this one has no screen to show.
+ */
 const TEST_TOOL = `test-personal-${PID}`;
 
 d("personal spaces: sync, provisioning, membership and the gate", () => {

@@ -241,8 +241,12 @@ export async function provisionPersonalSpace(
           .set({ timezone, updatedAt: new Date() })
           .where(eq(schema.tenants.id, tenant.id));
       }
-      // A superadmin's space previews the tools still `coming_soon`.
-      await ensurePersonalTools(tx, tenant.id, { preview: input.isSuperAdmin });
+      // AVAILABLE tools only, for everybody. A superadmin's preview of the
+      // `coming_soon` ones is switched on where the space is opened (the door,
+      // the layout and the home: `previewPersonalTools`), never here, so
+      // provisioning, which every consumer's space goes through, keeps the
+      // one rule the seed keeps.
+      await ensurePersonalTools(tx, tenant.id);
       return { tenant: { ...tenant, timezone: timezone ?? tenant.timezone }, created: true };
     } catch (err) {
       await clerk.deleteOrganization(org.id).catch((cleanup: unknown) => {

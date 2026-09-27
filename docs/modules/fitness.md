@@ -13,6 +13,88 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — F2c: split days, and a Today card (`claude/fitness-f2c`)
+
+No migration and no seed. The founder approved the screens from a mockup
+(the split choice, the evening pick-up, the Today card) and the rule that
+**every set done counts toward the day, however short it came up**. With this,
+F2 (workout mode) is built.
+
+- **A day is a ledger** (`core/day.ts`): the sets each exercise needs (its
+  minimum), the sets done across the day's sessions, and what is left. The
+  day is done when every exercise that is not optional has had its minimum.
+  That is the done day F3's gate will count.
+- **A set is a full set** (`fullSets`): one of "1 × 15 rolls per side" is both
+  sides. The session's `Session done` count and the program page's `Last
+  workout` count this way now. F2a counted each side as a set, so a drive's
+  "7 sets" is 6.
+- **"Half now, the rest later today"** at the start does the first half of
+  every exercise's sets, rounded up (1 of 2, 2 of 3). A session later that day
+  starts as `The rest of today`: the day so far with when each session was
+  (`Evening · 4 sets · 2 minutes`), and only what is left (`1 more set`),
+  passing over the exercises the day already has (`done today`). Once the day
+  is done, the start offers `Start another session`, which does everything
+  again and counts too. The choice only shows when halving changes something.
+- **The session carries its own aim** (`SessionDoc.aim`, the phone's alone,
+  like `plannedSets`): per item, the sets it does and the most "one more set"
+  may reach, so the morning and the evening together stay within the
+  program's maximum for the day. A document from before has none and aims at
+  each minimum, as before.
+- **The finish says how the day stands**: `That is every set today asks for.`
+  or `Still to do today: 4 sets. Start again later today and it picks up
+  here.` The coach's first-set intro says the session's share ("1 set of 8
+  breaths").
+- **The program page's Start** reads `Do the rest of today` after a session
+  earlier today, with `Today: Evening · 4 sets. 4 sets left.`, or `Start
+  another session` with `Today's sets are done: …`. `Last workout` steps
+  aside when its workout was today on the phase on screen.
+- **A Today card on the Workouts home** (`components/today-card.tsx`): the
+  program last followed, on its last workout's phase. It lists today's
+  sessions, says what is left and of which exercises, and has one button:
+  `Start today's session`, `Do the rest` or `Resume`. Once every set is done
+  it says `Every set done today.` and asks nothing. It sends unsent workouts
+  while the page is open.
+- **Where the day comes from**: the pages load the program's sessions from
+  the space's yesterday to tomorrow (`recentSessions`, full sets per item),
+  and the phone adds its own documents, sent or not, the phone's copy winning
+  (`dayOf`). So a morning done without signal is already counted.
+- **"Morning" is read on the space's clock** (`hourIn`), never the device's:
+  these screens are rendered on the server first, and a device clock there is
+  the server's.
+- Guides: `workout.md` (the start screen on a split day, `How much now?`, the
+  finish's line, a how-to for splitting a day), `program.md` (the Start
+  button's labels, `Last workout`), `overview.md` (the Today card).
+
+**Driven** on a production build against the dev branch, on the founder's
+program, with the breathing pace set to 1 s and 1 s for speed and cleared
+after. Phase 1 already had four sessions today from the earlier drives, which
+showed the done day: the Today card listed them with `Every set done today.`,
+the program page read `Start another session` with `Today's sets are done:
+Afternoon · 6 sets, …`, and the start screen said `Today's sets are done`
+with no split choice. On phase 2, a fresh day: `How much now?` with `All of
+it` chosen, and `Half now, the rest later today` turning every row to `1 of 2
+sets`. The half session ran `Set 1 of 1` on each exercise, per side where
+asked, and finished with `Still to do today: 4 sets.` (4 exercises, 4 sets).
+The program page then read `Do the rest of today` with `Today: Evening · 4
+sets. 4 sets left.`, and the Today card `Evening · 4 sets`, the four
+exercises left and `Do the rest`, as in the mockup. That opened `The rest of
+today` with the evening, `1 more set` on each and no split choice; its finish
+said `That is every set today asks for.`, and the program page `Start another
+session` with `Today's sets are done: Evening · 4 sets, Evening · 4 sets.`. At
+375 px, the Today card and the split choice fit with no sideways scroll. No
+hydration error from the server's render of "Evening". The drive left two
+phase 2 sessions on dev, so the program opens on phase 2 there.
+
+Tests: `tests/fitness-day.test.ts` (new, pure: a full set, a morning half and
+an evening that picks up, the day's maximum, another session after a done
+day, a session from before split days, the server's and the phone's copies,
+what the start screen says, the space's day and hour; the evening test was
+checked to fail with the skip taken out), `tests/fitness-session.test.ts` (a
+per-side set counted once), `tests/fitness-coach.test.ts` (the share said),
+`tests/fitness-ops.test.ts` (db: `recentSessions` on the days asked for with
+full sets per item, one side not yet a set, `lastSession` in full sets,
+`latestFollowed`).
+
 ### 2026-09-27 — F2b: the coach's voice and the looping demo (`claude/fitness-f2b`)
 
 No migration and no seed: everything F2b adds lives on the phone.
@@ -407,7 +489,8 @@ check, one exercise at a time with the pacer, the three taps, the finish) and
 the order **F2a the session → F2b the coach's voice and the looping demo →
 F2c split days**. His call on counting: **reps and rolls confirm the target**
 (Done records it, minus for a set that came up short); breaths are the
-pacer's. The build log has F2a and F2b. Where it moved from the list above:
+pacer's. The build log has F2a, F2b and F2c; F2 is built. Where it moved
+from the list above:
 
 - **Big buttons, not the whole screen as one.** A screen-wide "set done"
   target was too easy to hit by accident while getting into position; the
@@ -433,6 +516,12 @@ pacer's. The build log has F2a and F2b. Where it moved from the list above:
   forbid anything drawn over a player.
 - **Offline is a document, not an idempotency key per set**
   ([ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)).
+- **Split days are a choice at the start, not a slot.** "Half now, the rest
+  later today" plans the session's share, and any later session that day
+  picks up what is left. Nothing stores "morning" or "evening": when in the
+  day a session was is its start, on the space's clock. The home card says
+  `Evening · 4 sets` and what is left, rather than "Morning: 1 of 2 sets",
+  because a phase's exercises need different numbers of sets.
 
 His posture tool (camera, feedback) is his to build, in parallel. F2 builds
 nothing camera-related and leaves three seams for it: the exercise screen's
@@ -538,7 +627,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 | `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). Alternative-of and the side rule are F4 |
 | `fitness_imports` | A PDF on its way to being a program: file name, pages, links, status (`drafting` / `draft` / `failed` / `saved` / `discarded`), the draft, the error, the program it became | Holds the draft json and the counts, never the book's text; the draft is dropped once saved |
 | `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
-| `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several; the morning-evening slot is F2c |
+| `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several: a split day is two or more (F2c). No morning-or-evening slot is stored; a session's part of the day is its `started_at` on the space's clock |
 | `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished | F2a. The three taps after an exercise live here, per exercise, not per set |
 | `fitness_sets` | A set: its number, side, `target` (the least asked) and `count` (what was done), `done_at` | F2a. The id is the phone's, so there is no separate idempotency key. Load (weight) is F5 |
 | `fitness_progressions` | A ladder of exercises on an item with its advance rule | F4 |
@@ -562,9 +651,15 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   session document's schema, `nextStep` (where the session is, from what it
   holds), the changes (`beginSession`, `recordSet`, `oneMoreSet`,
   `finishExercise`, `skipExercise`, `finishSession`), `sessionSummary`.
+- `src/modules/fitness/core/day.ts` — a day of a program (F2c): the ledger
+  (`dayProgress`, `dayOf`), a split's aim (`aimFor`, `canHalve`), what the
+  start screen says (`aimWords`), and the space's day and hour (`localDayIn`,
+  `hourIn`, `partOfDay`).
 - `src/modules/fitness/session-ops.ts` — `saveSession` (the database made to
-  match a document), `lastSession`, `sessionCount`. `program-ops.ts` has
-  `sessionPlan`, a phase as workout mode runs it.
+  match a document), `lastSession`, `sessionCount`, `recentSessions` (a
+  program's sessions on some days, full sets per item) and `latestFollowed`
+  (the Today card's program). `program-ops.ts` has `sessionPlan`, a phase as
+  workout mode runs it.
 - `src/modules/fitness/components/workout/` — the workout screen
   (`workout-screen.tsx`), `breath-pacer.tsx`, `hold-timer.tsx`,
   `confirm-count.tsx`, `feel-scale.tsx`, the phone's store
@@ -572,7 +667,8 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   `use-wake-lock.ts`, `sound.ts` (the tones, the two switches and
   `coachSay`), `demo-loop.tsx` (the looping demo) and `youtube-api.ts` (the
   IFrame Player API, loaded once). `start-session-button.tsx` is the program
-  page's Start/Resume.
+  page's Start/Resume/Do the rest, and `today-card.tsx` the Workouts home's
+  Today card.
 - `src/modules/fitness/core/coach.ts` — every line the coach says (F2b).
 - `src/lib/speech/queue-policy.ts` and `voice-queue.ts` — the one voice
   (ADR 0114): the rules, pure, and the queue that feeds `speakLine` in
@@ -636,6 +732,20 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   leaves them be. The names and units the log needs are kept on it.
   `saveSession` also stores a reference the program no longer has as null
   rather than refusing the workout.
+- **A day is added up, never stored** (F2c). Its sessions, each with full
+  sets per item, are the whole truth: nothing records that a day is done or
+  that a session was the morning half. The phone adds the day up from the
+  server's sessions and its own documents, sent or not, its copy of a session
+  winning. So a split day works offline, and F3's done days will be the same
+  sum.
+- **Every set done counts toward the day** (the founder's call, 2026-09-27):
+  12 of 15 rolls is one of the day's sets. The count stays on the log for F3
+  to show a short set.
+- **A day and an hour are the space's.** The pages ask for the space's today
+  (`localDayIn(tenant.timezone)`), and "Morning" is the hour on the space's
+  clock (`hourIn`), because the server renders these screens first and its
+  own clock is not the person's. The finish adds up the session's own
+  `localDay`, which the phone chose at Start.
 - **No current phase on the enrollment.** Each session names its phase; the
   program page opens on the last workout's phase. Moving on is F3's gate.
 - **Timers read state through effect events.** The lint here is the React
@@ -699,8 +809,16 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   turn tracking off for those. This page tracks nothing of its own and uses
   the privacy-enhanced player. The lookup is not built. A program of
   children's exercises is when it matters.
-- **An unsent workout goes up only while a session or a program's page is
-  open**, not from the Workouts home.
+- **An unsent workout goes up while a session, a program's page or the
+  Workouts home's Today card is open.** The card only shows once a program
+  has a workout on the server, so a very first workout finished without
+  signal waits for the program page.
+- **A phone in another timezone from the space.** The day is the space's, so
+  near midnight a session the phone dated to its own day can fall on the
+  other side of the space's. Nobody travels with it yet.
+- **F2 is built; Workouts is still `coming_soon`.** Making it `available`
+  opens the Personal space door to every business user, and it wants the
+  health-data privacy policy first (P1). The founder's call.
 - **Scanned PDFs are refused** (`NO_TEXT`). Reading pictures of pages would
   need OCR; nobody has asked.
 - **A save is one statement per row.** Fine next to the database; from a

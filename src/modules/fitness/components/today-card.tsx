@@ -1,0 +1,111 @@
+"use client";
+
+import Link from "next/link";
+import { Check, Play } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { dayOf, hourIn, partOfDay, type DayItem, type DaySession } from "../core/day";
+import { countOf } from "../core/program";
+import { openSessionFor } from "./workout/session-store";
+import { useSessionSync, useStoredSessions } from "./workout/use-session-sync";
+
+/**
+ * TODAY, ON THE WORKOUTS HOME (docs/help/fitness/overview.md; F2c, approved
+ * from a mockup). The program last followed, on the phase of its last
+ * workout: the day's sessions so far ("Morning · 4 sets"), what is left and
+ * of which exercises, and one tap to do it. Once every exercise has had its
+ * sets, it says so and asks nothing.
+ *
+ * The day is the server's sessions and the phone's own, added up by
+ * core/day.ts, so a morning done without signal is already on it. And it keeps
+ * sending: a workout finished without signal goes up from here too.
+ */
+export function TodayCard({
+  programId,
+  programName,
+  phaseIds,
+  phaseNumber,
+  phaseName,
+  items,
+  recent,
+  today,
+  timeZone,
+}: {
+  programId: string;
+  programName: string;
+  /** Every phase's id, in order, to find the phase an open session belongs to. */
+  phaseIds: string[];
+  /** 1-based: the phase of the last workout. */
+  phaseNumber: number;
+  phaseName: string;
+  items: DayItem[];
+  recent: DaySession[];
+  /** The personal space's today, `YYYY-MM-DD`. */
+  today: string;
+  /** The space's timezone: "Morning" is read on its clock on the server and the phone alike. */
+  timeZone: string;
+}) {
+  const sessions = useStoredSessions();
+  useSessionSync(sessions);
+  const open = openSessionFor(sessions, programId);
+  const openPhase = open ? phaseIds.indexOf(open.phaseId ?? "") + 1 : 0;
+  const resume = open !== null && openPhase > 0;
+  const day = dayOf(
+    items,
+    today,
+    recent,
+    sessions.filter((s) => s.doc.programId === programId).map((s) => s.doc),
+    open?.id ?? null,
+  );
+  const leftNames = day.items.filter((item) => !item.optional && item.left > 0).map((item) => item.name);
+  const whole = items.reduce((n, item) => (item.optional ? n : n + item.setsMin), 0);
+  const href = `/personal/m/fitness/programs/${programId}/session?phase=${resume ? openPhase : phaseNumber}`;
+
+  return (
+    <section className="space-y-2 rounded-2xl bg-card p-4 shadow-elevation-1" aria-labelledby="today-heading">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <h2 id="today-heading" className="font-heading font-medium tracking-heading">
+          Today
+        </h2>
+        <Link
+          href={`/personal/m/fitness/programs/${programId}?phase=${phaseNumber}`}
+          className="text-sm text-muted-foreground hover:underline"
+        >
+          {programName} · {phaseName}
+        </Link>
+      </div>
+      {day.parts.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {resume
+            ? `A session is open on this phone for ${open.phaseName || `phase ${openPhase}`}.`
+            : `Nothing yet today: ${countOf(items.length, "exercise", "exercises")}, ${countOf(whole, "set", "sets")}.`}
+        </p>
+      ) : (
+        <ul className="space-y-0.5 text-sm">
+          {day.parts.map((part) => (
+            <li key={part.id} className="flex items-center gap-1.5">
+              <Check className="size-4 shrink-0 text-module-accent" aria-hidden />
+              {`${partOfDay(hourIn(timeZone, part.startedAt))} · ${countOf(part.sets, "set", "sets")}${part.finished ? "" : " · not finished"}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {day.complete ? (
+        <p className="text-sm font-medium text-module-accent">Every set done today.</p>
+      ) : (
+        <>
+          {day.parts.length > 0 && leftNames.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {`${countOf(day.left, "set", "sets")} left: ${leftNames.join(", ")}.`}
+            </p>
+          )}
+          <Button asChild size="sm">
+            <Link href={href}>
+              <Play aria-hidden />
+              {resume ? "Resume" : day.parts.length > 0 ? "Do the rest" : "Start today's session"}
+            </Link>
+          </Button>
+        </>
+      )}
+    </section>
+  );
+}

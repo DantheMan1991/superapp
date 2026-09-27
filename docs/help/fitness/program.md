@@ -15,8 +15,10 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
 - **The phase's name**, with how many exercises it has, `in this order`, and how many days to do it before moving on, for example `14 days before moving on`.
 - **{button:Start today's session|primary|play}.** Starts a session for this phase. See [Doing a session](workout.md).
   - When a session is still open on this phone, the button reads {button:Resume today's session|primary|play}, with a line like `Open for Phase 1: Weeks 1-2. It picks up at the set you were on.` It takes you back to that phase and that set.
+  - After a session earlier today on this phase, it reads {button:Do the rest of today|primary|play}, with a line like `Today: Morning · 4 sets. 2 sets left.` The session picks up what is left. See [Doing a session](workout.md).
+  - Once every exercise has had its sets today, it reads {button:Start another session|primary|play}, with a line like `Today's sets are done: Morning · 4 sets, Evening · 2 sets.`
   - When a finished workout has not reached us yet, a line says so, for example `1 workout on this phone not sent yet. It goes when there is signal.` It is sent by itself while this page is open.
-- **`Last workout`**, once you have done one, for example `Last workout: yesterday · Phase 1: Weeks 1-2 · 12 sets · felt 4 before, 7 after`. It adds `not finished` for a session you left open.
+- **`Last workout`**, once you have done one, for example `Last workout: yesterday · Phase 1: Weeks 1-2 · 12 sets · felt 4 before, 7 after`. It adds `not finished` for a session you left open. A set of an exercise done per side counts once, for both sides. When your last workout was today on this phase, the line under the button says it instead.
 - **Each exercise**, in the order to do them:
   - **The video.** `Tap to play here` plays it on this page. When only part of the video is set to play, the times show beside it, for example `Tap to play here · 0:42–1:10`. One video plays at a time: tapping another stops the one already playing, and it starts from the beginning when you tap it again. A video that only plays on YouTube reads `This video only plays on YouTube.` with {button:Open in YouTube|link|external-link}.
   - **Its number and name**, with {badge:Optional} when it is extra.

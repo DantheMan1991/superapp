@@ -1,8 +1,9 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import type { DaySession } from "./core/day";
 import { FitnessError } from "./core/errors";
-import type { SessionDoc } from "./core/session";
+import { fullSets, type SessionDoc, type Side } from "./core/session";
 
 /**
  * WORKOUT MODE'S SERVER HALF (docs/modules/fitness.md, F2a): make the database
@@ -313,8 +314,12 @@ export async function lastSession(tx: Tx, tenantId: string, programId: string): 
     .orderBy(desc(t.fitnessSessions.startedAt))
     .limit(1);
   if (!row) return null;
-  const [counted] = await tx
-    .select({ sets: sql<number>`count(*)::int`.mapWith(Number) })
+  const rows = await tx
+    .select({
+      exerciseId: t.fitnessSessionExercises.id,
+      perSide: t.fitnessSessionExercises.perSide,
+      side: t.fitnessSets.side,
+    })
     .from(t.fitnessSets)
     .innerJoin(
       t.fitnessSessionExercises,
@@ -324,7 +329,139 @@ export async function lastSession(tx: Tx, tenantId: string, programId: string): 
       ),
     )
     .where(and(eq(t.fitnessSets.tenantId, tenantId), eq(t.fitnessSessionExercises.sessionId, row.id)));
-  return { ...row, sets: counted?.sets ?? 0 };
+  // Full sets, as the phone counts them: one set of a per-side exercise is both sides.
+  let sets = 0;
+  for (const { perSide, sides } of groupSides(rows).values()) sets += fullSets(perSide, sides);
+  return { ...row, sets };
+}
+
+/** Set rows grouped by their exercise: its sides, for `fullSets`. */
+function groupSides(
+  rows: readonly { exerciseId: string; perSide: boolean; side: Side | null }[],
+): Map<string, { perSide: boolean; sides: (Side | null)[] }> {
+  const out = new Map<string, { perSide: boolean; sides: (Side | null)[] }>();
+  for (const row of rows) {
+    const entry = out.get(row.exerciseId) ?? { perSide: row.perSide, sides: [] };
+    entry.sides.push(row.side);
+    out.set(row.exerciseId, entry);
+  }
+  return out;
+}
+
+/**
+ * A program's sessions on the days from `fromDay` to `toDay` (the person's own
+ * `local_day`s), as a day adds them up (core/day.ts): full sets per item.
+ *
+ * The pages ask for the space's yesterday to tomorrow and let the phone pick
+ * its own today, so a phone a timezone away from the space still finds the
+ * morning it did.
+ */
+export async function recentSessions(
+  tx: Tx,
+  tenantId: string,
+  programId: string,
+  fromDay: string,
+  toDay: string,
+): Promise<DaySession[]> {
+  const t = schema;
+  const sessions = await tx
+    .select({
+      id: t.fitnessSessions.id,
+      localDay: t.fitnessSessions.localDay,
+      startedAt: t.fitnessSessions.startedAt,
+      finishedAt: t.fitnessSessions.finishedAt,
+    })
+    .from(t.fitnessSessions)
+    .innerJoin(
+      t.fitnessEnrollments,
+      and(
+        eq(t.fitnessEnrollments.tenantId, t.fitnessSessions.tenantId),
+        eq(t.fitnessEnrollments.id, t.fitnessSessions.enrollmentId),
+      ),
+    )
+    .where(
+      and(
+        eq(t.fitnessSessions.tenantId, tenantId),
+        eq(t.fitnessEnrollments.programId, programId),
+        gte(t.fitnessSessions.localDay, fromDay),
+        lte(t.fitnessSessions.localDay, toDay),
+      ),
+    )
+    .orderBy(asc(t.fitnessSessions.startedAt))
+    .limit(50);
+  if (sessions.length === 0) return [];
+
+  const rows = await tx
+    .select({
+      sessionId: t.fitnessSessionExercises.sessionId,
+      exerciseId: t.fitnessSessionExercises.id,
+      itemId: t.fitnessSessionExercises.itemId,
+      perSide: t.fitnessSessionExercises.perSide,
+      side: t.fitnessSets.side,
+      doneAt: t.fitnessSets.doneAt,
+    })
+    .from(t.fitnessSets)
+    .innerJoin(
+      t.fitnessSessionExercises,
+      and(
+        eq(t.fitnessSessionExercises.tenantId, t.fitnessSets.tenantId),
+        eq(t.fitnessSessionExercises.id, t.fitnessSets.sessionExerciseId),
+      ),
+    )
+    .where(
+      and(
+        eq(t.fitnessSets.tenantId, tenantId),
+        inArray(
+          t.fitnessSessionExercises.sessionId,
+          sessions.map((session) => session.id),
+        ),
+      ),
+    );
+
+  return sessions.map((session) => {
+    const mine = rows.filter((row) => row.sessionId === session.id);
+    const itemOf = new Map(mine.map((row) => [row.exerciseId, row.itemId]));
+    const items = new Map<string, number>();
+    for (const [exerciseId, { perSide, sides }] of groupSides(mine)) {
+      const itemId = itemOf.get(exerciseId);
+      if (!itemId) continue;
+      items.set(itemId, (items.get(itemId) ?? 0) + fullSets(perSide, sides));
+    }
+    const lastSet = mine.reduce<Date | null>(
+      (latest, row) => (!latest || row.doneAt > latest ? row.doneAt : latest),
+      null,
+    );
+    return {
+      id: session.id,
+      localDay: session.localDay,
+      startedAt: session.startedAt.toISOString(),
+      endedAt: (session.finishedAt ?? lastSet ?? session.startedAt).toISOString(),
+      finished: session.finishedAt !== null,
+      items: [...items].map(([itemId, sets]) => ({ itemId, sets })),
+    };
+  });
+}
+
+/** The program and phase of the person's latest session, for the Workouts home's Today card. */
+export async function latestFollowed(
+  tx: Tx,
+  tenantId: string,
+): Promise<{ programId: string; phaseId: string | null } | null> {
+  const t = schema;
+  const [row] = await tx
+    .select({ programId: t.fitnessEnrollments.programId, phaseId: t.fitnessSessions.phaseId })
+    .from(t.fitnessSessions)
+    .innerJoin(
+      t.fitnessEnrollments,
+      and(
+        eq(t.fitnessEnrollments.tenantId, t.fitnessSessions.tenantId),
+        eq(t.fitnessEnrollments.id, t.fitnessSessions.enrollmentId),
+      ),
+    )
+    .where(eq(t.fitnessSessions.tenantId, tenantId))
+    .orderBy(desc(t.fitnessSessions.startedAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /** How many sessions deleting a program would take with it (the delete dialog says so). */

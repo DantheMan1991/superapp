@@ -127,6 +127,30 @@ no equivalent for the editor, so a change here has to be clicked.
 > interview run (X1 on). Add new entries at the top here; when it grows past a
 > few screens, sweep the oldest across.
 
+### 2026-09-22 — The takeoff's first link is dropped (`claude/drop-the-first-link`, migration 0423)
+
+ADR 0110 moved a trace's link to an estimate line off the markup into
+`job_estimate_line_traces`, copied every existing link across, and left
+`estimate_line_id` / `pushed_quantity_thousandths` on `job_sheet_markups`
+unwritten and unread for a later drop — a drop goes out AFTER the deploy
+of the code that stops using the columns, never with it. That code
+deployed with #665; this drops them: the column-list `SET NULL` foreign
+key `job_sheet_markups_line_fk`, the index
+`job_sheet_markups_tenant_line_idx`, then the two columns, exactly the
+four statements `db:generate` emitted. Nothing in `src/` named either
+column any more (the `estimateLineId` the walk reads is the PROPOSED
+line's own); the ops scenarios that asserted the columns stayed null and
+the isolation case that drove the old FK's `SET NULL` now assert the
+measurement stands when its line goes, which is what remains true. The
+pure suite still scans 0365 for the FK it once made (history), and now
+scans 0423 for the four drops.
+
+**Migration 0423** — applied to dev and verified there, then to PRODUCTION
+on the founder's word in the chat the same day ("run the migration"), as
+ADR 0014 and the 2026-09-22 lesson have it: `npm run db:migrate`, then
+`npm run db:verify-rls` at 245 tables, RLS enabled and forced everywhere;
+read back, the two columns, the key and the index were gone and the six
+markups and two links stood.
 ### 2026-09-22 — Focus on the sheet, and a list that does not wait for the page (`claude/focus-on-the-sheet`)
 
 Step 5 of the drawings-takeoff pass, agreed by mockup: the two things the
@@ -199,7 +223,6 @@ them*, 352px with all three and *The last one*; back at 935px the rail
 returned without a reload. Not driven: a push or a pencil save from the
 rail (the same rows and actions as the page's list), the walk's own
 dialog (no *Focus* there by design).
-
 ### 2026-09-22 — The takeoff finishes what it starts (`claude/the-takeoff-finishes-what-it-starts`)
 
 Step 4 of the drawings-takeoff pass: the rough edges the review left once
@@ -2983,7 +3006,7 @@ assembly keys. Then a takeoff opened inline from a question.
 | `job_party_documents` | What a subcontractor or supplier has on file with the business (11b, ADR 0068): the party, an open-taxonomy `kind` (format-checked; three suggested), title, issuer, number, issued and expires dates, a coverage limit, requested / received / void with the receipt date, notes. The scanned copy is a Documents attachment (`job_party_document`). | **No action to the party** — one with documents on file cannot be merged away. CHECK: the kind is a slug; received has its date, requested has none, void keeps what it had; limit ≥ 0. Standing (missing / expired / expiring / ok) is derived against today and the tenant's required list, never stored. |
 | `job_drawing_sets` | One issue of a job's drawings (ADR 0072): name, the date on the drawings (`issued_on`, which orders the issues), who issued it (a party), notes. Its PDFs are cabinet documents hung on it through `document_attachments` (`job_drawing_set`). | Cascade from the project; **no action to the party**. CHECK: name present. The current set is never stored — it is derived from the issues' dates. |
 | `job_sheets` | One page of one of a set's files with the number the trade calls it by, normalised on write, a title and a revision mark; **and its scale** (ADR 0074): page points per foot or metre with the page's size in points beside it, so a measurement's fractions become feet without the PDF. | Cascade from the project, the set AND the document (a page of a file that is gone is nothing to open). UNIQUE (set, number) and (set, document, page). CHECK: number present, page ≥ 1. The discipline is read off the number, never stored. |
-| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, and, since ADR 0110, `figures` (jsonb, an object by CHECK): what the trade typed onto the trace — a height on a length, a pitch, a depth and the openings cut out of an area — kept as typed and read tolerantly by `parseFigures`; every derived figure is worked out when read. `estimate_line_id` / `pushed_quantity_thousandths` were the takeoff's first link (ADR 0074): **superseded by `job_estimate_line_traces`, unwritten and unread since ADR 0110**, to be dropped by a later migration. |
+| `job_sheet_markups` | A cloud, an arrow, a note or a pin on ONE issue of a sheet (ADR 0073): the shape as fractions of the page (`geometry` jsonb), a colour from the five, words for a note or a pin, and the punch item a pin raised while it exists (`work_item_id`); **and a length, an area or a count** (ADR 0074): `{points}`, its quantity derived through the sheet's scale, and, since ADR 0110, `figures` (jsonb, an object by CHECK): what the trade typed onto the trace — a height on a length, a pitch, a depth and the openings cut out of an area — kept as typed and read tolerantly by `parseFigures`; every derived figure is worked out when read. `estimate_line_id` / `pushed_quantity_thousandths` were the takeoff's first link (ADR 0074), superseded by `job_estimate_line_traces` under ADR 0110 and **dropped by migration 0423** once that had deployed. |
 | `job_estimate_line_traces` | **What stands behind an estimate line** (ADR 0110): one row per (line, trace, figure) — the room's area behind the flooring, its perimeter behind the baseboard, its volume behind the slab — with `share_thousandths`, what THAT figure of THAT trace came to when it was pushed. Read by `measurementsBehind` (the reverse link) and `listMarkups` (the chips). | Composite FKs, both **cascade**: a line taken off the estimate takes its links, a trace rubbed out takes its links; the line keeps its quantity either way. **Unique per `(tenant, line, trace, figure)`**: one figure of one trace stands behind one line once, and the same figure may stand behind another line. CHECK: figure in the seven, share ≥ 0. FORCE RLS, member-wide. | Cascade from the project and from the sheet; **SET NULL (column-list form) from `work_items` and from `job_estimate_lines`** — a punch item cleared leaves the pin as a note, a line taken off leaves the measurement. CHECK: kind (seven), colour, words present for a note or a pin, words ≤ 2,000, geometry an object. |
 | `job_warranty_claims` | The call after the job is done (ADR 0076): a number per job, what and where, reported when and by whom, the trade responsible (a party), the cost code the fix is charged under, the decision — pending / covered / not_covered — with its day and reason, and the Work item raised for it while it exists (`work_item_id`). | Cascade from the project; **SET NULL (column-list form) from `work_items` and from `job_cost_codes`**; no `onDelete` to the party (the CRM merge rule). UNIQUE (project, number). CHECK: number > 0, title present and ≤ 300, decision in the three, `(decision = 'pending') = (decided_on is null)`, every text bounded. The project's months: `coalesce(months, 1) between 1 and 1200`. Standing is never stored. |
 | `job_back_charges` | Money the business spent that was the subcontractor's (ADR 0077), kept back from their next application: a number per order, what was paid for, the amount (always > 0), the day it went out, the cost code it landed on, the warranty claim it came from, and the application it rides while it rides one. | Cascade from the commitment; **SET NULL (column-list form) from `job_cost_codes`, `job_warranty_claims` AND `job_sub_applications`**. UNIQUE (commitment, number). CHECK: number > 0, amount > 0, description present and ≤ 300, status in (`open`, `void`), and `void` implies no application — the one impossible state. Where it stands is never stored. |
@@ -3551,9 +3574,7 @@ ordering only bites when two new tables reference each other in one file.
   unit (sf → sy, m → lf — today a line priced in another unit is refused by
   name, `unitAccepts`). Still open there: clipping an opening to its area
   (today the net is the plain difference), openings on a length, the walk
-  opening a sheet for a phase's line, and the DROP of
-  `estimate_line_id` / `pushed_quantity_thousandths` off the markups once
-  ADR 0110 has deployed. A scanned set's
+  opening a sheet for a phase's line. A scanned set's
   numbers are typed off the thumbnails. The "From Documents" door leaves a
   picked file's `doc_kind` as it was; only an upload through the set is
   filed as a `drawing`.

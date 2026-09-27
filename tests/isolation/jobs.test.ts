@@ -3627,9 +3627,8 @@ d("jobs tables (RLS)", () => {
     const mine = await lineFor(tenantA, projectA, `${STAMP}-EST-A`);
     const theirs = await lineFor(tenantB, projectB, `${STAMP}-EST-B`);
     const base = { tenantId: tenantA, projectId: projectA, sheetId, kind: "area", geometry: { points: [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }] } } as const;
-    await expect(withSystem((tx) => tx.insert(schema.jobSheetMarkups).values({ ...base, estimateLineId: theirs.lineId }))).rejects.toThrow();
     const markupId = await withSystem(async (tx) => {
-      const r = await tx.insert(schema.jobSheetMarkups).values({ ...base, estimateLineId: mine.lineId, pushedQuantityThousandths: 93_500 }).returning();
+      const r = await tx.insert(schema.jobSheetMarkups).values(base).returning();
       return r[0].id;
     });
     expect(await asOtherTenant((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)))).toEqual([]);
@@ -3637,11 +3636,11 @@ d("jobs tables (RLS)", () => {
     await expect(withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "volume" }).where(eq(schema.jobSheetMarkups.id, markupId)))).rejects.toThrow();
     await withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "length" }).where(eq(schema.jobSheetMarkups.id, markupId)));
     await withSystem((tx) => tx.update(schema.jobSheetMarkups).set({ kind: "count" }).where(eq(schema.jobSheetMarkups.id, markupId)));
-    // The line taken off the estimate: the key is null, the pushed quantity and the measurement remain.
+    // A line taken off the estimate leaves the measurement standing: its links live in
+    // job_estimate_line_traces (ADR 0110), and the two columns that once held one are gone (migration 0423).
     await withSystem((tx) => tx.delete(schema.jobEstimateLines).where(eq(schema.jobEstimateLines.id, mine.lineId)));
     const after = await withSystem((tx) => tx.select().from(schema.jobSheetMarkups).where(eq(schema.jobSheetMarkups.id, markupId)));
-    expect(after).toHaveLength(1);
-    expect([after[0].estimateLineId, after[0].pushedQuantityThousandths, after[0].tenantId]).toEqual([null, 93_500, tenantA]);
+    expect(after.map((m) => m.tenantId)).toEqual([tenantA]);
     await withSystem(async (tx) => {
       await tx.delete(schema.jobEstimates).where(inArray(schema.jobEstimates.id, [mine.estimateId, theirs.estimateId]));
       await tx.delete(schema.jobDrawingSets).where(eq(schema.jobDrawingSets.id, setId));

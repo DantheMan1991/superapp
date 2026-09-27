@@ -22,6 +22,10 @@ out to YouTube, and **a tool that is really useful and fun to use during a
 workout.** Slice 1 is his program running; the builder for your own workouts
 comes after (his decision, [personal-space.md](personal-space.md)).
 
+Checked the same day: YouTube's oEmbed endpoint answers 200 for 28 of the 29
+distinct videos the PDF links, so every one of them can play inline. The 29th
+answers 404 (the video is gone); it is linked only from a phase overview page.
+
 ## What his program demands of the model
 
 A generic set/rep tracker cannot run this program. Each row below is a rule in
@@ -71,6 +75,9 @@ person's own space, the way a pack must never carry one business's price list
   links, into a zod-validated draft: program, phases, items, exercises, cues,
   video per exercise. The PDF's headings are letter-spaced
   (`E X E R C I S E`), which a model reads and a regex does not.
+- **An exercise's video is the link on its own page**, not one on a phase
+  overview. In his PDF the phase 4 overview carries a link to a video that no
+  longer exists, while the exercise's own page links a working one.
 - **The draft is never the program.** The person reviews it on a screen laid
   out like the program (phase by phase), fixes a range or a unit, and saves.
   Nothing is written to the program tables before that. The same rule the tell

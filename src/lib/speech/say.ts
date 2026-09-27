@@ -81,9 +81,24 @@ export function spokenConfirmation(summaries: readonly string[]): string {
   return `Recorded ${said.length} things`;
 }
 
+/**
+ * Whether an utterance's error means THIS DEVICE CANNOT SPEAK.
+ *
+ * Most errors do not. `interrupted` and `canceled` are what `cancel()` does to
+ * the line it stops, which every new line does first; `not-allowed` is a
+ * browser refusing to speak before the page has had a tap, which says nothing
+ * about the next line after one. Taking any of them as proof of a silent
+ * device switched the voice off for the page's life the first time two lines
+ * came close together (found building the workout's voice, F2b).
+ */
+export function isRealSpeechFailure(error: string | undefined): boolean {
+  return error !== "interrupted" && error !== "canceled" && error !== "not-allowed";
+}
+
 /* -- the half that touches the browser ------------------------------------- */
 
 import { readNativeBridge } from "@/lib/native-bridge";
+import { estimateSpeechMs } from "./queue-policy";
 
 /**
  * **THE SHELL'S OWN VOICE, WHEN THERE IS ONE.**
@@ -229,6 +244,15 @@ export function noVoiceOnTheServer(): boolean {
 let warmed = false;
 
 /**
+ * The last line handed to `utter`. A line waits a tick before it is spoken
+ * (below), and longer for the voices on a page's first line, so a newer line
+ * can be asked for before an older one has begun. Its cancel has nothing to
+ * stop yet, so without this both would be said, one after the other: the
+ * older one is dropped instead, exactly as the cancel would have dropped it.
+ */
+let lastUtter = 0;
+
+/**
  * **THE GESTURE TRICK, AND IT IS NOT OPTIONAL ON iOS.**
  *
  * Mobile Safari starts speech only inside a user gesture, and everything this
@@ -259,6 +283,8 @@ export function hush(): void {
   const native = nativeVoice();
   if (native) void native.hush().catch(() => {});
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  // A line still waiting for its tick is dropped too; a cancel cannot reach it.
+  lastUtter += 1;
   try {
     window.speechSynthesis.cancel();
   } catch {
@@ -317,8 +343,23 @@ function whenVoicesReady(run: () => void): void {
 /** How long an utterance may sit having neither started nor failed. */
 const NEVER_STARTED_MS = 3_000;
 
-function utter(words: string): void {
+/**
+ * Slightly under the default. A confirmation is heard once, outdoors, possibly
+ * over an engine, and a rushed one has to be read on the screen anyway — which
+ * is the interaction this exists to remove. The workout's voice uses it too.
+ */
+const RATE = 0.95;
+
+/**
+ * The line being said, held so it cannot be collected mid-sentence: an engine
+ * whose utterance is garbage-collected stops without ever reporting `end`.
+ */
+let speaking: SpeechSynthesisUtterance | null = null;
+
+function utter(words: string, onEnd?: () => void): void {
   const synth = window.speechSynthesis;
+  lastUtter += 1;
+  const mine = lastUtter;
   try {
     synth.cancel();
     // A queue stuck `paused` speaks nothing and reports nothing until this is
@@ -328,6 +369,13 @@ function utter(words: string): void {
     /* nothing to cancel or resume */
   }
 
+  let settled = false;
+  const ended = () => {
+    if (settled) return;
+    settled = true;
+    onEnd?.();
+  };
+
   /*
    * A TICK BETWEEN CANCEL AND SPEAK. Doing both in one turn is a documented
    * Android WebView race in which the new utterance is discarded with the old
@@ -335,12 +383,13 @@ function utter(words: string): void {
    * quickly must not queue up: the second is the one that is true.
    */
   window.setTimeout(() => {
+    if (mine !== lastUtter) {
+      ended();
+      return;
+    }
     try {
       const utterance = new SpeechSynthesisUtterance(words);
-      // Slightly under the default. A confirmation is heard once, outdoors,
-      // possibly over an engine, and a rushed one has to be read on the screen
-      // anyway — which is the interaction this exists to remove.
-      utterance.rate = 0.95;
+      utterance.rate = RATE;
 
       /*
        * **THE VOICE FIRST, THEN THE LANGUAGE TO MATCH IT.**
@@ -364,19 +413,107 @@ function utter(words: string): void {
       utterance.onstart = () => {
         started = true;
       };
-      utterance.onerror = () => provedSilent();
+      const release = () => {
+        if (speaking === utterance) speaking = null;
+      };
+      utterance.onend = () => {
+        release();
+        ended();
+      };
+      utterance.onerror = (event) => {
+        release();
+        // Cancelled by the next line, or refused before the page's first tap:
+        // over, but no proof that this device cannot speak.
+        if (isRealSpeechFailure(event.error)) provedSilent();
+        ended();
+      };
+      speaking = utterance;
       synth.speak(utterance);
 
       // Neither started nor errored: the engine took it and threw it away,
       // which is how a WebView with nothing behind it behaves. The ONLY way to
       // notice that, since nothing is reported.
       window.setTimeout(() => {
-        if (!started) provedSilent();
+        if (!started && !settled) {
+          provedSilent();
+          ended();
+        }
       }, NEVER_STARTED_MS);
+      // And an engine that started and never said it finished must not hold
+      // the next line forever.
+      window.setTimeout(ended, NEVER_STARTED_MS + estimateSpeechMs(words, RATE) * 2);
     } catch {
       provedSilent();
+      ended();
     }
   }, 0);
+}
+
+/**
+ * ONE LINE, AND WORD WHEN IT IS OVER: the engine under the workout's voice
+ * queue (voice-queue.ts, ADR 0114), which holds the next line until this one
+ * has been said instead of cutting it off.
+ *
+ * `done` is called once: when the line ends, fails or is stopped by the next
+ * line. The function returned stops it and does NOT call `done`; the caller
+ * that stops a line already knows.
+ *
+ * The app's own voice answers the moment it has the words, not when it has
+ * said them, so its end is estimated from the line's length (queue-policy.ts).
+ * A newer line still cuts it off cleanly there: the shell flushes.
+ */
+export function speakLine(text: string, done: () => void): () => void {
+  const words = text.trim();
+  let over = false;
+  let timer: number | undefined;
+  const finish = () => {
+    if (over) return;
+    over = true;
+    if (timer !== undefined) window.clearTimeout(timer);
+    done();
+  };
+  if (words === "" || !canSpeak()) {
+    // Never synchronously: the queue is in the middle of starting this line.
+    window.setTimeout(finish, 0);
+    return () => {
+      over = true;
+    };
+  }
+
+  const native = nativeVoice();
+  if (native) {
+    void native.speak({ text: words }).catch(() => {
+      provedSilent();
+      finish();
+    });
+    timer = window.setTimeout(finish, estimateSpeechMs(words, RATE));
+    return () => {
+      if (over) return;
+      over = true;
+      window.clearTimeout(timer);
+      void native.hush().catch(() => {});
+    };
+  }
+
+  try {
+    whenVoicesReady(() => {
+      if (!over) utter(words, finish);
+    });
+  } catch {
+    provedSilent();
+    window.setTimeout(finish, 0);
+  }
+  return () => {
+    if (over) return;
+    over = true;
+    // Also a line still waiting for its tick, which a cancel cannot reach.
+    lastUtter += 1;
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* nothing to cancel */
+    }
+  };
 }
 
 /**

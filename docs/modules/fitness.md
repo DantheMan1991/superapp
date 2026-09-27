@@ -13,6 +13,108 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — F2b: the coach's voice and the looping demo (`claude/fitness-f2b`)
+
+No migration and no seed: everything F2b adds lives on the phone.
+
+- **The demo loops above the count** (`components/workout/demo-loop.tsx`).
+  The exercise's clip starts by itself, muted, and goes round between the
+  video's `Start` and `End` (or from `Start` to the video's end) at 0.5×,
+  0.75× or 1×, remembered per device. Under it: pause and play, the speeds,
+  and `With sound`, which plays the clip once from its start at 1× with the
+  author talking and then goes back to the loop. A set beginning to run does
+  the same, so the demo never talks over the count. It is YouTube's player
+  driven by the IFrame Player API (`youtube-api.ts`), inside YouTube's terms
+  for an API client (Inline video, below). The loop is the page's own, a check
+  every 250 ms that seeks back a quarter of a second before the end. A video
+  that may not be embedded, is gone or will not play says why, with `Open in
+  YouTube`, and a page that cannot load the API gets F1's player. The exercise
+  screen is now one per exercise, so the demo keeps playing from set to set.
+- **The coach's voice** (`core/coach.ts`): the screen, said at the moments it
+  cannot be seen. As a set appears it says the exercise, what to do and the
+  side to start on the first time ("Side-lying pullback. 2 sets of 5 to 8
+  breaths, each side. Right side first."), then "Now the left side." or "Set 2
+  of 3. Right side.". Reps and rolls get their cue with it. In a breath set it
+  says the cue as the middle breath starts and "Last one." as the last one
+  does. In a hold, the cue halfway, and "Ten seconds left." in one of 30 s or
+  more. "Exercise done." as the check appears. Not the count breath by breath:
+  the tones already mark every turn.
+- **One voice** ([ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md);
+  `src/lib/speech/queue-policy.ts`, `voice-queue.ts`). Every line carries a
+  priority, an optional key and a freshness. A higher line interrupts, a newer
+  line with the same key replaces, and a stale line is dropped, never said
+  late. Workout mode speaks through `coachSay` (`sound.ts`), which honours the
+  two switches in the top bar: the megaphone (the coach's voice, shown only
+  while the phone can speak) and the speaker, which now silences everything.
+  The founder's posture tool speaks through the same `coachSay`, with
+  `priority: "high"`.
+- **The speech engine learned when a line ends** (`speakLine` in say.ts):
+  the browser says so; the app's voice answers before it speaks, so there the
+  end is estimated from the line's length.
+- **Fixed for the tell box as well:** an utterance stopped by the next one
+  (`interrupted`, `canceled`) or refused before the page's first tap
+  (`not-allowed`) no longer counts as proof that the device cannot speak. That
+  proof switched the voice off for the rest of the page. And a line overtaken
+  by a newer one before it began (the same tick, or while the voices were
+  still loading) was said after it; it is dropped now.
+- **F1's player is never under 200 px tall.** YouTube's terms ask it of every
+  embedded player, and a phone's width made the 16:9 box 193 px.
+- Guides: `workout.md` (the demo, the voice, the two switches, the how-to) and
+  `editor.md` (`Start` and `End` bound the loop).
+
+**Driven** on a production build against the dev branch, in the founder's
+space, on his imported program. For speed, the breathing pace was set to 2 s
+and 2 s, and exercise 3's video was given a 0:05–0:15 clip; both were cleared
+after. A recorder on the page's speech engine logged every line, when it
+started and when it ended.
+
+- A whole session of four exercises and seven sets, in the Windows voice at
+  rate 0.95. The rolls said their intros with their cues, the second one per
+  side: "Sidelying Half-Rolling in 90/90. 1 set of 15 rolls, each side. Right
+  side first. Low back stays relaxed the whole time." then "Now the left side.
+  No pinching felt in the hip.". The first intro took 8.6 s to say. In the
+  breath exercise, the first cue came 21 s after Start (the countdown and four
+  breaths), "Last one." at 33 s, and "Set 2 of 2." as the next set counted
+  down. Set 2 had its own cue, then "Last one.", then "Exercise done." as the
+  check appeared.
+- The warm-up line, cut off by the first real one, reported `interrupted` and
+  did not silence the device (the fix).
+- The voice switch off: nothing said for 30 s, through the end of a set and
+  the next set's start. Back on, then all sound off: "Last one." was cut off
+  0.4 s in, and the voice switch stayed, so the phone was not taken for a
+  silent one.
+- Skipping three exercises in a row: each intro cut off the one before, the
+  newest step being the true one.
+- The demo: the privacy-enhanced player, muted, 416 × 234 px in a desktop
+  pane. 0.5× applied, was remembered, and carried to the next exercise. `With
+  sound` unmuted it and played from the clip's start at 1×, with the speeds
+  grayed out, and at the video's end it went back to the muted 0.5× loop. The
+  muted loop came round at a video's end. Exercise 3's clip went round 0:05 →
+  0:15 → 0:05. `With sound` kept playing through a countdown, then went back
+  to the muted loop the moment the set ran. One player stayed across both
+  sides of an exercise. Scrolled fully out of sight (a 375 × 420 view), it
+  paused; scrolled back, it played.
+- The browser pane refuses a video that starts by itself, even muted. The
+  demo said `This phone waits for a tap before it plays a video. Tap play.`,
+  and play started it.
+- Finish saved: `Session saved`, then `Last workout: today · Phase 1: Weeks
+  1-2 · 7 sets · felt 4 before, 6 after`.
+- **Two bugs the drive found, fixed.** The chosen speed did not show on the
+  dark screen: the outline button's dark-mode fill beat the highlight, so the
+  chosen speed now takes the primary look. And at 375 px, with the voice
+  switch added, "Exercise 4 of 4" and "Kept on this phone" each wrapped onto
+  two lines; the save status now sits under where you are. Both were
+  re-checked at 375 px on a new build, with a second, short session run
+  through to its finish.
+- The last change (a line overtaken before it began is dropped) was driven on
+  its own build. Each intro was still cut off by the next, the voice switch
+  stayed, and a double tap on Skip skipped one exercise, not two.
+
+Tests: `tests/speech-queue.test.ts` (the voice's rules, the length estimate,
+which speech errors mean a silent device), `tests/fitness-coach.test.ts`
+(every line the coach says, set by set), `tests/fitness-core.test.ts` (the
+demo's player parameters and when the loop goes round).
+
 ### 2026-09-27 — F2a: workout mode, the session (`claude/fitness-f2`)
 
 Migrations `0428` (four tables, two enums, the breathing pace on programs;
@@ -305,7 +407,7 @@ check, one exercise at a time with the pacer, the three taps, the finish) and
 the order **F2a the session → F2b the coach's voice and the looping demo →
 F2c split days**. His call on counting: **reps and rolls confirm the target**
 (Done records it, minus for a set that came up short); breaths are the
-pacer's. The build log has F2a. Where it moved from the list above:
+pacer's. The build log has F2a and F2b. Where it moved from the list above:
 
 - **Big buttons, not the whole screen as one.** A screen-wide "set done"
   target was too easy to hit by accident while getting into position; the
@@ -313,19 +415,32 @@ pacer's. The build log has F2a. Where it moved from the list above:
   five seconds and starts itself (breaths and holds).
 - **No roll metronome.** Rolls confirm the target instead (his call), so
   nothing needs to keep their tempo.
-- **Cues shown, not spoken, in F2a**: one of the exercise's checks in large
-  type, changing each set. Speaking them is F2b, through ONE voice queue:
-  today's `sayIt` cancels whatever it is saying on every new line, which is
-  right for the tell box and wrong for a pacer, a cue and (later) the
-  founder's posture feedback all wanting to speak in the same minute.
+- **One cue a set, shown and said at one moment.** F2a shows one of the
+  exercise's checks in large type, changing each set. F2b says it once, as the
+  middle breath starts or halfway through a hold, through ONE voice queue
+  ([ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md)).
+  `sayIt` cancels whatever it is saying on every new line, which is right for
+  the tell box and wrong for a pacer, a cue and (later) the founder's posture
+  feedback all wanting to speak in the same minute.
+- **No spoken count, breath by breath.** The tones mark every turn. A number
+  said every ten seconds for twenty minutes would nag, so the voice says only
+  "Last one.".
+- **"Tap for sound and the full clip" became `With sound`**: the clip once,
+  from its start, at 1× with the sound on, then back to the loop. YouTube's
+  own controls stay hidden in the loop, and the whole video is the program
+  page's player.
+- **The demo's buttons sit under the player, not on it.** YouTube's terms
+  forbid anything drawn over a player.
 - **Offline is a document, not an idempotency key per set**
   ([ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)).
 
 His posture tool (camera, feedback) is his to build, in parallel. F2 builds
 nothing camera-related and leaves three seams for it: the exercise screen's
-top **stage** (the video today, a camera view during a set later), the one
-**voice** (F2b), and the enrollment's **side**, where a left-or-right
-assessment lands.
+top **stage** (the looping demo today, a camera view during a set later),
+the one **voice** (built in F2b: `coachSay({ text, priority: "high", key:
+"posture" })` cuts in on a cue or a count, replaces its own unsaid last
+correction, and goes unsaid when more than two seconds late), and the
+enrollment's **side**, where a left-or-right assessment lands.
 
 ### F3 — progress and the gate
 
@@ -369,8 +484,22 @@ The founder does not want to leave the app to watch a demo.
   downloading and serving them ourselves would be copying them. F1 embeds the
   plain player behind a click-to-play picture (`video-player.tsx`), with
   `playsinline` so an iPhone does not force full screen and the clip's start
-  and end in the URL. Workout mode (F2) moves to the IFrame Player API, which
-  adds loop, mute and speed.
+  and end in the URL. Workout mode's demo (F2b) uses the IFrame Player API,
+  which adds loop, mute and speed (below).
+- **Workout mode's demo is an API client, and keeps YouTube's terms for one**
+  (Required Minimum Functionality, Developer Policies). It starts by itself
+  only muted, and only while at least half of it is on screen. It pauses when
+  it is not, or when the screen is off, which also rules out a background
+  player. It is the only player on its screen. Every player here is at least
+  200 × 200 px, the program page's included. Nothing is drawn over a player:
+  the demo's buttons are below it. It calls only what the API reference
+  documents. The API talks only to `www.youtube.com` unless the Player is told
+  its `host`, which the privacy-enhanced player needs; `host` is not in the
+  reference but is how every privacy-enhanced embed is driven. The loop is the
+  page's: YouTube's `loop` replays a whole video and ignores the clip's
+  start. The API is YouTube's own script (`youtube-api.ts`), loaded only by
+  workout mode and only for a video that may be embedded. A page that cannot
+  load it gets F1's player.
 - **An exercise's videos** are a list of `{ provider, id, startS, endS, label,
   embeddable }` on the exercise (`fitness_exercises.videos`). The first is THE
   video; any other has a `label`. The import fills the id and a start from the
@@ -440,8 +569,14 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   (`workout-screen.tsx`), `breath-pacer.tsx`, `hold-timer.tsx`,
   `confirm-count.tsx`, `feel-scale.tsx`, the phone's store
   (`session-store.ts`) and its sync (`use-session-sync.ts`),
-  `use-wake-lock.ts`, and `sound.ts`. `start-session-button.tsx` is the
-  program page's Start/Resume.
+  `use-wake-lock.ts`, `sound.ts` (the tones, the two switches and
+  `coachSay`), `demo-loop.tsx` (the looping demo) and `youtube-api.ts` (the
+  IFrame Player API, loaded once). `start-session-button.tsx` is the program
+  page's Start/Resume.
+- `src/modules/fitness/core/coach.ts` — every line the coach says (F2b).
+- `src/lib/speech/queue-policy.ts` and `voice-queue.ts` — the one voice
+  (ADR 0114): the rules, pure, and the queue that feeds `speakLine` in
+  `say.ts`.
 - `src/modules/fitness/components/` — `read-program-pdf.ts` (pdfjs on the
   device), `import-form.tsx`, `program-editor.tsx`, `program-view.tsx`,
   `video-player.tsx`, and the discard and delete buttons.
@@ -452,6 +587,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   `fitness/programs/[id]/session` (workout mode).
 - `src/lib/pdf/browser.ts` — `loadPdfjs`, shared with Documents.
 - `tests/fitness-core.test.ts`, `tests/fitness-session.test.ts`,
+  `tests/fitness-coach.test.ts`, `tests/speech-queue.test.ts`,
   `tests/fitness-ops.test.ts`, `tests/isolation/fitness.test.ts`.
 - `docs/help/fitness/` — `overview.md` (`**Route:** /personal/m/fitness/**`),
   `import.md`, `editor.md`, `program.md`, `workout.md`.
@@ -514,7 +650,23 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   sentence, not its source.
 - **Sound needs a tap.** A browser starts audio only from a user gesture, and
   a session resumed after a reload has had no Start tap, so any tap on the
-  workout screen unlocks it.
+  workout screen unlocks it. The same tap warms the voice up, which iOS needs
+  before it will speak at all.
+- **One voice, and a line knows how long it is worth saying** (F2b,
+  [ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md)).
+  Steps are `normal` and keyed `step`, so a newer step replaces an unsaid
+  older one. "Last one." is `normal`, keyed `count`, so it cuts off a cue. A
+  cue is `low` and waits its turn, or goes unsaid. Nothing is said late.
+- **A cancelled line is not a silent phone.** `cancel()` makes the line it
+  stops fire `error` with `interrupted` or `canceled`, and a browser refuses
+  speech before the page's first tap with `not-allowed`. The tell box took any
+  error as proof that the device could not speak and switched the voice off
+  for the page. The queue interrupts on purpose, so only a real failure
+  counts now (`isRealSpeechFailure`).
+- **The demo's player is made in a node React does not own.** The API
+  replaces the element it is given with its iframe, so the demo hands it a
+  `div` made in the effect, inside the box React renders empty. React never
+  tries to remove a node the API has replaced.
 
 ## Open items
 
@@ -532,8 +684,21 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   will not until a new build, best made together with the CAMERA permission
   the founder's posture tool needs. Screen Wake Lock inside the app's WebView
   has not been watched either.
-- **Nobody has heard the pacer on a phone.** The drive ran in a browser pane;
-  the tones, their volume and the buzz are unproven on a real phone.
+- **Nobody has heard the pacer or the coach on a phone.** The drives ran in a
+  browser pane. The tones, their volume, the buzz and the voice are unproven
+  on a real phone. In the app the end of a line is estimated from its length,
+  so a long line may be cut off by the next one. The build that adds VIBRATE
+  and CAMERA can have the native voice report its end (`onDone`), and
+  `speakLine` would use it where it is there.
+- **The demo inside the Android app is unwatched.** A WebView can refuse even
+  a muted video until a tap (`mediaPlaybackRequiresUserGesture`). The demo
+  then says so and waits for play, but nobody has seen which way the app
+  goes.
+- **Made-for-kids videos.** YouTube's developer policies ask an API client to
+  look up each embedded video's made-for-kids status (a Data API call) and
+  turn tracking off for those. This page tracks nothing of its own and uses
+  the privacy-enhanced player. The lookup is not built. A program of
+  children's exercises is when it matters.
 - **An unsent workout goes up only while a session or a program's page is
   open**, not from the Workouts home.
 - **Scanned PDFs are refused** (`NO_TEXT`). Reading pictures of pages would

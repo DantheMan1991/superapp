@@ -23,6 +23,10 @@ type Status = "ready" | "countdown" | "running" | "paused" | "done";
  * breath back.
  *
  * A breath is one out and one in, counted at the end of the in.
+ *
+ * `onBegin` and `onBreath` are for the coach's voice and the demo (F2b): the
+ * set starting to run, and each breath as it begins (1-based), so the screen
+ * can say "Last one." without the pacer knowing any words.
  */
 export function BreathPacer({
   outS,
@@ -31,6 +35,8 @@ export function BreathPacer({
   max,
   autoStart,
   onFinish,
+  onBegin,
+  onBreath,
 }: {
   outS: number;
   inS: number;
@@ -39,6 +45,8 @@ export function BreathPacer({
   /** Start counting down at once: every set after an exercise's first. */
   autoStart: boolean;
   onFinish: (count: number) => void;
+  onBegin?: () => void;
+  onBreath?: (n: number) => void;
 }) {
   const [status, setStatus] = useState<Status>(autoStart ? "countdown" : "ready");
   const [countdown, setCountdown] = useState(COUNTDOWN_S);
@@ -55,14 +63,23 @@ export function BreathPacer({
   }
   const finishFromTimer = useEffectEvent((breaths: number) => finishSet(breaths));
 
+  // The first breath: from the countdown's end, or Start now. The same two
+  // names for one thing as above.
+  function begin() {
+    setStatus("running");
+    setPhase("out");
+    sounds.breatheOut();
+    onBegin?.();
+    onBreath?.(count + 1);
+  }
+  const beginFromTimer = useEffectEvent(() => begin());
+
   // The countdown into the set.
   useEffect(() => {
     if (status !== "countdown") return;
     const timer = window.setTimeout(() => {
       if (countdown <= 1) {
-        setStatus("running");
-        setPhase("out");
-        sounds.breatheOut();
+        beginFromTimer();
         return;
       }
       if (countdown <= 4) sounds.tick();
@@ -87,6 +104,7 @@ export function BreathPacer({
     }
     setPhase("out");
     sounds.breatheOut();
+    onBreath?.(next + 1);
   });
 
   useEffect(() => {
@@ -138,15 +156,7 @@ export function BreathPacer({
       )}
       {status === "countdown" && (
         <div className="grid w-full grid-cols-2 gap-3">
-          <Button
-            size="lg"
-            className="h-14"
-            onClick={() => {
-              setStatus("running");
-              setPhase("out");
-              sounds.breatheOut();
-            }}
-          >
+          <Button size="lg" className="h-14" onClick={begin}>
             Start now
           </Button>
           <Button size="lg" variant="outline" className="h-14" onClick={() => {

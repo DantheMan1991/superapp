@@ -103,6 +103,46 @@ export function embedUrl(clip: Clip): string {
   return `https://www.youtube-nocookie.com/embed/${clip.id}?${params.toString()}`;
 }
 
+/** The speeds workout mode's demo loops at (F2b). */
+export const DEMO_SPEEDS = [0.5, 0.75, 1] as const;
+export type DemoSpeed = (typeof DEMO_SPEEDS)[number];
+
+export function isDemoSpeed(value: unknown): value is DemoSpeed {
+  return DEMO_SPEEDS.some((speed) => speed === value);
+}
+
+/** The privacy-enhanced host every player here comes from. */
+export const PLAYER_HOST = "https://www.youtube-nocookie.com";
+
+/**
+ * Workout mode's looping demo (F2b): the player's parameters, for YouTube's
+ * IFrame Player API, which adds `enablejsapi` and the page's `origin` itself.
+ * No autoplay: the API starts it, muted, once it is on screen. No `end`: the
+ * loop goes back to the start just before it, so YouTube's end screen never
+ * shows. No controls: the page's own buttons sit below the player, never over
+ * it (YouTube's terms forbid anything drawn over a player).
+ */
+export function demoPlayerVars(clip: Clip): Record<string, number> {
+  const vars: Record<string, number> = { playsinline: 1, rel: 0, controls: 0 };
+  if (clip.startS != null) vars.start = clip.startS;
+  return vars;
+}
+
+/** Where the loop goes back to. */
+export function loopStart(clip: Clip): number {
+  return clip.startS ?? 0;
+}
+
+/**
+ * Time to go back to the start: a quarter of a second before the clip's end,
+ * so the player never reaches it and never stops. A clip with no end (or an
+ * end before its start) loops the rest of the video, when YouTube says it
+ * ended.
+ */
+export function loopDue(time: number, clip: Clip): boolean {
+  return clip.endS != null && clip.endS > loopStart(clip) && time >= clip.endS - 0.25;
+}
+
 /** The same clip on YouTube itself, for a video that may not be embedded. */
 export function watchUrl(clip: Clip): string {
   const t = clip.startS != null ? `&t=${clip.startS}s` : "";

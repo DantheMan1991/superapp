@@ -13,17 +13,25 @@ type Status = "ready" | "countdown" | "running" | "paused" | "done";
  * A HOLD, counted in seconds: a countdown from the top of the range, a tick
  * in the last three, and the chime at zero. From the bottom of the range the
  * person may stop it themselves, and the seconds held are what is logged.
+ *
+ * `onBegin` and `onSecond` are for the coach's voice and the demo (F2b), as
+ * the pacer's are.
  */
 export function HoldTimer({
   min,
   max,
   autoStart,
   onFinish,
+  onBegin,
+  onSecond,
 }: {
   min: number;
   max: number;
   autoStart: boolean;
   onFinish: (seconds: number) => void;
+  onBegin?: () => void;
+  /** Each second held, before the last. */
+  onSecond?: (elapsed: number) => void;
 }) {
   const [status, setStatus] = useState<Status>(autoStart ? "countdown" : "ready");
   const [countdown, setCountdown] = useState(COUNTDOWN_S);
@@ -36,11 +44,17 @@ export function HoldTimer({
   }
   const finishFromTimer = useEffectEvent((seconds: number) => finishSet(seconds));
 
+  function begin() {
+    setStatus("running");
+    onBegin?.();
+  }
+  const beginFromTimer = useEffectEvent(() => begin());
+
   useEffect(() => {
     if (status !== "countdown") return;
     const timer = window.setTimeout(() => {
       if (countdown <= 1) {
-        setStatus("running");
+        beginFromTimer();
         return;
       }
       if (countdown <= 4) sounds.tick();
@@ -57,6 +71,7 @@ export function HoldTimer({
       return;
     }
     if (max - next <= 3) sounds.tick();
+    onSecond?.(next);
   });
 
   useEffect(() => {
@@ -97,7 +112,7 @@ export function HoldTimer({
       )}
       {status === "countdown" && (
         <div className="grid w-full grid-cols-2 gap-3">
-          <Button size="lg" className="h-14" onClick={() => setStatus("running")}>
+          <Button size="lg" className="h-14" onClick={begin}>
             Start now
           </Button>
           <Button

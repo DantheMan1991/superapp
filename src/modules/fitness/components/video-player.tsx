@@ -29,6 +29,9 @@ const PLAYING = "yosher:fitness-video-playing";
  * A video its uploader will not let be embedded (`embeddable === false`,
  * asked when the program was drafted or saved) shows a link to YouTube
  * instead of a player that would only show YouTube's error.
+ *
+ * Never under 200 px tall: YouTube's terms ask that of every embedded player,
+ * and a 16:9 box on a phone's width comes out a few pixels short of it.
  */
 export function VideoPlayer({
   videoId,
@@ -68,7 +71,7 @@ export function VideoPlayer({
 
   if (embeddable === false) {
     return (
-      <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-muted px-4 text-center text-sm">
+      <div className="flex aspect-video min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-muted px-4 text-center text-sm">
         <span className="text-muted-foreground">This video only plays on YouTube.</span>
         <a
           href={watchUrl(clip)}
@@ -87,7 +90,7 @@ export function VideoPlayer({
       <button
         type="button"
         onClick={play}
-        className="group flex aspect-video w-full flex-col items-center justify-center gap-2 bg-muted text-sm hover:bg-muted/70"
+        className="group flex aspect-video min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-muted text-sm hover:bg-muted/70"
         aria-label={`Play the video for ${title}`}
       >
         <span className="flex size-12 items-center justify-center rounded-full bg-background shadow-elevation-1 transition-transform group-hover:scale-105">
@@ -102,7 +105,7 @@ export function VideoPlayer({
     <iframe
       src={embedUrl(clip)}
       title={`Video: ${title}`}
-      className="aspect-video w-full"
+      className="aspect-video min-h-[200px] w-full"
       // `fullscreen` here is what lets the player go full screen; the old
       // `allowFullScreen` attribute beside it only drew a console warning.
       allow="autoplay; encrypted-media; picture-in-picture; fullscreen"

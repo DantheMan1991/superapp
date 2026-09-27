@@ -1,22 +1,30 @@
 /**
- * THE PACER'S SOUNDS (docs/modules/fitness.md, F2): a soft tone at each turn
- * of the breath, and a two-note chime and a buzz when a set is done, so a
- * person with their face on the floor does not have to look.
+ * WHAT WORKOUT MODE MAKES HEARD (docs/modules/fitness.md, F2): a soft tone at
+ * each turn of the breath, a two-note chime and a buzz when a set is done, and
+ * the coach's voice (F2b), so a person with their face on the floor does not
+ * have to look.
  *
- * Tones, not words. Words are F2b's coach voice, which is ONE queue so that a
- * spoken cue (and, later, the founder's posture feedback) never talks over a
- * count. A tone is short enough to sit under a word.
+ * The tones are the Web Audio API, which a browser only lets start after a
+ * tap: any tap on the workout screen calls `unlockSound`, which also warms the
+ * voice up (iOS will not speak otherwise). The buzz is the Vibration API: the
+ * phone's browser has it; the Android app does not until a build adds the
+ * VIBRATE permission (an open item, with the camera).
  *
- * Made with the Web Audio API, which a browser only lets start after a tap:
- * `unlockSound` is called from the Start button. The buzz is the Vibration
- * API: the phone's browser has it; the Android app does not until a build
- * adds the VIBRATE permission (an open item, with the camera).
+ * THE VOICE IS ONE QUEUE (`@/lib/speech/voice-queue`, ADR 0114), so a cue never
+ * talks over a count and, later, the founder's posture feedback can cut in on
+ * both. Everything in workout mode speaks through `coachSay`, which honours the
+ * two switches: sounds (everything) and the coach's voice (words only).
  */
+
+import { warmUpSpeech } from "@/lib/speech/say";
+import { silence, speak, type VoiceLine } from "@/lib/speech/voice-queue";
 
 let context: AudioContext | null = null;
 
 const MUTE_KEY = "yosher.fitness.sound";
+const VOICE_KEY = "yosher.fitness.voice";
 let muted: boolean | null = null;
+let voiceOff: boolean | null = null;
 const listeners = new Set<() => void>();
 
 function readMutedFromStorage(): boolean {
@@ -44,16 +52,58 @@ export function setMuted(value: boolean): void {
   } catch {
     // Kept in memory for this page.
   }
+  if (value) silence();
   for (const listener of listeners) listener();
 }
 
+/** The coach's voice is off on this device; the tones may still be on. */
+export function isVoiceOff(): boolean {
+  if (voiceOff === null) {
+    try {
+      voiceOff = window.localStorage.getItem(VOICE_KEY) === "off";
+    } catch {
+      voiceOff = false;
+    }
+  }
+  return voiceOff;
+}
+
+export function voiceOffOnTheServer(): boolean {
+  return false;
+}
+
+export function setVoiceOff(value: boolean): void {
+  voiceOff = value;
+  try {
+    if (value) window.localStorage.setItem(VOICE_KEY, "off");
+    else window.localStorage.removeItem(VOICE_KEY);
+  } catch {
+    // Kept in memory for this page.
+  }
+  if (value) silence();
+  for (const listener of listeners) listener();
+}
+
+/** Either switch changing: sounds, or the coach's voice. */
 export function subscribeMuted(onChange: () => void): () => void {
   listeners.add(onChange);
   return () => listeners.delete(onChange);
 }
 
+/**
+ * Say a line in the coach's voice, when both switches allow it. The one way
+ * anything in workout mode speaks, the founder's posture feedback included:
+ * `coachSay({ text: "Knees out.", priority: "high", key: "posture" })`
+ * interrupts a cue or a count, and replaces its own unsaid last correction.
+ */
+export function coachSay(line: VoiceLine | null): void {
+  if (!line || isMuted() || isVoiceOff()) return;
+  speak(line);
+}
+
 /** Called from a tap: the only moment a browser allows sound to start. */
 export function unlockSound(): void {
+  warmUpSpeech();
   try {
     if (!context) {
       const Ctor =

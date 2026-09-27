@@ -131,6 +131,28 @@ screen.
 
 ## Build log
 
+### 2026-09-27 — A cancelled line no longer silences the voice (`claude/fitness-f2b`)
+
+Found while building workout mode's coach voice
+([fitness.md](fitness.md), F2b), which shares `say.ts`. `sayIt` cancels
+whatever it is saying before each new answer, and `cancel()` makes the line
+it stops fire `error` with `interrupted` (or `canceled`, if it had not
+started). A browser also refuses speech before the page's first tap, with
+`not-allowed`. `utter` took ANY error as proof that the device cannot speak
+(`provedSilent`), so two answers close together switched the voice off for the
+rest of the page, and the speaker button went with it. Now only a real
+failure counts (`isRealSpeechFailure`, tested in
+`tests/speech-queue.test.ts`), and the never-started check no longer fires
+after an error it has already seen. And a line asked for in the same tick as
+a newer one (or while the page's voices were still loading) was said AFTER
+the newer one, because its cancel had nothing to stop yet; `hush()` could not
+stop such a line either. `utter` now drops a line that a newer one (or a
+hush) has overtaken before it began. `sayIt` is otherwise unchanged: it still
+cancels on every new answer, because the newest answer is the true one.
+Workout mode's voice is a queue beside it
+([ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md)),
+fed by the new `speakLine`, which reports when a line has been said.
+
 ### 2026-09-14 — A fifth source: the job site (`claude/the-first-slice-on-a-site`)
 
 `src/packs/jobs/tell/source.ts` joined the registry, third — after the clock

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Check,
   CloudOff,
   Loader2,
+  Megaphone,
+  MegaphoneOff,
   Play,
   Plus,
   SkipForward,
@@ -20,7 +22,10 @@ import { HelpButton } from "@/components/app/help-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { canSpeak, noVoiceOnTheServer, subscribeVoice } from "@/lib/speech/say";
+import { silence } from "@/lib/speech/voice-queue";
 import { cn } from "@/lib/utils";
+import { breathLine, cueFor, EXERCISE_DONE, holdLine, setIntro } from "../../core/coach";
 import { countOf, prescription } from "../../core/program";
 import {
   beginSession,
@@ -40,13 +45,23 @@ import {
   type SessionPlan,
   type Step,
 } from "../../core/session";
-import { VideoPlayer } from "../video-player";
 import { BreathPacer } from "./breath-pacer";
 import { ConfirmCount } from "./confirm-count";
+import { DemoLoop, type DemoHandle } from "./demo-loop";
 import { FeelScale } from "./feel-scale";
 import { HoldTimer } from "./hold-timer";
 import { newId, openSessionFor, putSession, readSessions, sendPending } from "./session-store";
-import { isMuted, mutedOnTheServer, setMuted, subscribeMuted, unlockSound } from "./sound";
+import {
+  coachSay,
+  isMuted,
+  isVoiceOff,
+  mutedOnTheServer,
+  setMuted,
+  setVoiceOff,
+  subscribeMuted,
+  unlockSound,
+  voiceOffOnTheServer,
+} from "./sound";
 import { useSessionSync, useStoredSessions, type SyncState } from "./use-session-sync";
 import { useWakeLock } from "./use-wake-lock";
 
@@ -62,9 +77,13 @@ import { useWakeLock } from "./use-wake-lock";
  * a document is its next step. So a reload, a dropped signal or the phone
  * locking mid-set lands back on exactly the set it was on.
  *
- * THE STAGE at the top is the exercise's video today. It is a slot: F2b loops
- * the demo there, and the founder's posture tool can put its camera view
- * there during a set.
+ * THE STAGE at the top is a slot: the exercise's demo, looping (F2b), and
+ * where the founder's posture tool can put its camera view during a set.
+ *
+ * THE COACH'S VOICE (F2b, core/coach.ts) says what the screen would tell you
+ * at the moments you cannot see it: each set as it appears, a cue and "Last
+ * one." during it, "Exercise done." after. Everything it says goes through the
+ * one voice (`coachSay`, ADR 0114), which a posture tool shares.
  */
 export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; programHref: string }) {
   const router = useRouter();
@@ -75,6 +94,8 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
   const elsewhere = open && open.phaseId !== plan.phaseId ? open : null;
   const [leaving, setLeaving] = useState(false);
   useWakeLock(doc !== null && !leaving);
+  // Leaving the screen, however it happens, leaves nothing talking.
+  useEffect(() => () => silence(), []);
 
   /** The session as it is at the moment of a tap, never as it was at render. */
   function current(): SessionDoc | null {
@@ -130,7 +151,9 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
     if (step.kind !== "finish") where = `Exercise ${step.itemIndex + 1} of ${plan.items.length}`;
     body =
       step.kind === "set" ? (
+        // One per exercise, so the demo keeps playing from set to set.
         <SetView
+          key={step.itemIndex}
           plan={plan}
           doc={doc}
           step={step}
@@ -176,6 +199,10 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
 
 function TopBar({ where, programHref, sync }: { where: string; programHref: string; sync: SyncState }) {
   const muted = useSyncExternalStore(subscribeMuted, isMuted, mutedOnTheServer);
+  const voiceOff = useSyncExternalStore(subscribeMuted, isVoiceOff, voiceOffOnTheServer);
+  // A phone that has shown it cannot speak loses the switch rather than keep
+  // one that does nothing.
+  const speakable = useSyncExternalStore(subscribeVoice, canSpeak, noVoiceOnTheServer);
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
@@ -184,9 +211,11 @@ function TopBar({ where, programHref, sync }: { where: string; programHref: stri
             <X className="size-5" aria-hidden />
           </Link>
         </Button>
-        <span className="text-sm text-muted-foreground">{where}</span>
-        <div className="flex items-center gap-1">
-          <span className="flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite">
+        {/* Where, and under it whether it is saved: beside three switches on a
+            phone's width, the two side by side wrapped onto four lines. */}
+        <div className="flex min-w-0 flex-col items-center text-center leading-tight">
+          <span className="text-sm text-muted-foreground">{where}</span>
+          <span className="flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" aria-live="polite">
             {sync.status === "saved" ? (
               <>
                 <Check className="size-3.5" aria-hidden /> Saved
@@ -201,6 +230,23 @@ function TopBar({ where, programHref, sync }: { where: string; programHref: stri
               </>
             )}
           </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {speakable && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={voiceOff ? "Turn the coach's voice on" : "Turn the coach's voice off"}
+              aria-pressed={!voiceOff}
+              onClick={() => setVoiceOff(!voiceOff)}
+            >
+              {voiceOff ? (
+                <MegaphoneOff className="size-5" aria-hidden />
+              ) : (
+                <Megaphone className="size-5" aria-hidden />
+              )}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -291,23 +337,30 @@ function SetView({
   const planned = logged?.plannedSets ?? item.setsMin;
   const done = logged?.sets.length ?? 0;
   const side = sideWords(step.side);
-  const cue = item.cues.length > 0 ? item.cues[done % item.cues.length] : null;
+  const cue = cueFor(item, done);
   const key = `${step.itemIndex}-${step.number}-${step.side ?? "both"}`;
   const max = item.targetMax ?? item.targetMin;
   const finishSet = (count: number) => onFinishSet(step.itemIndex, count);
+  const demo = useRef<DemoHandle>(null);
+  // A set beginning to run quiets a demo playing with sound.
+  const quietDemo = () => demo.current?.quiet();
+
+  // Each set says what it is as it appears, and only then: an effect event,
+  // so a save's status changing never says it again.
+  const announce = useEffectEvent(() => coachSay(setIntro(plan, doc, step)));
+  useEffect(() => {
+    announce();
+  }, [key]);
 
   return (
     <div className="flex flex-1 flex-col gap-5">
       {item.video && (
-        <div className="overflow-hidden rounded-xl">
-          <VideoPlayer
-            videoId={item.video.id}
-            startS={item.video.startS}
-            endS={item.video.endS}
-            embeddable={item.video.embeddable}
-            title={item.name}
-          />
-        </div>
+        <DemoLoop
+          key={`${item.video.id}-${item.video.startS}-${item.video.endS}`}
+          ref={demo}
+          video={item.video}
+          title={item.name}
+        />
       )}
       <div className="space-y-1">
         <h1 className="font-heading text-xl font-medium">
@@ -340,9 +393,19 @@ function SetView({
           max={max}
           autoStart={done > 0}
           onFinish={finishSet}
+          onBegin={quietDemo}
+          onBreath={(n) => coachSay(breathLine(n, max, cue))}
         />
       ) : item.unit === "seconds" ? (
-        <HoldTimer key={key} min={item.targetMin} max={max} autoStart={done > 0} onFinish={finishSet} />
+        <HoldTimer
+          key={key}
+          min={item.targetMin}
+          max={max}
+          autoStart={done > 0}
+          onFinish={finishSet}
+          onBegin={quietDemo}
+          onSecond={(elapsed) => coachSay(holdLine(elapsed, max, cue))}
+        />
       ) : (
         <ConfirmCount key={key} target={item.targetMin} unit={item.unit} onFinish={finishSet} />
       )}
@@ -383,6 +446,11 @@ function CheckView({
   const [hurtNote, setHurtNote] = useState("");
   const next = plan.items[itemIndex + 1];
   const zone = plan.effort;
+  // A timed set can end with the person on the floor: this is the word to
+  // pick up the phone.
+  useEffect(() => {
+    coachSay(EXERCISE_DONE);
+  }, []);
 
   return (
     <div className="flex flex-1 flex-col gap-5">

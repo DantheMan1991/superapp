@@ -33,6 +33,12 @@ export interface DaySession {
   finished: boolean;
   /** Full sets per program item it did. An item edited away since is not here. */
   items: { itemId: string; sets: number }[];
+  /** The phase it did, when that phase is still in the program (F3: feel by phase). */
+  phaseId: string | null;
+  feelBefore: number | null;
+  feelAfter: number | null;
+  /** The effort given after each exercise, where one was (F3: the effort warning). */
+  efforts: number[];
 }
 
 /** A session on the phone, as a day sees it. */
@@ -50,6 +56,10 @@ export function daySessionOf(doc: SessionDoc): DaySession {
         ? []
         : [{ itemId: exercise.itemId, sets: fullSets(exercise.perSide, exercise.sets.map((set) => set.side)) }],
     ),
+    phaseId: doc.phaseId,
+    feelBefore: doc.feelBefore,
+    feelAfter: doc.feelAfter,
+    efforts: doc.exercises.flatMap((exercise) => (exercise.effort === null ? [] : [exercise.effort])),
   };
 }
 

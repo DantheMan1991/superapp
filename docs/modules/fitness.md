@@ -13,6 +13,78 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — F3: progress and the gate (`claude/fitness-f3`)
+
+No migration and no seed. The founder approved the screens from a mockup
+(the program page's progress, the gate opening, the Today card's line) with
+two calls of his own: **the streak counts weeks on target**, and **a phase
+whose gate has not opened warns but can still be started**.
+
+- **Done days** (`core/progress.ts`): a day whose sessions together did every
+  exercise's minimum for the phase, the same `dayProgress` a split day uses.
+  Counted per phase from every session of the program (`programSessions`,
+  the newest 2,000).
+- **The phase bar** on the program page: `6 of 14 done days`, `Phase 2: … opens
+  at 14`, a bar, and a line saying what a done day is.
+- **This week**: done days, Monday to Sunday, against the program's sessions a
+  week (`1 of 3–4 sessions`).
+- **The last four weeks**: a square a day (done, some sets, nothing, still to
+  come, today ringed), and `3 weeks in a row on target`. It counts weeks, not
+  days (his call): the program asks for 3–4 a week, so a daily streak would
+  break on every rest day. The week going on never breaks it.
+- **The effort warning**, in the program's terms: `1 exercise at 7/10 this
+  week. The program says stay at 3–5.` It counts exercises, not sets as the
+  plan said, because effort is given once per exercise.
+- **How you felt**: the phase's average before and after, and a line for each
+  over the last 14 sessions, drawn as inline SVG with no chart library.
+- **The gate**: when the phase's done days are reached, `Phase 2: … is open`
+  with what is new in it (by name, since each phase's exercises are rows of
+  their own), the first new exercise's video, `Move on to …`, and `Or keep
+  going here. It never moves you on by itself.` Nothing is stored. The program
+  opens on the phase of the last workout, so the first session on the next
+  phase is the move.
+- **A phase whose gate has not opened** says `Opens after 14 done days of …
+  (6 so far). The program says not to skip a phase.` above a Start that still
+  works (his call).
+- **The Today card** adds `6 of 14 done days · This week: 1 of 3–4 sessions`,
+  and `Phase 2: … is open` with `Move on` once its phase's gate opens.
+- It is worked out on the server from what has reached it, so a workout still
+  on the phone counts once it is sent.
+- Guides: `program.md` (Your progress, the gate, how to move on) and
+  `overview.md` (the Today card's lines). Two icons registered for guides:
+  `arrow-right` and `triangle-alert`.
+
+**Driven** on a production build against the dev branch, on the founder's
+program:
+
+- The Today card for phase 2 read `1 of 14 done days · This week: 1 of 3–4
+  sessions`.
+- At 375 px, phase 1's page showed `1 of 14 done days` with `Phase 2: Weeks
+  3-4 opens at 14` and `This week 1 of 3–4 sessions`. Its calendar marked
+  today done. The effort warning read `1 exercise at 7/10 this week`, from the
+  7/10 given in F2a's drive, and `How you felt` read 2 sessions, 4 before →
+  6.5 after. No sideways scroll.
+- Phase 2's page said `Opens after 14 done days of Phase 1: Weeks 1-2 (1 so
+  far). …` above its progress and a Start that still worked.
+- With phase 1's days set to 1 for the drive (restored to 14), phase 1's page
+  showed `Phase 2: Weeks 3-4 is open`: its four exercises, all new, the first
+  one's video, and `Move on to Phase 2: Weeks 3-4` linking to `?phase=2`.
+  Phase 2's warning went away.
+- With phase 2's days set to 1 (restored), the Today card showed `Phase 3:
+  Weeks 5-6 is open` with `Move on` linking to `?phase=3`.
+- The drive found three wording bugs, all fixed: `4 of them new` when all are
+  new (now `all new`), `1 days before moving on`, and `1 of 1 done days`.
+- The app window was minimized for part of the drive, so the page's text was
+  read instead of taking screenshots.
+
+Tests: `tests/fitness-progress.test.ts` (new, pure): done and partial days, a
+program's done day across phases, the gate and its words, the Monday week and
+this week's count, weeks on target (the week going on never breaks it), the
+four-week calendar, the effort warning in the program's terms, the feel's
+averages and series, what the next phase brings. `tests/fitness-ops.test.ts`
+(db): `programSessions` with each session's phase, feels and efforts.
+`tests/fitness-day.test.ts`: the session's new fields.
+
 ### 2026-09-27 — F2c: split days, and a Today card (`claude/fitness-f2c`)
 
 No migration and no seed. The founder approved the screens from a mockup
@@ -434,6 +506,12 @@ enrollment's **side**, where a left-or-right assessment lands.
 
 ### F3 — progress and the gate
 
+Built (the build log has it). Where it moved from the list below: the streak
+counts weeks on target, not days; the effort warning counts exercises, since
+effort is given per exercise; there is no stored current phase, and moving
+on is starting a session on the next phase; a phase whose gate has not opened
+warns but is not locked (the founder's calls).
+
 - **The phase bar**: "6 of 14 done days · Phase 2 opens when you reach 14".
   When it opens, a preview of the new exercises with their videos, and a
   button to move on; the app never moves you on its own, because the program
@@ -552,13 +630,19 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   session document's schema, `nextStep` (where the session is, from what it
   holds), the changes (`beginSession`, `recordSet`, `oneMoreSet`,
   `finishExercise`, `skipExercise`, `finishSession`), `sessionSummary`.
+- `src/modules/fitness/core/progress.ts` — progress and the gate (F3): done
+  days per phase (`phaseDays`, `programDays`), `phaseGate`, the week
+  (`mondayOf`, `weekCount`, `weeksOnTarget`), `calendarWeeks`,
+  `effortWarning`, `feelOf`, and their words. `components/phase-progress.tsx`
+  draws them on the program page, with the gate's two boxes.
 - `src/modules/fitness/core/day.ts` — a day of a program (F2c): the ledger
   (`dayProgress`, `dayOf`), a split's aim (`aimFor`, `canHalve`), what the
   start screen says (`aimWords`), and the space's day and hour (`localDayIn`,
   `hourIn`, `partOfDay`).
 - `src/modules/fitness/session-ops.ts` — `saveSession` (the database made to
   match a document), `lastSession`, `sessionCount`, `recentSessions` (a
-  program's sessions on some days, full sets per item) and `latestFollowed`
+  program's sessions on some days, full sets per item; `programSessions` for
+  all of them, with each one's phase, feels and efforts) and `latestFollowed`
   (the Today card's program). `program-ops.ts` has `sessionPlan`, a phase as
   workout mode runs it.
 - `src/modules/fitness/components/workout/` — the workout screen
@@ -647,6 +731,16 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   clock (`hourIn`), because the server renders these screens first and its
   own clock is not the person's. The finish adds up the session's own
   `localDay`, which the phone chose at Start.
+- **Progress is worked out, never stored** (F3). Done days, the week, the
+  streak, the warning and the feel all come from the sessions on each view of
+  the program page or the Workouts home. So correcting a program (its minimum
+  sets, its days) changes the past's arithmetic too, which is what a person
+  correcting a mistake means.
+- **Moving on is a session, not a switch.** The gate says the next phase is
+  open and links to it. The program opens on the phase of the last workout,
+  so the first session on the new phase is what moves the person on. Nothing
+  locks: a phase whose gate has not opened says so above a Start that works.
+- **A week runs Monday to Sunday**, for the week's count and the streak.
 - **No current phase on the enrollment.** Each session names its phase; the
   program page opens on the last workout's phase. Moving on is F3's gate.
 - **Timers read state through effect events.** The lint here is the React
@@ -717,6 +811,11 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - **A phone in another timezone from the space.** The day is the space's, so
   near midnight a session the phone dated to its own day can fall on the
   other side of the space's. Nobody travels with it yet.
+- **Progress counts only what has reached the server.** A workout still on
+  the phone joins the done days once sent. The Start button and the Today
+  card's day line already count it.
+- **The program page reads the program's whole history** (the newest 2,000
+  sessions) on each view. Page it, or keep running totals, if it is ever slow.
 - **F2 is built; Workouts is still `coming_soon`.** Making it `available`
   opens the Personal space door to every business user, and it wants the
   health-data privacy policy first (P1). The founder's call.

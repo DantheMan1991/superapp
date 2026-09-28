@@ -13,6 +13,8 @@ Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This pa
 - **{button:Import a program|primary|upload}.** Opens the import. See [Importing a program](import.md).
 - **`Today`**, once you have done a workout: a card for the program of your last workout, on that workout's phase.
   - **The program and the phase**, for example `Beginner Body Restoration · Phase 1: Weeks 1-2`. Click it to open the program on that phase.
+  - **Where the phase stands**, for example `6 of 14 done days · This week: 2 of 3–4 sessions`. See [Following a program](program.md) for what a done day is.
+  - **When the phase has reached its days**, a box with {icon:check} says the next one is open, for example `Phase 2: Weeks 3-4 is open`, with {button:Move on|outline|arrow-right}, which opens the program on that phase.
   - **Today's sessions**, each with {icon:check} and when you started it, for example `Morning · 4 sets`. A session you left open adds `not finished`. A set of an exercise done per side counts once, for both sides.
   - **Before your first session today**, `Nothing yet today: 4 exercises, 6 sets.`
   - **What is left**, once the day has started, for example `2 sets left: 90-90 Hip Lift with Ball Hold, Quadruped Block Squeeze.`
@@ -35,7 +37,7 @@ Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This pa
 
 ## Not on this page
 
-- **Your progress.** Days done, the week against the program's target, and when the next phase opens come after that.
+- **Your progress in full.** The Today card shows the phase's done days and this week. The calendar, the effort warning and how you felt are on the program's page.
 - **Putting a program away without deleting it.** Not built. You can delete a program from its edit screen.
 
 ## Who can do what

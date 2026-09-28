@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Banknote,
   Bookmark,
@@ -14,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Trophy,
+  TriangleAlert,
   Ban,
   Receipt,
   SkipForward,
@@ -110,6 +112,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "cloud-off": CloudOff,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
+  // Workouts' "Move on to Phase 2" (fitness.md, F3).
+  "arrow-right": ArrowRight,
   "arrow-up": ArrowUp,
   banknote: Banknote,
   bookmark: Bookmark,
@@ -206,6 +210,9 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   // A personal register's card (ADR 0034) wears this instead of the bank mark.
   wallet: Wallet,
   x: X,
+  // A warning drawn beside its words: Workouts' effort warning and a phase not
+  // yet open (fitness.md, F3).
+  "triangle-alert": TriangleAlert,
 };
 
 export function getControlIcon(name: string | null | undefined): LucideIcon | null {

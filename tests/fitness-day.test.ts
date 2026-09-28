@@ -239,6 +239,10 @@ describe("adding a day up from the server and the phone", () => {
     endedAt: at(8, 15).toISOString(),
     finished: true,
     items: [{ itemId: plan().items[2].itemId, sets: 2 }],
+    phaseId: null,
+    feelBefore: null,
+    feelAfter: null,
+    efforts: [],
     ...over,
   });
 

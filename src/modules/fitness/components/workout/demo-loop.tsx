@@ -9,8 +9,10 @@ import {
   useSyncExternalStore,
   type Ref,
 } from "react";
-import { ExternalLink, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { AudioLines, ExternalLink, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isVoiceBusy, silence, subscribeVoiceBusy } from "@/lib/speech/voice-queue";
+import { cn } from "@/lib/utils";
 import type { PlanVideo } from "../../core/session";
 import {
   DEMO_SPEEDS,
@@ -72,6 +74,17 @@ export interface DemoHandle {
 
 type Status = "loading" | "playing" | "paused" | "blocked" | "fallback";
 
+/** The longest the demo waits for the coach: a line that never reports its end must not keep it still. */
+const COACH_WAIT_MAX_MS = 20_000;
+
+/**
+ * On a phone the demo runs the full width of the screen (F2d): the column's
+ * own side margins come off it, and its corners with them. Wider than the
+ * workout's column, the column has margins of its own and the demo keeps its
+ * corners.
+ */
+const EDGE_TO_EDGE = "max-[44rem]:-mx-4 max-[44rem]:w-auto max-[44rem]:rounded-none";
+
 /**
  * THE DEMO LOOPS ABOVE THE COUNT (docs/modules/fitness.md, F2b; the approved
  * mockup's "Demo loops here, muted"). The exercise's clip, muted, going round
@@ -90,6 +103,12 @@ type Status = "loading" | "playing" | "paused" | "blocked" | "fallback";
  *
  * THE STAGE: this fills the slot at the top of the exercise screen, which the
  * founder's posture tool may fill with its camera view during a set instead.
+ *
+ * THE COACH FIRST (F2d; the founder: "the video should wait to start until
+ * the talking is done"). A new exercise's demo holds still while the coach
+ * says what the exercise is, and starts when the voice goes quiet: listen,
+ * then watch. Tapping play starts it at once, and it never waits more than
+ * `COACH_WAIT_MAX_MS`. Once going it does not stop for the coach again.
  */
 export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: string; ref?: Ref<DemoHandle> }) {
   const box = useRef<HTMLDivElement>(null);
@@ -98,8 +117,11 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
   const onScreen = useRef(false);
   /** The person paused it: nothing starts it again but them. */
   const held = useRef(false);
+  /** Ready, and holding its start until the coach has finished. */
+  const waitingForCoach = useRef(false);
   const [status, setStatus] = useState<Status>("loading");
   const [ready, setReady] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [withSound, setWithSound] = useState(false);
   const [failure, setFailure] = useState<{ words: string; onYouTube: boolean } | null>(null);
   const speed = useSyncExternalStore(subscribeSpeed, demoSpeed, speedOnTheServer);
@@ -116,7 +138,13 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
     p.mute();
     p.setPlaybackRate(speed);
     p.seekTo(loopStart(clip), true);
-    if (!held.current && shown()) p.playVideo();
+    if (!held.current && !waitingForCoach.current && shown()) p.playVideo();
+  }
+
+  /** Stop holding for the coach: they finished, the person tapped, or it waited long enough. */
+  function stopWaiting() {
+    waitingForCoach.current = false;
+    setWaiting(false);
   }
 
   useImperativeHandle(ref, () => ({
@@ -131,8 +159,34 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
     setReady(true);
     p.mute();
     p.setPlaybackRate(speed);
+    // The exercise's line was asked for as its screen appeared, before the
+    // player could be ready, so a coach still talking is talking about this.
+    if (isVoiceBusy()) {
+      waitingForCoach.current = true;
+      setWaiting(true);
+      return;
+    }
     if (shown()) p.playVideo();
   });
+
+  const startAfterCoach = useEffectEvent(() => {
+    if (!waitingForCoach.current) return;
+    stopWaiting();
+    const p = player.current;
+    if (p && !held.current && shown()) p.playVideo();
+  });
+  useEffect(
+    () =>
+      subscribeVoiceBusy(() => {
+        if (!isVoiceBusy()) startAfterCoach();
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setTimeout(() => startAfterCoach(), COACH_WAIT_MAX_MS);
+    return () => window.clearTimeout(timer);
+  }, [waiting]);
 
   const whenStateChanges = useEffectEvent((state: number) => {
     const p = player.current;
@@ -206,7 +260,7 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
     const p = player.current;
     if (!p) return;
     if (!shown()) p.pauseVideo();
-    else if (!held.current) p.playVideo();
+    else if (!held.current && !waitingForCoach.current) p.playVideo();
   });
   useEffect(() => {
     const host = box.current;
@@ -255,6 +309,7 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
       p.pauseVideo();
     } else {
       held.current = false;
+      stopWaiting();
       p.playVideo();
     }
   }
@@ -266,6 +321,9 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
       backToLoop(p);
       return;
     }
+    // The author's voice, alone: the coach stops rather than talk over them.
+    silence();
+    stopWaiting();
     setWithSound(true);
     held.current = false;
     p.unMute();
@@ -283,7 +341,7 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
     // Not ours to loop: YouTube's link, or the plain player when the API
     // would not load.
     return (
-      <div className="overflow-hidden rounded-xl">
+      <div className={cn("overflow-hidden rounded-xl", EDGE_TO_EDGE)}>
         <VideoPlayer videoId={id} startS={startS} endS={endS} embeddable={video.embeddable} title={title} />
       </div>
     );
@@ -312,7 +370,10 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
     <div className="space-y-2">
       <div
         ref={box}
-        className="relative aspect-video min-h-[200px] w-full overflow-hidden rounded-xl bg-black [&_iframe]:absolute [&_iframe]:inset-0 [&_iframe]:size-full"
+        className={cn(
+          "relative aspect-video min-h-[200px] w-full overflow-hidden rounded-xl bg-black [&_iframe]:absolute [&_iframe]:inset-0 [&_iframe]:size-full",
+          EDGE_TO_EDGE,
+        )}
       />
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -346,6 +407,12 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
           {withSound ? "Back to the loop" : "With sound"}
         </Button>
       </div>
+      {waiting && (
+        <p className="flex items-start gap-1.5 text-sm text-module-accent" aria-live="polite">
+          <AudioLines className="mt-0.5 size-4 shrink-0" aria-hidden />
+          The demo starts when the coach has finished. Tap play to start it now.
+        </p>
+      )}
       {status === "blocked" && (
         <p className="text-sm text-muted-foreground">This phone waits for a tap before it plays a video. Tap play.</p>
       )}

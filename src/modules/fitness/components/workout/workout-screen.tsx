@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { toast } from "sonner";
 import {
   Check,
@@ -22,10 +30,12 @@ import { HelpButton } from "@/components/app/help-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { prefetchLines, setClipSource } from "@/lib/speech/clips";
 import { canSpeak, noVoiceOnTheServer, subscribeVoice } from "@/lib/speech/say";
 import { silence } from "@/lib/speech/voice-queue";
+import { isRecordedVoice, RECORDED_VOICES, type RecordedVoice } from "@/lib/speech/voices";
 import { cn } from "@/lib/utils";
-import { breathLine, cueFor, EXERCISE_DONE, holdLine, setIntro } from "../../core/coach";
+import { breathLine, cueFor, EXERCISE_DONE, holdLine, sessionLines, setIntro } from "../../core/coach";
 import {
   aimFor,
   aimWords,
@@ -66,12 +76,16 @@ import { HoldTimer } from "./hold-timer";
 import { newId, openSessionFor, putSession, readSessions, sendPending } from "./session-store";
 import {
   coachSay,
+  coachVoice,
+  coachVoiceOnTheServer,
   isMuted,
   isVoiceOff,
   mutedOnTheServer,
+  setCoachVoice,
   setMuted,
   setVoiceOff,
   subscribeMuted,
+  tryCoachVoice,
   unlockSound,
   voiceOffOnTheServer,
 } from "./sound";
@@ -96,14 +110,24 @@ import { useWakeLock } from "./use-wake-lock";
  * THE COACH'S VOICE (F2b, core/coach.ts) says what the screen would tell you
  * at the moments you cannot see it: each set as it appears, a cue and "Last
  * one." during it, "Exercise done." after. Everything it says goes through the
- * one voice (`coachSay`, ADR 0114), which a posture tool shares.
+ * one voice (`coachSay`, ADR 0114), which a posture tool shares. Since F2d it
+ * is a recorded natural voice (ADR 0115) when the platform has one: this
+ * screen turns the recordings on, in the voice the phone chose, and fetches
+ * the session's lines ahead of them being said.
+ *
+ * THE WIDTH (F2d): a set with a demo spreads out on a wide screen, the demo
+ * on the left as big as the window's height allows and the set on the right,
+ * so Done stays in view. Every other view keeps the phone's column.
  */
+const VOICE_ENDPOINT = "/api/fitness/voice";
+
 export function WorkoutScreen({
   plan,
   programHref,
   recent,
   today,
   timeZone,
+  naturalVoice,
 }: {
   plan: SessionPlan;
   programHref: string;
@@ -113,6 +137,8 @@ export function WorkoutScreen({
   today: string;
   /** The space's timezone, so "Morning" reads the same on the server's render and the phone's. */
   timeZone: string;
+  /** The platform can record the coach's lines (ADR 0115); otherwise the device speaks. */
+  naturalVoice: boolean;
 }) {
   const router = useRouter();
   const sessions = useStoredSessions();
@@ -121,9 +147,33 @@ export function WorkoutScreen({
   const doc = open && open.phaseId === plan.phaseId ? open : null;
   const elsewhere = open && open.phaseId !== plan.phaseId ? open : null;
   const [leaving, setLeaving] = useState(false);
+  const voice = useSyncExternalStore(subscribeMuted, coachVoice, coachVoiceOnTheServer);
+  const muted = useSyncExternalStore(subscribeMuted, isMuted, mutedOnTheServer);
+  const voiceOff = useSyncExternalStore(subscribeMuted, isVoiceOff, voiceOffOnTheServer);
+  const quiet = muted || voiceOff;
   useWakeLock(doc !== null && !leaving);
   // Leaving the screen, however it happens, leaves nothing talking.
   useEffect(() => () => silence(), []);
+
+  // The recordings, on while this screen is, in the voice this phone chose.
+  // A LAYOUT effect: a child's effects run before its parent's, so a plain
+  // one here came after the start screen had already asked for its lines
+  // (dropped, with no source yet) and after a reloaded set had said its line
+  // (in the device's voice). Found on the drive.
+  useLayoutEffect(() => {
+    if (!naturalVoice) return;
+    setClipSource({ endpoint: VOICE_ENDPOINT, voice });
+    return () => setClipSource(null);
+  }, [naturalVoice, voice]);
+
+  // What is left of the session, fetched ahead of being said: again as it
+  // moves on, which asks only for a line a change made new ("One more set").
+  const fetchAhead = useEffectEvent(() => {
+    if (doc && naturalVoice && !quiet) prefetchLines(sessionLines(plan, doc));
+  });
+  useEffect(() => {
+    fetchAhead();
+  }, [doc?.id, doc?.revision, voice, quiet]);
 
   // SPLIT DAYS (F2c): what the day's other sessions did, and so what this one
   // sets out to do. Pure over the server's sessions and the phone's own.
@@ -146,6 +196,8 @@ export function WorkoutScreen({
 
   function start(feelBefore: number | null, choice: SplitChoice) {
     unlockSound();
+    // A Try still talking stops: the first exercise's line is next.
+    silence();
     const other = openSessionFor(readSessions(), plan.programId);
     if (other && other.phaseId !== plan.phaseId) {
       // Starting here ends the other one where its last set was, keeping it all.
@@ -174,6 +226,8 @@ export function WorkoutScreen({
 
   let body: ReactNode;
   let where = "Today's session";
+  /** A set with a demo: the one view that spreads out on a wide screen. */
+  let wide = false;
   if (leaving) {
     body = (
       <p className="flex items-center justify-center gap-2 py-24 text-lg">
@@ -187,12 +241,15 @@ export function WorkoutScreen({
         day={earlier}
         hourOf={(iso) => hourIn(timeZone, iso)}
         elsewhere={elsewhere}
+        voice={naturalVoice ? voice : null}
+        quiet={quiet}
         onStart={start}
       />
     );
   } else {
     const step = nextStep(plan, doc);
     if (step.kind !== "finish") where = `Exercise ${step.itemIndex + 1} of ${plan.items.length}`;
+    wide = step.kind === "set" && plan.items[step.itemIndex].video !== null;
     body =
       step.kind === "set" ? (
         // One per exercise, so the demo keeps playing from set to set.
@@ -234,20 +291,36 @@ export function WorkoutScreen({
       className="dark fixed inset-0 z-50 overflow-y-auto bg-background text-foreground"
       onPointerDown={unlockSound}
     >
-      <div className="mx-auto flex min-h-full w-full max-w-md flex-col gap-5 px-4 pt-3 pb-10">
-        <TopBar where={where} programHref={programHref} sync={sync} />
+      <div
+        className={cn(
+          "mx-auto flex min-h-full w-full flex-col gap-5 px-4 pt-3 pb-10",
+          wide ? "max-w-2xl lg:max-w-[120rem]" : "max-w-md",
+        )}
+      >
+        <TopBar where={where} programHref={programHref} sync={sync} naturalVoice={naturalVoice} />
         {body}
       </div>
     </div>
   );
 }
 
-function TopBar({ where, programHref, sync }: { where: string; programHref: string; sync: SyncState }) {
+function TopBar({
+  where,
+  programHref,
+  sync,
+  naturalVoice,
+}: {
+  where: string;
+  programHref: string;
+  sync: SyncState;
+  naturalVoice: boolean;
+}) {
   const muted = useSyncExternalStore(subscribeMuted, isMuted, mutedOnTheServer);
   const voiceOff = useSyncExternalStore(subscribeMuted, isVoiceOff, voiceOffOnTheServer);
   // A phone that has shown it cannot speak loses the switch rather than keep
-  // one that does nothing.
-  const speakable = useSyncExternalStore(subscribeVoice, canSpeak, noVoiceOnTheServer);
+  // one that does nothing. With the recorded voice there is always one.
+  const devicesVoice = useSyncExternalStore(subscribeVoice, canSpeak, noVoiceOnTheServer);
+  const speakable = devicesVoice || naturalVoice;
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
@@ -318,12 +391,18 @@ function TopBar({ where, programHref, sync }: { where: string; programHref: stri
  * sessions did and what this one sets out to do. "Half now" does the first
  * share of every exercise's sets; a session later that day lists only what
  * is left; a day already complete offers another session, which counts too.
+ *
+ * And the coach's voice (F2d): which of the recorded voices, with Try to hear
+ * it say the first exercise's line. The session's lines are fetched here,
+ * while the feel check is answered, so the first one is ready at Start.
  */
 function BeforeView({
   plan,
   day,
   hourOf,
   elsewhere,
+  voice,
+  quiet,
   onStart,
 }: {
   plan: SessionPlan;
@@ -332,6 +411,10 @@ function BeforeView({
   /** The hour a session started, on the space's clock. */
   hourOf: (iso: string) => number;
   elsewhere: SessionDoc | null;
+  /** The recorded voice chosen on this phone; null when the platform has none. */
+  voice: RecordedVoice | null;
+  /** The sounds or the coach's voice are switched off. */
+  quiet: boolean;
   onStart: (feelBefore: number | null, choice: SplitChoice) => void;
 }) {
   const [feel, setFeel] = useState<number | null>(null);
@@ -341,6 +424,23 @@ function BeforeView({
   const halving = canHalve(day);
   const choice: SplitChoice = day.complete ? "again" : half && halving ? "half" : "all";
   const aims = aimFor(day, choice);
+
+  /** The session as Start would begin it: what its lines will be. */
+  function ahead(): SessionDoc {
+    return beginSession(plan, { id: "ahead", now: new Date(), feelBefore: null, aim: aims });
+  }
+  const fetchAhead = useEffectEvent(() => {
+    if (voice && !quiet) prefetchLines(sessionLines(plan, ahead()));
+  });
+  useEffect(() => {
+    fetchAhead();
+  }, [choice, voice, quiet]);
+
+  function tryVoice() {
+    const doc = ahead();
+    const step = nextStep(plan, doc);
+    tryCoachVoice(step.kind === "set" ? setIntro(plan, doc, step).text : EXERCISE_DONE.text);
+  }
   return (
     <div className="flex flex-1 flex-col gap-5">
       <div>
@@ -379,6 +479,31 @@ function BeforeView({
         </div>
       )}
       <FeelScale label="How does your body feel right now?" value={feel} onChange={setFeel} />
+      {voice && (
+        <div className="flex items-center gap-2 rounded-xl border border-border px-3 py-2">
+          <Megaphone className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <label htmlFor="coach-voice" className="text-sm">
+            Coach&apos;s voice
+          </label>
+          <select
+            id="coach-voice"
+            value={voice}
+            onChange={(e) => {
+              if (isRecordedVoice(e.target.value)) setCoachVoice(e.target.value);
+            }}
+            className="ml-auto h-10 min-w-0 rounded-md border border-input bg-background px-2 text-sm [color-scheme:dark]"
+          >
+            {RECORDED_VOICES.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          <Button type="button" variant="outline" className="h-10" onClick={tryVoice}>
+            <Play aria-hidden /> Try
+          </Button>
+        </div>
+      )}
       {halving && (
         <fieldset className="space-y-2">
           <legend className="text-base">How much now?</legend>
@@ -465,69 +590,82 @@ function SetView({
   }, [key]);
 
   return (
-    <div className="flex flex-1 flex-col gap-5">
+    <div
+      className={cn(
+        "flex flex-1 flex-col gap-5",
+        // A wide screen (F2d): the demo on the left, the set on the right.
+        item.video && "lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-x-8",
+      )}
+    >
       {item.video && (
-        <DemoLoop
-          key={`${item.video.id}-${item.video.startS}-${item.video.endS}`}
-          ref={demo}
-          video={item.video}
-          title={item.name}
-        />
+        // As wide as the window's height allows a 16:9 demo to be, with the
+        // top bar and the demo's own buttons still on screen; never narrower
+        // than the phone's column made it, which a phone on its side would be.
+        <div className="mx-auto w-full max-w-[max(26rem,calc((100dvh_-_12rem)*16/9))]">
+          <DemoLoop
+            key={`${item.video.id}-${item.video.startS}-${item.video.endS}`}
+            ref={demo}
+            video={item.video}
+            title={item.name}
+          />
+        </div>
       )}
-      <div className="space-y-1">
-        <h1 className="font-heading text-xl font-medium">
-          {item.name}
-          {item.optional && (
-            <Badge variant="outline" className="ml-2 align-middle">
-              Optional
-            </Badge>
-          )}
-        </h1>
-        <p className="text-muted-foreground">
-          Set {step.number} of {planned}
-          {side && (
-            <>
-              {" · "}
-              <span className="font-medium text-module-accent">{side}</span>
-            </>
-          )}
-          {" · "}
-          {prescription(item)}
-        </p>
+      <div className="flex flex-1 flex-col gap-5">
+        <div className="space-y-1">
+          <h1 className="font-heading text-xl font-medium">
+            {item.name}
+            {item.optional && (
+              <Badge variant="outline" className="ml-2 align-middle">
+                Optional
+              </Badge>
+            )}
+          </h1>
+          <p className="text-muted-foreground">
+            Set {step.number} of {planned}
+            {side && (
+              <>
+                {" · "}
+                <span className="font-medium text-module-accent">{side}</span>
+              </>
+            )}
+            {" · "}
+            {prescription(item)}
+          </p>
+        </div>
+
+        {item.unit === "breaths" ? (
+          <BreathPacer
+            key={key}
+            outS={plan.breath.outS}
+            inS={plan.breath.inS}
+            min={item.targetMin}
+            max={max}
+            autoStart={done > 0}
+            onFinish={finishSet}
+            onBegin={quietDemo}
+            onBreath={(n) => coachSay(breathLine(n, max, cue))}
+          />
+        ) : item.unit === "seconds" ? (
+          <HoldTimer
+            key={key}
+            min={item.targetMin}
+            max={max}
+            autoStart={done > 0}
+            onFinish={finishSet}
+            onBegin={quietDemo}
+            onSecond={(elapsed) => coachSay(holdLine(elapsed, max, cue))}
+          />
+        ) : (
+          <ConfirmCount key={key} target={item.targetMin} unit={item.unit} onFinish={finishSet} />
+        )}
+
+        {cue && <p className="text-center text-lg leading-snug">{cue}</p>}
+        {item.notes && <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{item.notes}</p>}
+        <div className="flex-1" />
+        <Button variant="ghost" className="self-center" onClick={() => onSkip(step.itemIndex)}>
+          <SkipForward aria-hidden /> Skip this exercise
+        </Button>
       </div>
-
-      {item.unit === "breaths" ? (
-        <BreathPacer
-          key={key}
-          outS={plan.breath.outS}
-          inS={plan.breath.inS}
-          min={item.targetMin}
-          max={max}
-          autoStart={done > 0}
-          onFinish={finishSet}
-          onBegin={quietDemo}
-          onBreath={(n) => coachSay(breathLine(n, max, cue))}
-        />
-      ) : item.unit === "seconds" ? (
-        <HoldTimer
-          key={key}
-          min={item.targetMin}
-          max={max}
-          autoStart={done > 0}
-          onFinish={finishSet}
-          onBegin={quietDemo}
-          onSecond={(elapsed) => coachSay(holdLine(elapsed, max, cue))}
-        />
-      ) : (
-        <ConfirmCount key={key} target={item.targetMin} unit={item.unit} onFinish={finishSet} />
-      )}
-
-      {cue && <p className="text-center text-lg leading-snug">{cue}</p>}
-      {item.notes && <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{item.notes}</p>}
-      <div className="flex-1" />
-      <Button variant="ghost" className="self-center" onClick={() => onSkip(step.itemIndex)}>
-        <SkipForward aria-hidden /> Skip this exercise
-      </Button>
     </div>
   );
 }

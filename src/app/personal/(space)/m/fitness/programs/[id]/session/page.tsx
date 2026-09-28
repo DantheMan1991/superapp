@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { isSynthesisConfigured } from "@/lib/speech/synthesis";
 import { localDayIn, shiftDay } from "@/modules/fitness/core/day";
 import { loadProgram, sessionPlan } from "@/modules/fitness/program-ops";
 import { recentSessions } from "@/modules/fitness/session-ops";
@@ -56,6 +57,7 @@ export default async function WorkoutPage({
       recent={recent}
       today={today}
       timeZone={ctx.tenant.timezone}
+      naturalVoice={isSynthesisConfigured()}
     />
   );
 }

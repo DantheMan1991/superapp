@@ -4,6 +4,7 @@ import {
   cueFor,
   EXERCISE_DONE,
   holdLine,
+  sessionLines,
   setIntro,
   spokenPrescription,
 } from "../src/modules/fitness/core/coach";
@@ -226,5 +227,100 @@ describe("during a set", () => {
 describe("after an exercise", () => {
   it("says it is done, as the next step", () => {
     expect(EXERCISE_DONE).toEqual({ text: "Exercise done.", priority: "normal", key: "step" });
+  });
+});
+
+/**
+ * THE LINES FETCHED AHEAD (F2d, ADR 0115): what the coach's recordings are
+ * asked for before the session says them. A line missing here is said late,
+ * or in the device's robotic voice, so the list is checked against the
+ * screen's own functions, walked the way the screen walks.
+ */
+describe("every line a session can say, fetched ahead", () => {
+  it("walks the session to its end: each set's line, each timed set's cue, and the lines any set may say", () => {
+    const p = plan();
+    const doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    // In the order they are needed, so the first few (fetched on their own)
+    // hold the first set's line.
+    expect(sessionLines(p, doc)).toEqual([
+      "Side-lying pullback. 2 to 3 sets of 5 to 8 breaths, each side. Right side first.",
+      "Low back relaxed.",
+      "Now the left side.",
+      "Ribs down.",
+      "Set 2 of 2. Right side.",
+      "Foam roll, calves. 1 set of 15 rolls. Slow, about an inch a second.",
+      "Wall hold. 2 sets of 30 seconds.",
+      "Set 2 of 2.",
+      "Last one.",
+      "Ten seconds left.",
+      "Exercise done.",
+    ]);
+  });
+
+  it("holds every line the screen then says, set by set", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    const fetched = new Set(sessionLines(p, doc));
+    const said: string[] = [];
+    for (let guard = 0; guard < 50; guard++) {
+      const step = nextStep(p, doc);
+      if (step.kind === "finish") break;
+      if (step.kind === "check") {
+        said.push(EXERCISE_DONE.text);
+        doc = finish(p, doc, step.itemIndex);
+        continue;
+      }
+      const item = p.items[step.itemIndex];
+      const max = item.targetMax ?? item.targetMin;
+      const cue = cueFor(item, doc.exercises.find((e) => e.itemId === item.itemId)?.sets.length ?? 0);
+      said.push(setIntro(p, doc, step).text);
+      for (let n = 1; n <= max; n++) {
+        const line =
+          item.unit === "breaths" ? breathLine(n, max, cue) : item.unit === "seconds" ? holdLine(n, max, cue) : null;
+        if (line) said.push(line.text);
+      }
+      doc = done(p, doc, step.itemIndex, max);
+    }
+    expect(said.length).toBeGreaterThan(10);
+    expect(said.filter((line) => !fetched.has(line))).toEqual([]);
+  });
+
+  it("from the middle of a session, fetches only what is left", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    for (let i = 0; i < 4; i++) doc = done(p, doc, 0, 8);
+    doc = finish(p, doc, 0);
+    const lines = sessionLines(p, doc);
+    expect(lines.some((line) => line.startsWith("Side-lying pullback"))).toBe(false);
+    expect(lines).toContain("Foam roll, calves. 1 set of 15 rolls. Slow, about an inch a second.");
+  });
+
+  it("says a split day's share, as the screen will (F2c)", () => {
+    const p = plan();
+    const aim = p.items.map((item) => ({ itemId: item.itemId, sets: 1, max: item.setsMax ?? item.setsMin }));
+    const lines = sessionLines(p, beginSession(p, { id: id(), now: at(0), feelBefore: null, aim }));
+    expect(lines).toContain("Side-lying pullback. 1 set of 5 to 8 breaths, each side. Right side first.");
+    expect(lines).toContain("Wall hold. 1 set of 30 seconds.");
+    expect(lines).not.toContain("Set 2 of 2. Right side.");
+  });
+
+  it("does not foresee a set added with One more set, and fetches it once it is added", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    for (let i = 0; i < 4; i++) doc = done(p, doc, 0, 8);
+    expect(sessionLines(p, doc)).not.toContain("Set 3 of 3. Right side.");
+    doc = oneMoreSet(p, doc, 0);
+    expect(sessionLines(p, doc)).toContain("Set 3 of 3. Right side.");
+  });
+
+  it("has nothing but the three standing lines once the session is over", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    for (let guard = 0; guard < 50; guard++) {
+      const step = nextStep(p, doc);
+      if (step.kind === "finish") break;
+      doc = step.kind === "check" ? finish(p, doc, step.itemIndex) : done(p, doc, step.itemIndex, 30);
+    }
+    expect(sessionLines(p, doc)).toEqual(["Last one.", "Ten seconds left.", "Exercise done."]);
   });
 });

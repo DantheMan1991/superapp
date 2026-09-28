@@ -95,6 +95,73 @@ export function isRealSpeechFailure(error: string | undefined): boolean {
   return error !== "interrupted" && error !== "canceled" && error !== "not-allowed";
 }
 
+/** What `pickVoice` reads of a voice. The browser's own `SpeechSynthesisVoice` has all of it. */
+export interface VoiceOption {
+  name: string;
+  lang: string;
+  localService: boolean;
+  default: boolean;
+  voiceURI: string;
+}
+
+/**
+ * The old voices that come with a Mac and sound like the eighties, and the
+ * joke ones beside them. Used only when a device has nothing else.
+ */
+const DATED_VOICES =
+  /\b(agnes|albert|bad news|bahh|bells|boing|bruce|bubbles|cellos|deranged|fred|good news|hysterical|jester|junior|kathy|organ|princess|ralph|superstar|trinoids|vicki|victoria|whisper|wobble|zarvox)\b/i;
+
+/**
+ * THE MOST NATURAL VOICE THE DEVICE HAS, for the page's language.
+ *
+ * The old pick was the first voice in the language. On a Windows PC that is
+ * Microsoft David, and the founder called the workout's coach "very robotic"
+ * (2026-09-27). Most devices have better further down the list: Edge's
+ * "Online (Natural)" voices, Chrome's "Google" ones, an iPhone's "Enhanced"
+ * and "Premium" downloads. The coach now speaks in recorded lines
+ * (ADR 0115), so this is its voice when a recording is not there in time, and
+ * the tell box's always.
+ *
+ * - Another language: never.
+ * - A voice that needs the network: only online, and not one that already
+ *   failed on this page (`avoid`).
+ * - Natural or neural first, then premium, enhanced, Google; the person's own
+ *   region (`en-US`) over another (`en-GB`); a dated voice last of all, and a
+ *   child's voice (Edge's Ana) with them.
+ *
+ * Ties go to the device's own order. Nothing in the language: the device's
+ * default, or null, and the engine picks.
+ */
+export function pickVoice<V extends VoiceOption>(
+  voices: readonly V[],
+  want: { lang: string; region: string; online: boolean; avoid?: ReadonlySet<string> },
+): V | null {
+  const base = want.lang.slice(0, 2).toLowerCase();
+  const region = want.region.replace("_", "-").toLowerCase();
+  let best: V | null = null;
+  let bestScore = -Infinity;
+  for (const voice of voices) {
+    const lang = voice.lang.replace("_", "-").toLowerCase();
+    if (!lang.startsWith(base)) continue;
+    if (!voice.localService && !want.online) continue;
+    if (want.avoid?.has(voice.voiceURI)) continue;
+    let score = 0;
+    if (lang === region) score += 2;
+    if (/natural|neural/i.test(voice.name)) score += 6;
+    else if (/premium/i.test(voice.name)) score += 5;
+    else if (/enhanced/i.test(voice.name)) score += 4;
+    else if (/^google\b/i.test(voice.name)) score += 3;
+    if (/desktop|espeak|compact/i.test(voice.name)) score -= 2;
+    if (DATED_VOICES.test(voice.name) || /\bana\b/i.test(voice.name)) score -= 10;
+    if (voice.default) score += 1;
+    if (score > bestScore) {
+      best = voice;
+      bestScore = score;
+    }
+  }
+  return best ?? voices.find((voice) => voice.default) ?? null;
+}
+
 /* -- the half that touches the browser ------------------------------------- */
 
 import { readNativeBridge } from "@/lib/native-bridge";
@@ -301,6 +368,30 @@ function preferredLang(): string {
   }
 }
 
+/** The person's own region, so an American hears an American voice. */
+function preferredRegion(): string {
+  try {
+    return navigator.language || "en-US";
+  } catch {
+    return "en-US";
+  }
+}
+
+function online(): boolean {
+  try {
+    return navigator.onLine !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Voices that need the network and failed on this page. The failure was the
+ * voice's (no signal), not the device's, so the next line takes the best voice
+ * on the device instead of this one, rather than the page going silent.
+ */
+const failedVoices = new Set<string>();
+
 function voicesNow(): SpeechSynthesisVoice[] {
   try {
     return window.speechSynthesis.getVoices();
@@ -396,18 +487,26 @@ function utter(words: string, onEnd?: () => void): void {
        *
        * Measured in an embedded Chromium on 2026-09-13: the page declares
        * `lang="en"` and every installed voice is `en-US`, so an exact match
-       * finds NOTHING and only the two-letter fallback picks one. Setting
-       * `lang` from the page and the voice from the fallback would then hand
+       * finds NOTHING and only the two-letter match picks one. Setting
+       * `lang` from the page and the voice from that match would then hand
        * the engine a pair that disagree — so the chosen voice names the
        * language, and the page is only the starting point for choosing.
+       * Which voice of the language is `pickVoice`'s, above.
        */
       const wanted = preferredLang();
-      const voice =
-        voicesNow().find((v) => v.lang === wanted) ??
-        voicesNow().find((v) => v.lang?.startsWith(wanted.slice(0, 2))) ??
-        voicesNow().find((v) => v.default);
+      const voice = pickVoice(voicesNow(), {
+        lang: wanted,
+        region: preferredRegion(),
+        online: online(),
+        avoid: failedVoices,
+      });
       if (voice) utterance.voice = voice;
       utterance.lang = voice?.lang || wanted;
+      // A voice that needs the network failing says nothing about the device.
+      const failed = () => {
+        if (voice && !voice.localService) failedVoices.add(voice.voiceURI);
+        else provedSilent();
+      };
 
       let started = false;
       utterance.onstart = () => {
@@ -424,7 +523,7 @@ function utter(words: string, onEnd?: () => void): void {
         release();
         // Cancelled by the next line, or refused before the page's first tap:
         // over, but no proof that this device cannot speak.
-        if (isRealSpeechFailure(event.error)) provedSilent();
+        if (isRealSpeechFailure(event.error)) failed();
         ended();
       };
       speaking = utterance;
@@ -435,7 +534,7 @@ function utter(words: string, onEnd?: () => void): void {
       // notice that, since nothing is reported.
       window.setTimeout(() => {
         if (!started && !settled) {
-          provedSilent();
+          failed();
           ended();
         }
       }, NEVER_STARTED_MS);

@@ -29,8 +29,11 @@ import { forSpeech } from "@/lib/speech/say";
 import type { VoiceLine } from "@/lib/speech/queue-policy";
 import { UNIT_WORDS } from "./program";
 import {
+  finishExercise,
   loggedFor,
+  nextStep,
   plannedFor,
+  recordSet,
   SIDE_ORDER,
   type PlanItem,
   type SessionDoc,
@@ -96,26 +99,90 @@ export function setIntro(plan: SessionPlan, doc: SessionDoc, step: Extract<Step,
   return { text: forSpeech(parts.map(sentence).join(" ")), priority: "normal", key: "step" };
 }
 
+const LAST_ONE = "Last one.";
+const TEN_SECONDS_LEFT = "Ten seconds left.";
+
+/** A cue, as it is said during a set. */
+function spokenCue(cue: string): string {
+  return forSpeech(sentence(cue));
+}
+
 /**
  * As breath `n` of a set begins (1-based; `max` is the top of the range, where
  * the pacer stops): the cue at the middle breath, "Last one." at the last.
  */
 export function breathLine(n: number, max: number, cue: string | null): VoiceLine | null {
-  if (max > 1 && n === max) return { text: "Last one.", priority: "normal", key: "count" };
+  if (max > 1 && n === max) return { text: LAST_ONE, priority: "normal", key: "count" };
   if (cue && max >= 3 && n === Math.floor(max / 2) + 1) {
-    return { text: forSpeech(sentence(cue)), priority: "low", key: "cue" };
+    return { text: spokenCue(cue), priority: "low", key: "cue" };
   }
   return null;
 }
 
 /** After `elapsed` seconds of a hold of `max`: the cue halfway, and ten seconds' warning in a long one. */
 export function holdLine(elapsed: number, max: number, cue: string | null): VoiceLine | null {
-  if (max >= 30 && max - elapsed === 10) return { text: "Ten seconds left.", priority: "normal", key: "count" };
+  if (max >= 30 && max - elapsed === 10) return { text: TEN_SECONDS_LEFT, priority: "normal", key: "count" };
   if (cue && max >= 10 && elapsed === Math.floor(max / 2)) {
-    return { text: forSpeech(sentence(cue)), priority: "low", key: "cue" };
+    return { text: spokenCue(cue), priority: "low", key: "cue" };
   }
   return null;
 }
 
 /** As the check after an exercise appears. */
 export const EXERCISE_DONE: VoiceLine = { text: "Exercise done.", priority: "normal", key: "step" };
+
+/**
+ * EVERY LINE A SESSION CAN SAY FROM HERE (F2d, ADR 0115): what the coach's
+ * recordings are fetched for, before they are needed. The session is walked
+ * to its end the way it will most likely go, every set done at its target:
+ * each set's line as it appears, each timed set's cue, and the three lines
+ * any set may say. A line the walk did not foresee (a set added with "One
+ * more set") is recorded when it is first said, and said by the device if
+ * the recording is late.
+ *
+ * In the order they will be needed, the three that wait for a set's end last,
+ * because the phone fetches the first few on their own (`clips.ts`) so the
+ * first line is ready soonest.
+ *
+ * Pure, and built from the same functions the screen speaks with, so a word
+ * changed there is a word fetched here.
+ */
+export function sessionLines(plan: SessionPlan, doc: SessionDoc): string[] {
+  const lines: string[] = [];
+  const now = new Date(0);
+  let walk = doc;
+  // A phase is a handful of exercises of a few sets each; the bound is a
+  // guard against a plan that never finishes, not a limit anyone reaches.
+  for (let i = 0; i < 500; i++) {
+    const step = nextStep(plan, walk);
+    if (step.kind === "finish") break;
+    if (step.kind === "check") {
+      walk = finishExercise(plan, walk, {
+        itemIndex: step.itemIndex,
+        effort: null,
+        cuesFelt: [],
+        hurt: null,
+        hurtNote: "",
+        now,
+      });
+      continue;
+    }
+    const item = plan.items[step.itemIndex];
+    lines.push(setIntro(plan, walk, step).text);
+    // A breath or a hold says its cue during the set; reps and rolls said
+    // theirs with the set's line.
+    const cue = item.unit === "reps" || item.unit === "rolls" ? null : cueFor(item, loggedFor(walk, item)?.sets.length ?? 0);
+    if (cue) lines.push(spokenCue(cue));
+    const next = recordSet(plan, walk, {
+      itemIndex: step.itemIndex,
+      count: item.targetMin,
+      setId: `walk-${i}`,
+      exerciseId: `walk-${step.itemIndex}`,
+      now,
+    });
+    if (next === walk) break;
+    walk = next;
+  }
+  lines.push(LAST_ONE, TEN_SECONDS_LEFT, EXERCISE_DONE.text);
+  return [...new Set(lines.map((line) => line.trim()))];
+}

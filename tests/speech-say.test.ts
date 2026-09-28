@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   forSpeech,
+  pickVoice,
   SPEAK_EACH_UP_TO,
   spokenConfirmation,
+  type VoiceOption,
 } from "../src/lib/speech/say";
 
 /**
@@ -86,5 +88,86 @@ describe("what it says once something is recorded", () => {
     expect(spokenConfirmation(["Clocked in at 7:42 AM", "  "])).toBe(
       "Clocked in at 7:42 AM",
     );
+  });
+});
+
+/**
+ * WHICH OF THE DEVICE'S VOICES (F2d, ADR 0115). The founder heard Microsoft
+ * David, the first English voice on a Windows PC, and called it "very
+ * robotic". These are the lists real devices give, abridged.
+ */
+function voice(name: string, lang: string, extra: Partial<VoiceOption> = {}): VoiceOption {
+  return { name, lang, localService: true, default: false, voiceURI: name, ...extra };
+}
+
+const windowsChrome = [
+  voice("Microsoft David - English (United States)", "en-US", { default: true }),
+  voice("Microsoft Mark - English (United States)", "en-US"),
+  voice("Microsoft Zira - English (United States)", "en-US"),
+  voice("Google Deutsch", "de-DE", { localService: false }),
+  voice("Google US English", "en-US", { localService: false }),
+  voice("Google UK English Female", "en-GB", { localService: false }),
+];
+
+const edge = [
+  voice("Microsoft Ana Online (Natural) - English (United States)", "en-US", { localService: false }),
+  voice("Microsoft Aria Online (Natural) - English (United States)", "en-US", { localService: false }),
+  voice("Microsoft Guy Online (Natural) - English (United States)", "en-US", { localService: false }),
+  voice("Microsoft David - English (United States)", "en-US", { default: true }),
+  voice("Microsoft Libby Online (Natural) - English (United Kingdom)", "en-GB", { localService: false }),
+];
+
+const iphone = [
+  voice("Albert", "en-US"),
+  voice("Samantha", "en-US", { default: true }),
+  voice("Samantha (Enhanced)", "en-US"),
+  voice("Ava (Premium)", "en-US"),
+  voice("Daniel", "en-GB"),
+];
+
+const american = { lang: "en", region: "en-US", online: true };
+
+describe("the device's most natural voice", () => {
+  it("takes Chrome's Google voice over Microsoft David on a Windows PC", () => {
+    expect(pickVoice(windowsChrome, american)?.name).toBe("Google US English");
+  });
+
+  it("takes Edge's natural voices, never its child's", () => {
+    expect(pickVoice(edge, american)?.name).toBe("Microsoft Aria Online (Natural) - English (United States)");
+    expect(pickVoice(edge.slice(0, 1).concat(edge.slice(3)), american)?.name).toBe(
+      "Microsoft Libby Online (Natural) - English (United Kingdom)",
+    );
+  });
+
+  it("takes an iPhone's premium download, then its enhanced one, and never a novelty voice", () => {
+    expect(pickVoice(iphone, american)?.name).toBe("Ava (Premium)");
+    expect(pickVoice(iphone.slice(0, 3), american)?.name).toBe("Samantha (Enhanced)");
+    expect(pickVoice(iphone.slice(0, 2), american)?.name).toBe("Samantha");
+    expect(pickVoice([voice("Albert", "en-US"), voice("Fred", "en-US")], american)?.name).toBe("Albert");
+  });
+
+  it("uses only what is on the device when there is no signal", () => {
+    expect(pickVoice(windowsChrome, { ...american, online: false })?.name).toBe(
+      "Microsoft David - English (United States)",
+    );
+  });
+
+  it("passes over a network voice that already failed on this page", () => {
+    const picked = pickVoice(windowsChrome, { ...american, avoid: new Set(["Google US English"]) });
+    expect(picked?.name).not.toBe("Google US English");
+  });
+
+  it("prefers the person's own region", () => {
+    expect(pickVoice(windowsChrome, { lang: "en", region: "en-GB", online: true })?.name).toBe(
+      "Google UK English Female",
+    );
+    expect(pickVoice([voice("English", "en_US")], american)?.name).toBe("English");
+  });
+
+  it("never speaks another language; the device's default when it has none of this one", () => {
+    const foreign = [voice("Google Deutsch", "de-DE"), voice("Thomas", "fr-FR", { default: true })];
+    expect(pickVoice(foreign, american)?.name).toBe("Thomas");
+    expect(pickVoice([voice("Google Deutsch", "de-DE")], american)).toBeNull();
+    expect(pickVoice([], american)).toBeNull();
   });
 });

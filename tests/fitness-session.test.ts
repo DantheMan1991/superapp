@@ -124,7 +124,8 @@ describe("a session, walked from Start to Finish", () => {
     expect(nextStep(p, doc)).toEqual({ kind: "finish" });
 
     doc = finishSession(doc, { feelAfter: 7, now: at(13) });
-    expect(sessionSummary(doc)).toEqual({ exercises: 2, sets: 5, minutes: 13, feelBefore: 4, feelAfter: 7 });
+    // Three sets, not five rows: one set of a per-side exercise is both sides (F2c).
+    expect(sessionSummary(doc)).toEqual({ exercises: 2, sets: 3, minutes: 13, feelBefore: 4, feelAfter: 7 });
     // Every change raised the revision, so the server can tell old from new.
     expect(doc.revision).toBe(1 + 4 + 1 + 1 + 1 + 1);
     expect(sessionDocSchema.safeParse(doc).success).toBe(true);

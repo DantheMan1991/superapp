@@ -28,7 +28,15 @@
 import { forSpeech } from "@/lib/speech/say";
 import type { VoiceLine } from "@/lib/speech/queue-policy";
 import { UNIT_WORDS } from "./program";
-import { loggedFor, SIDE_ORDER, type PlanItem, type SessionDoc, type SessionPlan, type Step } from "./session";
+import {
+  loggedFor,
+  plannedFor,
+  SIDE_ORDER,
+  type PlanItem,
+  type SessionDoc,
+  type SessionPlan,
+  type Step,
+} from "./session";
 
 /** The check shown (and said) for a set: one of the exercise's cues, changing each set. */
 export function cueFor(item: PlanItem, setsDone: number): string | null {
@@ -69,10 +77,12 @@ export function setIntro(plan: SessionPlan, doc: SessionDoc, step: Extract<Step,
   const item = plan.items[step.itemIndex];
   const logged = loggedFor(doc, item);
   const done = logged?.sets.length ?? 0;
-  const planned = logged?.plannedSets ?? item.setsMin;
+  const planned = logged?.plannedSets ?? plannedFor(doc, item).sets;
   const parts: string[] = [];
   if (done === 0) {
-    parts.push(item.name, spokenPrescription(item));
+    const aimed = plannedFor(doc, item).sets;
+    // A split day's share (F2c) says this session's sets: "1 set of 8 breaths".
+    parts.push(item.name, spokenPrescription(aimed === item.setsMin ? item : { ...item, setsMin: aimed, setsMax: null }));
     if (step.side) parts.push(`${sideName(step.side)} first`);
   } else if (step.side && step.side !== SIDE_ORDER[0]) {
     parts.push(`Now the ${step.side} side`);

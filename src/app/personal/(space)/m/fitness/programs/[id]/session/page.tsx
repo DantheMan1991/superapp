@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { localDayIn, shiftDay } from "@/modules/fitness/core/day";
 import { loadProgram, sessionPlan } from "@/modules/fitness/program-ops";
+import { recentSessions } from "@/modules/fitness/session-ops";
 import { WorkoutScreen } from "@/modules/fitness/components/workout/workout-screen";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +16,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * `?phase=2` is the phase; without it, the first. The screen is a client
  * component over the whole page: everything it does is kept on the phone and
  * sent from there (components/workout/session-store.ts).
+ *
+ * It is given the program's sessions from the day before today to the day
+ * after (F2c): a session later in the day picks up what the morning left, and
+ * the phone adds the day up from these and its own (core/day.ts).
  */
 export default async function WorkoutPage({
   params,
@@ -26,9 +32,16 @@ export default async function WorkoutPage({
   if (!UUID.test(id)) notFound();
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
-  const program = await withTenant(ctx.tenant.id, (tx) => loadProgram(tx, ctx.tenant.id, id), {
-    role: ctx.role,
-  });
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  const [program, recent] = await withTenant(
+    ctx.tenant.id,
+    (tx) =>
+      Promise.all([
+        loadProgram(tx, ctx.tenant.id, id),
+        recentSessions(tx, ctx.tenant.id, id, shiftDay(today, -1), shiftDay(today, 1)),
+      ]),
+    { role: ctx.role },
+  );
   if (!program) notFound();
   const raw = (await searchParams).phase;
   const asked = Number.parseInt(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""), 10);
@@ -40,6 +53,9 @@ export default async function WorkoutPage({
     <WorkoutScreen
       plan={sessionPlan(program, phaseIndex)}
       programHref={`/personal/m/fitness/programs/${program.id}?phase=${phaseIndex + 1}`}
+      recent={recent}
+      today={today}
+      timeZone={ctx.tenant.timezone}
     />
   );
 }

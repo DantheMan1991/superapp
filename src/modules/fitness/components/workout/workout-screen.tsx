@@ -26,6 +26,18 @@ import { canSpeak, noVoiceOnTheServer, subscribeVoice } from "@/lib/speech/say";
 import { silence } from "@/lib/speech/voice-queue";
 import { cn } from "@/lib/utils";
 import { breathLine, cueFor, EXERCISE_DONE, holdLine, setIntro } from "../../core/coach";
+import {
+  aimFor,
+  aimWords,
+  canHalve,
+  dayOf,
+  hourIn,
+  partOfDay,
+  toDayItem,
+  type DayProgress,
+  type DaySession,
+  type SplitChoice,
+} from "../../core/day";
 import { countOf, prescription } from "../../core/program";
 import {
   beginSession,
@@ -36,6 +48,7 @@ import {
   loggedFor,
   nextStep,
   oneMoreSet,
+  plannedFor,
   recordSet,
   sessionSummary,
   sideWords,
@@ -85,7 +98,22 @@ import { useWakeLock } from "./use-wake-lock";
  * one." during it, "Exercise done." after. Everything it says goes through the
  * one voice (`coachSay`, ADR 0114), which a posture tool shares.
  */
-export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; programHref: string }) {
+export function WorkoutScreen({
+  plan,
+  programHref,
+  recent,
+  today,
+  timeZone,
+}: {
+  plan: SessionPlan;
+  programHref: string;
+  /** The program's sessions of the days around today, from the server (core/day.ts). */
+  recent: DaySession[];
+  /** The personal space's today, `YYYY-MM-DD`: the day a split day is added up on. */
+  today: string;
+  /** The space's timezone, so "Morning" reads the same on the server's render and the phone's. */
+  timeZone: string;
+}) {
   const router = useRouter();
   const sessions = useStoredSessions();
   const sync = useSessionSync(sessions);
@@ -96,6 +124,12 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
   useWakeLock(doc !== null && !leaving);
   // Leaving the screen, however it happens, leaves nothing talking.
   useEffect(() => () => silence(), []);
+
+  // SPLIT DAYS (F2c): what the day's other sessions did, and so what this one
+  // sets out to do. Pure over the server's sessions and the phone's own.
+  const dayItems = plan.items.map(toDayItem);
+  const phoneDocs = sessions.filter((s) => s.doc.programId === plan.programId).map((s) => s.doc);
+  const earlier = dayOf(dayItems, today, recent, phoneDocs, doc?.id ?? null);
 
   /** The session as it is at the moment of a tap, never as it was at render. */
   function current(): SessionDoc | null {
@@ -110,7 +144,7 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
     if (changed !== now) putSession(changed);
   }
 
-  function start(feelBefore: number | null) {
+  function start(feelBefore: number | null, choice: SplitChoice) {
     unlockSound();
     const other = openSessionFor(readSessions(), plan.programId);
     if (other && other.phaseId !== plan.phaseId) {
@@ -118,7 +152,9 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
       putSession(finishSession(other, { feelAfter: other.feelAfter, now: new Date(lastActivity(other)) }));
     }
     if (current()) return;
-    putSession(beginSession(plan, { id: newId(), now: new Date(), feelBefore }));
+    putSession(
+      beginSession(plan, { id: newId(), now: new Date(), feelBefore, aim: aimFor(earlier, choice) }),
+    );
   }
 
   async function finish(feelAfter: number | null) {
@@ -145,7 +181,15 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
       </p>
     );
   } else if (!doc) {
-    body = <BeforeView plan={plan} elsewhere={elsewhere} onStart={start} />;
+    body = (
+      <BeforeView
+        plan={plan}
+        day={earlier}
+        hourOf={(iso) => hourIn(timeZone, iso)}
+        elsewhere={elsewhere}
+        onStart={start}
+      />
+    );
   } else {
     const step = nextStep(plan, doc);
     if (step.kind !== "finish") where = `Exercise ${step.itemIndex + 1} of ${plan.items.length}`;
@@ -178,7 +222,8 @@ export function WorkoutScreen({ plan, programHref }: { plan: SessionPlan; progra
           }
         />
       ) : (
-        <FinishView doc={doc} onFinish={finish} />
+        // The session's own day, with it in: what the day comes to after it.
+        <FinishView doc={doc} day={dayOf(dayItems, doc.localDay, recent, phoneDocs)} onFinish={finish} />
       );
   }
 
@@ -268,26 +313,60 @@ function TopBar({ where, programHref, sync }: { where: string; programHref: stri
   );
 }
 
+/**
+ * THE START: the feel check, and on a split day (F2c) what the day's other
+ * sessions did and what this one sets out to do. "Half now" does the first
+ * share of every exercise's sets; a session later that day lists only what
+ * is left; a day already complete offers another session, which counts too.
+ */
 function BeforeView({
   plan,
+  day,
+  hourOf,
   elsewhere,
   onStart,
 }: {
   plan: SessionPlan;
+  /** The day so far, without this session (core/day.ts). */
+  day: DayProgress;
+  /** The hour a session started, on the space's clock. */
+  hourOf: (iso: string) => number;
   elsewhere: SessionDoc | null;
-  onStart: (feelBefore: number | null) => void;
+  onStart: (feelBefore: number | null, choice: SplitChoice) => void;
 }) {
   const [feel, setFeel] = useState<number | null>(null);
+  const [half, setHalf] = useState(false);
   const otherPhase = elsewhere ? plan.phases.findIndex((phase) => phase.id === elsewhere.phaseId) : -1;
+  const started = day.parts.length > 0;
+  const halving = canHalve(day);
+  const choice: SplitChoice = day.complete ? "again" : half && halving ? "half" : "all";
+  const aims = aimFor(day, choice);
   return (
     <div className="flex flex-1 flex-col gap-5">
       <div>
         <p className="text-sm text-muted-foreground">{plan.programName}</p>
-        <h1 className="font-heading text-2xl font-medium">Today&apos;s session</h1>
+        <h1 className="font-heading text-2xl font-medium">
+          {day.complete ? "Today's sets are done" : started ? "The rest of today" : "Today's session"}
+        </h1>
         <p className="text-muted-foreground">
           {plan.phaseName} · {countOf(plan.items.length, "exercise", "exercises")}
         </p>
       </div>
+      {started && (
+        <ul className="space-y-1 rounded-xl bg-card px-3 py-2">
+          {day.parts.map((part) => (
+            <li key={part.id} className="flex items-center gap-2">
+              <Check className="size-4 shrink-0 text-module-accent" aria-hidden />
+              {`${partOfDay(hourOf(part.startedAt))} · ${countOf(part.sets, "set", "sets")} · ${countOf(part.minutes, "minute", "minutes")}${part.finished ? "" : " · not finished"}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {day.complete && (
+        <p className="text-sm text-muted-foreground">
+          Every exercise has had its sets today. Another session is extra, and it is logged too.
+        </p>
+      )}
       {elsewhere && (
         <div className="rounded-xl border border-border bg-card p-3 text-sm">
           A session for {elsewhere.phaseName || "another phase"} is still open.{" "}
@@ -300,20 +379,53 @@ function BeforeView({
         </div>
       )}
       <FeelScale label="How does your body feel right now?" value={feel} onChange={setFeel} />
+      {halving && (
+        <fieldset className="space-y-2">
+          <legend className="text-base">How much now?</legend>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant={half ? "outline" : "default"}
+              aria-pressed={!half}
+              className="h-auto min-h-11 py-2 whitespace-normal"
+              onClick={() => setHalf(false)}
+            >
+              {started ? "All that's left" : "All of it"}
+            </Button>
+            <Button
+              type="button"
+              variant={half ? "default" : "outline"}
+              aria-pressed={half}
+              className="h-auto min-h-11 py-2 whitespace-normal"
+              onClick={() => setHalf(true)}
+            >
+              Half now, the rest later today
+            </Button>
+          </div>
+        </fieldset>
+      )}
       <ol className="space-y-1 text-sm text-muted-foreground">
-        {plan.items.map((item, i) => (
-          <li key={item.itemId} className="flex justify-between gap-3">
-            <span>
-              {i + 1}. {item.name}
-              {item.optional ? " (optional)" : ""}
-            </span>
-            <span className="shrink-0">{prescription(item)}</span>
-          </li>
-        ))}
+        {plan.items.map((item, i) => {
+          const doneToday = aims[i].sets === 0;
+          return (
+            <li key={item.itemId} className="flex justify-between gap-3">
+              <span className="flex items-start gap-1.5">
+                {doneToday && <Check className="mt-0.5 size-3.5 shrink-0 text-module-accent" aria-hidden />}
+                <span>
+                  {`${i + 1}. ${item.name}`}
+                  {item.optional ? " (optional)" : ""}
+                </span>
+              </span>
+              <span className={cn("shrink-0", !doneToday && "text-foreground")}>
+                {aimWords(item, day.items[i], aims[i], choice)}
+              </span>
+            </li>
+          );
+        })}
       </ol>
       <div className="flex-1" />
-      <Button size="lg" className="h-14 w-full text-lg" onClick={() => onStart(feel)}>
-        <Play aria-hidden /> Start
+      <Button size="lg" className="h-14 w-full text-lg" onClick={() => onStart(feel, choice)}>
+        <Play aria-hidden /> {day.complete ? "Start another session" : started ? "Start the rest" : "Start"}
       </Button>
     </div>
   );
@@ -334,7 +446,7 @@ function SetView({
 }) {
   const item = plan.items[step.itemIndex];
   const logged = loggedFor(doc, item);
-  const planned = logged?.plannedSets ?? item.setsMin;
+  const planned = logged?.plannedSets ?? plannedFor(doc, item).sets;
   const done = logged?.sets.length ?? 0;
   const side = sideWords(step.side);
   const cue = cueFor(item, done);
@@ -560,12 +672,30 @@ function CheckView({
   );
 }
 
-function FinishView({ doc, onFinish }: { doc: SessionDoc; onFinish: (feelAfter: number | null) => void }) {
+function FinishView({
+  doc,
+  day,
+  onFinish,
+}: {
+  doc: SessionDoc;
+  /** The day with this session in it (F2c): whether it is complete, or what is left. */
+  day: DayProgress;
+  onFinish: (feelAfter: number | null) => void;
+}) {
   const [feel, setFeel] = useState<number | null>(null);
   const summary = sessionSummary(doc);
   return (
     <div className="flex flex-1 flex-col gap-5">
       <h1 className="font-heading text-2xl font-medium">Session done</h1>
+      {day.complete ? (
+        <p className="flex items-center gap-2 rounded-xl bg-card px-3 py-2">
+          <Check className="size-4 shrink-0 text-module-accent" aria-hidden /> That is every set today asks for.
+        </p>
+      ) : day.done > 0 && day.left > 0 ? (
+        <p className="rounded-xl bg-card px-3 py-2">
+          {`Still to do today: ${countOf(day.left, "set", "sets")}. Start again later today and it picks up here.`}
+        </p>
+      ) : null}
       <div className="grid grid-cols-3 gap-2 text-center">
         {[
           { n: summary.exercises, label: summary.exercises === 1 ? "exercise" : "exercises" },

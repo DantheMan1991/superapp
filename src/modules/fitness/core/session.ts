@@ -71,6 +71,17 @@ export const sessionExerciseSchema = z.object({
   sets: z.array(sessionSetSchema).max(80),
 });
 
+/**
+ * What a session sets out to do for one item (F2c, core/day.ts): `sets` now
+ * (0 when the day's earlier sessions already did them), and the most "one
+ * more set" may reach without taking the day past the program's maximum.
+ */
+export const sessionAimSchema = z.object({
+  itemId: uuid,
+  sets: z.number().int().min(0).max(20),
+  max: z.number().int().min(0).max(20),
+});
+
 export const sessionDocSchema = z.object({
   id: uuid,
   programId: uuid,
@@ -86,11 +97,18 @@ export const sessionDocSchema = z.object({
   /** Counts the phone's changes; the server keeps the highest it has seen. */
   revision: z.number().int().min(1).max(1_000_000),
   exercises: z.array(sessionExerciseSchema).max(60),
+  /**
+   * The session's own plan, one per item, when it was started as part of a
+   * split day (F2c): the phone's alone, like `plannedSets`. A session without
+   * one (every session before F2c) aims at each item's minimum.
+   */
+  aim: z.array(sessionAimSchema).max(60).optional(),
 });
 
 export type SessionSet = z.infer<typeof sessionSetSchema>;
 export type SessionExercise = z.infer<typeof sessionExerciseSchema>;
 export type SessionDoc = z.infer<typeof sessionDocSchema>;
+export type SessionAim = z.infer<typeof sessionAimSchema>;
 
 /* -- the plan: what the phase asks for today -------------------------------- */
 
@@ -153,16 +171,47 @@ export function loggedFor(doc: SessionDoc, item: PlanItem): SessionExercise | un
 }
 
 /**
+ * What the session aims at for an item: its own aim when it has one (a split
+ * day, F2c), else the program's minimum, with "one more set" up to its
+ * maximum.
+ */
+export function plannedFor(doc: SessionDoc, item: PlanItem): { sets: number; max: number } {
+  const aim = doc.aim?.find((a) => a.itemId === item.itemId);
+  if (aim) return { sets: aim.sets, max: Math.max(aim.sets, aim.max) };
+  return { sets: item.setsMin, max: item.setsMax ?? item.setsMin };
+}
+
+/**
+ * A SET IS A FULL SET: one of "1 × 15 rolls per side" is both sides, so a
+ * per-side exercise's sets count once each side has one. What a session's
+ * summary says and what a day adds up (core/day.ts) both count this way.
+ */
+export function fullSets(perSide: boolean, sides: readonly (Side | null)[]): number {
+  if (!perSide) return sides.length;
+  let right = 0;
+  let left = 0;
+  for (const side of sides) {
+    if (side === "right") right += 1;
+    else if (side === "left") left += 1;
+  }
+  return Math.min(right, left);
+}
+
+/**
  * THE NEXT THING TO DO. Down the phase in order: an item not started yet is
- * its first set; one started and short of its planned sets is its next set
- * (right side, then left); one with every set done is the three taps after
- * it; one finished or skipped is behind us. Past the last, the finish.
+ * its first set, unless the session aims at none of it (the day's earlier
+ * sessions did them); one started and short of its planned sets is its next
+ * set (right side, then left); one with every set done is the three taps
+ * after it; one finished or skipped is behind us. Past the last, the finish.
  */
 export function nextStep(plan: SessionPlan, doc: SessionDoc): Step {
   for (let i = 0; i < plan.items.length; i++) {
     const item = plan.items[i];
     const logged = loggedFor(doc, item);
-    if (!logged) return { kind: "set", itemIndex: i, number: 1, side: sidesFor(item.perSide)[0] };
+    if (!logged) {
+      if (plannedFor(doc, item).sets === 0) continue;
+      return { kind: "set", itemIndex: i, number: 1, side: sidesFor(item.perSide)[0] };
+    }
     if (logged.skipped || logged.finishedAt) continue;
     const sides = sidesFor(logged.perSide);
     const done = logged.sets.length;
@@ -187,10 +236,13 @@ export function localDayOf(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** Start: the document is made when the person taps Start on the feel check. */
+/**
+ * Start: the document is made when the person taps Start on the feel check.
+ * `aim` is the session's own plan on a split day (core/day.ts `aimFor`).
+ */
 export function beginSession(
   plan: SessionPlan,
-  input: { id: string; now: Date; feelBefore: number | null },
+  input: { id: string; now: Date; feelBefore: number | null; aim?: SessionAim[] },
 ): SessionDoc {
   return {
     id: input.id,
@@ -205,6 +257,7 @@ export function beginSession(
     note: "",
     revision: 1,
     exercises: [],
+    ...(input.aim ? { aim: input.aim } : {}),
   };
 }
 
@@ -212,7 +265,7 @@ function bump(doc: SessionDoc, exercises: SessionExercise[]): SessionDoc {
   return { ...doc, revision: doc.revision + 1, exercises };
 }
 
-function startExercise(plan: SessionPlan, itemIndex: number, id: string): SessionExercise {
+function startExercise(plan: SessionPlan, doc: SessionDoc, itemIndex: number, id: string): SessionExercise {
   const item = plan.items[itemIndex];
   return {
     id,
@@ -222,7 +275,8 @@ function startExercise(plan: SessionPlan, itemIndex: number, id: string): Sessio
     name: item.name,
     unit: item.unit,
     perSide: item.perSide,
-    plannedSets: item.setsMin,
+    // At least one: an item is only started for a set it has, or to skip it.
+    plannedSets: Math.max(1, plannedFor(doc, item).sets),
     effort: null,
     cuesFelt: [],
     hurt: null,
@@ -242,7 +296,7 @@ function withExercise(
 ): { exercises: SessionExercise[]; exercise: SessionExercise } {
   const existing = loggedFor(doc, plan.items[itemIndex]);
   if (existing) return { exercises: doc.exercises, exercise: existing };
-  const exercise = startExercise(plan, itemIndex, newId);
+  const exercise = startExercise(plan, doc, itemIndex, newId);
   return { exercises: [...doc.exercises, exercise], exercise };
 }
 
@@ -275,12 +329,16 @@ export function recordSet(
   return bump(doc, replace(exercises, { ...exercise, sets: [...exercise.sets, set] }));
 }
 
-/** One more set than the minimum, while the program's maximum allows. */
+/**
+ * One more set than planned, while the program's maximum allows: for the day,
+ * on a split day, so the morning's sets and the evening's together stay
+ * within it.
+ */
 export function oneMoreSet(plan: SessionPlan, doc: SessionDoc, itemIndex: number): SessionDoc {
   const item = plan.items[itemIndex];
   const logged = loggedFor(doc, item);
   if (!logged || logged.finishedAt || logged.skipped) return doc;
-  if (logged.plannedSets >= (item.setsMax ?? item.setsMin)) return doc;
+  if (logged.plannedSets >= plannedFor(doc, item).max) return doc;
   return bump(doc, replace(doc.exercises, { ...logged, plannedSets: logged.plannedSets + 1 }));
 }
 
@@ -288,7 +346,7 @@ export function oneMoreSet(plan: SessionPlan, doc: SessionDoc, itemIndex: number
 export function canAddSet(plan: SessionPlan, doc: SessionDoc, itemIndex: number): boolean {
   const item = plan.items[itemIndex];
   const logged = loggedFor(doc, item);
-  return !!logged && logged.plannedSets < (item.setsMax ?? item.setsMin);
+  return !!logged && logged.plannedSets < plannedFor(doc, item).max;
 }
 
 /** The three taps after an exercise, which finish it. */
@@ -352,6 +410,7 @@ export function finishSession(
 export interface SessionSummary {
   /** Exercises with at least one set done. */
   exercises: number;
+  /** Full sets (`fullSets`): one set of a per-side exercise is both sides. */
   sets: number;
   /** Start to finish; while it is still going, start to the last set. */
   minutes: number;
@@ -373,7 +432,7 @@ export function sessionSummary(doc: SessionDoc): SessionSummary {
   const end = new Date(lastActivity(doc));
   return {
     exercises: done.length,
-    sets: done.reduce((n, exercise) => n + exercise.sets.length, 0),
+    sets: done.reduce((n, exercise) => n + fullSets(exercise.perSide, exercise.sets.map((set) => set.side)), 0),
     minutes: Math.max(0, Math.round((end.getTime() - new Date(doc.startedAt).getTime()) / 60_000)),
     feelBefore: doc.feelBefore,
     feelAfter: doc.feelAfter,

@@ -7,26 +7,46 @@ import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { describeAgo } from "@/lib/last-seen";
+import { localDayIn, shiftDay } from "./core/day";
 import { countOf } from "./core/program";
 import { listOpenImports } from "./import-ops";
-import { listPrograms } from "./program-ops";
+import { listPrograms, loadProgram } from "./program-ops";
+import { latestFollowed, recentSessions } from "./session-ops";
 import { DiscardImportButton } from "./components/discard-import-button";
+import { TodayCard } from "./components/today-card";
 
 /**
  * WORKOUTS — the tool's front page (docs/help/fitness/overview.md).
  *
- * The programs the person has, and any draft still waiting for them: one
- * being drafted, one ready to review, one that failed. A personal tool: this
+ * Today's workout on the program last followed (F2c: the day so far, what is
+ * left, one tap to do it), the programs the person has, and any draft still
+ * waiting for them: one being drafted, one ready to review, one that failed.
+ * A personal tool: this
  * only ever renders inside a personal space, behind `requirePersonalSpace`
  * and a module gate that refuses it anywhere else (ADR 0111).
  */
 export async function FitnessModule({ ctx }: { ctx: TenantContext }) {
-  const [programs, imports] = await withTenant(
+  const now = new Date();
+  const today = localDayIn(ctx.tenant.timezone, now);
+  const [programs, imports, followed] = await withTenant(
     ctx.tenant.id,
-    (tx) => Promise.all([listPrograms(tx, ctx.tenant.id), listOpenImports(tx, ctx.tenant.id)]),
+    async (tx) => {
+      const [programs, imports, latest] = await Promise.all([
+        listPrograms(tx, ctx.tenant.id),
+        listOpenImports(tx, ctx.tenant.id),
+        latestFollowed(tx, ctx.tenant.id),
+      ]);
+      // Today is for the program of the last workout, on that workout's phase:
+      // one still in the list (a put-away program has no today).
+      const listed = latest && programs.some((program) => program.id === latest.programId);
+      const program = listed ? await loadProgram(tx, ctx.tenant.id, latest.programId) : null;
+      if (!program || program.phases.length === 0) return [programs, imports, null] as const;
+      const at = Math.max(0, program.phases.findIndex((phase) => phase.id === latest?.phaseId));
+      const recent = await recentSessions(tx, ctx.tenant.id, program.id, shiftDay(today, -1), shiftDay(today, 1));
+      return [programs, imports, { program, phaseIndex: at, recent }] as const;
+    },
     { role: ctx.role },
   );
-  const now = new Date();
 
   const actions = (
     <div className="flex flex-wrap gap-2">
@@ -51,6 +71,26 @@ export async function FitnessModule({ ctx }: { ctx: TenantContext }) {
         icon={<Dumbbell />}
         actions={actions}
       />
+
+      {followed && followed.program.phases[followed.phaseIndex].items.length > 0 && (
+        <TodayCard
+          programId={followed.program.id}
+          programName={followed.program.name}
+          phaseIds={followed.program.phases.map((phase) => phase.id)}
+          phaseNumber={followed.phaseIndex + 1}
+          phaseName={followed.program.phases[followed.phaseIndex].name}
+          items={followed.program.phases[followed.phaseIndex].items.map((item) => ({
+            itemId: item.id,
+            name: item.exercise.name,
+            optional: item.optional,
+            setsMin: item.setsMin,
+            setsMax: item.setsMax,
+          }))}
+          recent={followed.recent}
+          today={today}
+          timeZone={ctx.tenant.timezone}
+        />
+      )}
 
       {imports.length > 0 && (
         <section className="space-y-2">

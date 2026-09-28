@@ -137,6 +137,17 @@ describe("each set, as it appears", () => {
     expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Set 3 of 3. Right side.");
   });
 
+  it("says this session's share on a split day, not the whole day's sets (F2c)", () => {
+    const p = plan();
+    const aim = p.items.map((item) => ({ itemId: item.itemId, sets: 1, max: item.setsMax ?? item.setsMin }));
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null, aim });
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe(
+      "Side-lying pullback. 1 set of 5 to 8 breaths, each side. Right side first.",
+    );
+    doc = done(p, doc, 0, 8);
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Now the left side.");
+  });
+
   it("gives a set counted in reps or rolls its cue with it, having no timer to say it later", () => {
     const p = plan();
     let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });

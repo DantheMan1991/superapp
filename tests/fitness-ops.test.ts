@@ -29,8 +29,21 @@ import {
 import { DraftModelError } from "../src/modules/fitness/draft-model";
 import { ensurePersonalTools } from "../src/lib/personal-space";
 import { randomUUID } from "node:crypto";
-import { beginSession, recordSet, type SessionDoc } from "../src/modules/fitness/core/session";
-import { lastSession, saveSession, sessionCount } from "../src/modules/fitness/session-ops";
+import {
+  beginSession,
+  finishExercise,
+  finishSession,
+  recordSet,
+  type SessionDoc,
+} from "../src/modules/fitness/core/session";
+import { dayProgress, shiftDay, toDayItem } from "../src/modules/fitness/core/day";
+import {
+  lastSession,
+  latestFollowed,
+  recentSessions,
+  saveSession,
+  sessionCount,
+} from "../src/modules/fitness/session-ops";
 
 /**
  * Workouts against a real database (docs/modules/fitness.md, F1): a program
@@ -540,6 +553,82 @@ d("workouts: programs and imports", () => {
         await inTenant((tx) => tx.select().from(schema.fitnessSessions).where(eq(schema.fitnessSessions.id, doc.id))),
       ).toEqual([]);
       expect(await setsOf(doc.id)).toEqual([]);
+    });
+  });
+
+  describe("split days (F2c)", () => {
+    it("gives a program's sessions on the days asked for, as a day adds them up: full sets per item", async () => {
+      const base = aProgram();
+      const saved = await inTenant((tx) =>
+        saveProgram(
+          tx,
+          tenant.id,
+          {
+            ...base,
+            name: "Split day",
+            phases: [
+              {
+                ...base.phases[0],
+                items: [{ ...item("Side reach", "breaths", 2, 5), perSide: true }, item("Hip lift", "breaths", 2, 8)],
+              },
+            ],
+          },
+          { programId: null, source: "own" },
+        ),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      const p = sessionPlan(program, 0);
+      const [reach, lift] = p.items.map((i) => i.itemId);
+      // Fixed days in the past, so the test never straddles a midnight.
+      const at = (day: number, hour: number) => new Date(2026, 8, day, hour, 0, 0);
+      const set = (doc: SessionDoc, itemIndex: number, when: Date) =>
+        recordSet(p, doc, { itemIndex, count: 5, setId: randomUUID(), exerciseId: randomUUID(), now: when });
+
+      // A morning half: one set of each, the per-side one on both sides.
+      const half = p.items.map((i) => ({ itemId: i.itemId, sets: 1, max: 2 }));
+      let morning = beginSession(p, { id: randomUUID(), now: at(20, 8), feelBefore: null, aim: half });
+      morning = set(set(morning, 0, at(20, 8)), 0, at(20, 8));
+      morning = finishExercise(p, morning, {
+        itemIndex: 0,
+        effort: null,
+        cuesFelt: [],
+        hurt: null,
+        hurtNote: "",
+        now: at(20, 8),
+      });
+      morning = set(morning, 1, at(20, 8));
+      morning = finishSession(morning, { feelAfter: null, now: at(20, 9) });
+      // An evening left after one side of the per-side exercise.
+      let evening = beginSession(p, { id: randomUUID(), now: at(20, 19), feelBefore: null });
+      evening = set(evening, 0, at(20, 19));
+      // Another day: never part of the 20th.
+      const earlier = set(beginSession(p, { id: randomUUID(), now: at(10, 8), feelBefore: null }), 0, at(10, 8));
+      for (const doc of [morning, evening, earlier]) await inTenant((tx) => saveSession(tx, tenant.id, doc));
+
+      const day = morning.localDay;
+      const recent = await inTenant((tx) =>
+        recentSessions(tx, tenant.id, program.id, shiftDay(day, -1), shiftDay(day, 1)),
+      );
+      expect(recent.map((s) => s.id)).toEqual([morning.id, evening.id]);
+      expect(Object.fromEntries(recent[0].items.map((i) => [i.itemId, i.sets]))).toEqual({ [reach]: 1, [lift]: 1 });
+      expect(recent[0]).toMatchObject({ localDay: day, finished: true, endedAt: at(20, 9).toISOString() });
+      // One side is not a set yet; the session is still open, and ran to its last set.
+      expect(recent[1].items).toEqual([{ itemId: reach, sets: 0 }]);
+      expect(recent[1]).toMatchObject({ finished: false, endedAt: at(20, 19).toISOString() });
+
+      const progress = dayProgress(p.items.map(toDayItem), recent);
+      expect(progress).toMatchObject({ done: 2, left: 2, complete: false });
+      // "Last workout" counts full sets too: the evening's one side is none.
+      const last = await inTenant((tx) => lastSession(tx, tenant.id, program.id));
+      expect(last).toMatchObject({ id: evening.id, sets: 0 });
+
+      // The Workouts home's Today card follows the latest session.
+      const now = beginSession(p, { id: randomUUID(), now: new Date(), feelBefore: null });
+      await inTenant((tx) => saveSession(tx, tenant.id, now));
+      expect(await inTenant((tx) => latestFollowed(tx, tenant.id))).toEqual({
+        programId: program.id,
+        phaseId: p.phaseId,
+      });
     });
   });
 });

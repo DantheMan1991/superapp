@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { localDayIn, shiftDay } from "@/modules/fitness/core/day";
 import { loadProgram } from "@/modules/fitness/program-ops";
-import { lastSession } from "@/modules/fitness/session-ops";
+import { lastSession, recentSessions } from "@/modules/fitness/session-ops";
 import { ProgramView } from "@/modules/fitness/components/program-view";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +27,17 @@ export default async function ProgramPage({
   if (!UUID.test(id)) notFound();
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
-  const [program, last] = await withTenant(
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  const [program, last, recent] = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const loaded = await loadProgram(tx, ctx.tenant.id, id);
-      return [loaded, loaded ? await lastSession(tx, ctx.tenant.id, id) : null] as const;
+      if (!loaded) return [null, null, []] as const;
+      return [
+        loaded,
+        await lastSession(tx, ctx.tenant.id, id),
+        await recentSessions(tx, ctx.tenant.id, id, shiftDay(today, -1), shiftDay(today, 1)),
+      ] as const;
     },
     { role: ctx.role },
   );
@@ -49,21 +56,9 @@ export default async function ProgramPage({
       program={program}
       phaseIndex={phaseIndex}
       lastSession={last}
-      today={localDayIn(ctx.tenant.timezone)}
+      today={today}
+      recent={recent}
+      timeZone={ctx.tenant.timezone}
     />
   );
-}
-
-/** Today in the personal space's own clock, `YYYY-MM-DD`: "Last workout: today". */
-function localDayIn(timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
 }

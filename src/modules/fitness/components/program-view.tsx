@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { DaySession } from "../core/day";
 import { breathPace, countOf, prescription } from "../core/program";
 import type { LoadedItem, LoadedProgram } from "../program-ops";
 import type { LastSession } from "../session-ops";
@@ -26,12 +27,18 @@ export function ProgramView({
   phaseIndex,
   lastSession,
   today,
+  recent,
+  timeZone,
 }: {
   program: LoadedProgram;
   phaseIndex: number;
   lastSession: LastSession | null;
   /** The personal space's own today, `YYYY-MM-DD`. */
   today: string;
+  /** The program's sessions around today: the Start button adds up a split day from them (F2c). */
+  recent: DaySession[];
+  /** The personal space's timezone. */
+  timeZone: string;
 }) {
   const base = `/personal/m/fitness/programs/${program.id}`;
   const phase = program.phases[phaseIndex] ?? program.phases[0];
@@ -113,8 +120,19 @@ export function ProgramView({
                 programId={program.id}
                 phaseIds={program.phases.map((p) => p.id)}
                 phaseNumber={phaseIndex + 1}
+                items={phase.items.map((item) => ({
+                  itemId: item.id,
+                  name: item.exercise.name,
+                  optional: item.optional,
+                  setsMin: item.setsMin,
+                  setsMax: item.setsMax,
+                }))}
+                recent={recent}
+                today={today}
+                timeZone={timeZone}
               />
-              {lastSession && (
+              {/* A workout today on this phase is the Start button's own line: "Today: Morning · 4 sets". */}
+              {lastSession && !(lastSession.localDay === today && lastSession.phaseId === phase.id) && (
                 <p className="text-sm text-muted-foreground">
                   Last workout: {dayWords(lastSession.localDay, today)} · {lastSession.phaseName || "a phase since removed"}{" "}
                   · {countOf(lastSession.sets, "set", "sets")}

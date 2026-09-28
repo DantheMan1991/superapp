@@ -19,11 +19,20 @@ At the top, on every step:
 
 ### Before you start
 
-- **The program's name** and `Today's session`, with the phase and how many exercises it has, for example `Phase 1: Weeks 1-2 · 4 exercises`.
-- **`How does your body feel right now?`**, with the numbers 0 to 10. 0 is stiff and sore, 10 is loose and easy. Click a number to choose it, and click it again to clear it. It is optional.
-- **The exercises, in order**, each with what to do, for example `2 × 8 breaths per side`.
-- **{button:Start|primary|play}.** Starts the session on the first exercise.
+- **The program's name** and the title, with the phase and how many exercises it has, for example `Phase 1: Weeks 1-2 · 4 exercises`. The title is `Today's session`, or `The rest of today` after a session earlier today on this phase, or `Today's sets are done` once every exercise has had its sets today.
+- **The day so far**, after a session earlier today: one line for each, with {icon:check}, when you started it, and what it did, for example `Morning · 4 sets · 9 minutes`. A session you left open adds `not finished`. Once every exercise has had its sets, a line says `Every exercise has had its sets today. Another session is extra, and it is logged too.`
 - **When a session for another phase is still open**, a box says so, with `Go back to it`. Starting this one ends the other one, keeping everything you did in it.
+- **`How does your body feel right now?`**, with the numbers 0 to 10. 0 is stiff and sore, 10 is loose and easy. Click a number to choose it, and click it again to clear it. It is optional.
+- **`How much now?`**, when some exercise has two or more sets to go today:
+  - {button:All of it|primary}, or {button:All that's left|primary} after a session earlier today, does every set the day still needs. It is chosen to start with.
+  - {button:Half now, the rest later today|outline} does the first half of each exercise's sets, rounded up: 1 of 2, 2 of 3. The rest is waiting when you start again later today.
+  - The one chosen is highlighted.
+- **The exercises, in order**, each with what this session does of it:
+  - What the program asks, for example `2 × 8 breaths per side`, on a whole session.
+  - The share, for example `1 of 2 sets`, with Half now.
+  - What is left, for example `1 more set`, after a session earlier today.
+  - `done today`, with {icon:check}, for an exercise the day has already had its sets of. The session passes over it.
+- **{button:Start|primary|play}.** Starts the session on the first exercise it does. It reads {button:Start the rest|primary|play} after a session earlier today, and {button:Start another session|primary|play} once the day is done: that session does every exercise again, and counts as well.
 
 ### During an exercise
 
@@ -69,14 +78,17 @@ After the first set of an exercise, each next set starts itself after a five-sec
 - **`How hard was that?`**, with the numbers 1 to 10. The program's own zone is outlined, and a line says it, for example `3–5 is the program's zone.` Choose a number above it and you see `That is harder than it asks for.`
 - **`What did you feel?`** The exercise's checks, each with a box to tick for the ones you felt.
 - **`Anything hurt?`** {button:No|outline}, {button:A pinch|outline} or {button:Yes|outline}. After A pinch or Yes, a box asks `Where, and what it felt like`.
-- **{button:One more set|outline|plus}**, when the program allows more sets than you have done, for example the third set of `2–3 × 8`.
+- **{button:One more set|outline|plus}**, when the program allows more sets than you have done, for example the third set of `2–3 × 8`. On a split day it counts the day's earlier sets too: with one set this morning, tonight can go to two of `2–3`.
 - **{button:Next: Sidelying Glute Max|primary}.** Saves your answers and starts the next exercise. On the last exercise it reads {button:On to the finish|primary}.
 
 All three questions are optional. The button works with none of them answered.
 
 ### At the finish
 
-- **`Session done`**, with how many exercises, sets and minutes it took.
+- **`Session done`**, with how many exercises, sets and minutes it took. A set of an exercise done per side counts once, for both sides.
+- **How the day stands**, with this session in it:
+  - {icon:check} `That is every set today asks for.` when every exercise has had its sets today, across all of today's sessions.
+  - `Still to do today: 2 sets. Start again later today and it picks up here.` when some are left, for example after Half now.
 - **`How does your body feel now?`**, 0 to 10, as at the start.
 - **`Before 4, after 7.`**, when you answered both.
 - **{button:Finish|primary|check}.** Ends the session and takes you back to the program. You see `Saving your session…`, then `Session saved`.
@@ -127,6 +139,17 @@ The voice is your phone's own. If you reload the page in the middle of a session
 7. When you hear `Exercise done.`, pick up the phone. Answer the three questions and click the next exercise's button.
 8. At the end, choose how your body feels now and click {button:Finish|primary|check}.
 
+## How to split a day between morning and evening
+
+1. In the morning, open the program and click {button:Start today's session|primary|play}.
+2. Under `How much now?`, click {button:Half now, the rest later today|outline}. The exercises show what this session does, for example `1 of 2 sets`.
+3. Click {button:Start|primary|play} and do the session to the finish.
+4. Later, open the program again. The button reads {button:Do the rest of today|primary|play}, with a line like `Today: Morning · 4 sets. 2 sets left.`
+5. Click it. The start screen reads `The rest of today`, shows the morning, and lists what is left. Exercises the morning finished say `done today`.
+6. Click {button:Start the rest|primary|play}. At the finish you see `That is every set today asks for.`
+
+You do not have to plan the split. A session you started as a whole one and stopped early leaves the rest for later too: see the next section.
+
 ## How to stop and come back later
 
 1. Click {icon:x} at the top. The session stays open on your phone.
@@ -139,7 +162,8 @@ A session you never finish is closed the next day, at its last set. What you did
 
 - **More breaths or seconds:** keep going past the bottom of the range. The set finishes at the top of it, or when you click {button:Finish set|primary}.
 - **More reps or rolls:** click plus before {button:Done|primary|check}.
-- **More sets:** after the last set, click {button:One more set|outline|plus}. You can add sets up to the most the program allows.
+- **More sets:** after the last set, click {button:One more set|outline|plus}. You can add sets up to the most the program allows in a day.
+- **Another whole session:** once the day is done, the start reads {button:Start another session|primary|play}. It does every exercise again.
 
 ## Working without signal
 
@@ -162,7 +186,6 @@ Everything is kept on your phone as you go. With no signal, the top of the scree
 ## Not on this page
 
 - **Choosing what the voice says, or which voice.** It is your phone's own voice. You can turn it off, but not change what it says.
-- **Splitting a day's sets between morning and evening.** Each session is complete on its own for now.
 - **Your progress.** Days done in each phase and when the next one opens come after that.
 - **Which side to favor.** The program's left-or-right self-assessment is not built yet. Every per-side exercise does both sides, right first.
 

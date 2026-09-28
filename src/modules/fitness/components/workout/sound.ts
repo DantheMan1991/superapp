@@ -14,17 +14,23 @@
  * talks over a count and, later, the founder's posture feedback can cut in on
  * both. Everything in workout mode speaks through `coachSay`, which honours the
  * two switches: sounds (everything) and the coach's voice (words only).
+ *
+ * WHOSE VOICE (F2d, ADR 0115): one of the recorded voices, chosen on the start
+ * screen and remembered by the phone, when the platform has them; the
+ * device's own when it has not, or when a recording is not there in time.
  */
 
+import { audioContext, unlockAudio } from "@/lib/audio-context";
 import { warmUpSpeech } from "@/lib/speech/say";
+import { DEFAULT_RECORDED_VOICE, isRecordedVoice, type RecordedVoice } from "@/lib/speech/voices";
 import { silence, speak, type VoiceLine } from "@/lib/speech/voice-queue";
-
-let context: AudioContext | null = null;
 
 const MUTE_KEY = "yosher.fitness.sound";
 const VOICE_KEY = "yosher.fitness.voice";
+const WHOSE_KEY = "yosher.fitness.coach-voice";
 let muted: boolean | null = null;
 let voiceOff: boolean | null = null;
+let whose: RecordedVoice | null = null;
 const listeners = new Set<() => void>();
 
 function readMutedFromStorage(): boolean {
@@ -84,7 +90,35 @@ export function setVoiceOff(value: boolean): void {
   for (const listener of listeners) listener();
 }
 
-/** Either switch changing: sounds, or the coach's voice. */
+/** The recorded voice this phone chose for the coach (F2d). */
+export function coachVoice(): RecordedVoice {
+  if (whose === null) {
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(WHOSE_KEY);
+    } catch {
+      // A private window: the default, for this page.
+    }
+    whose = isRecordedVoice(stored) ? stored : DEFAULT_RECORDED_VOICE;
+  }
+  return whose;
+}
+
+export function coachVoiceOnTheServer(): RecordedVoice {
+  return DEFAULT_RECORDED_VOICE;
+}
+
+export function setCoachVoice(value: RecordedVoice): void {
+  whose = value;
+  try {
+    window.localStorage.setItem(WHOSE_KEY, value);
+  } catch {
+    // Kept in memory for this page.
+  }
+  for (const listener of listeners) listener();
+}
+
+/** Either switch changing (sounds, or the coach's voice), or whose voice it is. */
 export function subscribeMuted(onChange: () => void): () => void {
   listeners.add(onChange);
   return () => listeners.delete(onChange);
@@ -101,24 +135,27 @@ export function coachSay(line: VoiceLine | null): void {
   speak(line);
 }
 
-/** Called from a tap: the only moment a browser allows sound to start. */
+/**
+ * The start screen's Try (F2d): a line in the chosen voice, heard even with
+ * the voice or the sounds switched off, because it was asked for. From a tap,
+ * so it can start.
+ */
+export function tryCoachVoice(text: string): void {
+  unlockSound();
+  speak({ text, priority: "normal", key: "try" });
+}
+
+/**
+ * Called from a tap: the only moment a browser allows sound to start. The
+ * tones and the coach's recordings share the one context it makes.
+ */
 export function unlockSound(): void {
   warmUpSpeech();
-  try {
-    if (!context) {
-      const Ctor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return;
-      context = new Ctor();
-    }
-    void context.resume();
-  } catch {
-    context = null;
-  }
+  unlockAudio();
 }
 
 function tone(frequency: number, ms: number, volume: number, delayMs = 0): void {
+  const context = audioContext();
   if (!context || isMuted()) return;
   try {
     const start = context.currentTime + delayMs / 1000;

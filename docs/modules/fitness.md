@@ -13,6 +13,95 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-27 — F2d: a natural voice, and a bigger demo that waits for it (`claude/fitness-f2d`)
+
+The founder's report after using workout mode on his PC: "the video is really
+small. the voice starts talking and the video plays at the same time. the video
+should wait to start until the talking is done. Also, the voice sounds very
+robotic. can we get a more natural voice." He approved a mockup of the layout
+and the wait as drawn, chose Deepgram for the voice after hearing four samples,
+and chose Arcas. No migration, no seed.
+
+- **The demo is bigger.** A set with a demo spreads out on a screen 1024 px wide
+  or more: the demo on the left, as wide as the window's height allows a 16:9
+  picture with the top bar and its buttons still on screen (never narrower
+  than 26rem), and the set in a 24rem column on the right, so Done stays in
+  view. Up to 1024 px the column is 42rem (a tablet held upright), and under
+  44rem wide the demo loses its side margins and corners and runs edge to edge
+  (a phone). The start, the three taps and the finish keep the phone's column.
+- **The demo waits for the coach.** A new exercise's demo holds while the coach
+  says what the exercise is, with `The demo starts when the coach has finished.
+  Tap play to start it now.` under it, and starts when the voice goes quiet
+  (`isVoiceBusy` and `subscribeVoiceBusy` on the queue). Play starts it at once,
+  it never waits more than 20 s, and once going it does not stop for the coach.
+  `With sound` now stops the coach, so the author is heard alone.
+- **The coach speaks in a recorded voice**
+  ([ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
+  Deepgram's Aura-2 (the tell box's vendor already; $0.030 per 1,000
+  characters): Arcas, Orion, Helena or Vesta, chosen on the start screen with
+  `Try` and remembered by the phone. `sessionLines` (core/coach.ts) walks the
+  session with the screen's own functions to list every line it can say; the
+  start screen fetches them while the feel check is answered, the first four
+  on their own so the first line is ready soonest, and the screen fetches what
+  a change made new as the session moves on. `/api/fitness/voice` records a
+  batch (40 lines of 300 characters at most, the personal space's door and the
+  Workouts gate, the words only, the vendor's model-improvement opt-out,
+  nothing kept) and answers in one binary body. The phone keeps every
+  recording in Cache Storage. The queue's rules are unchanged; its engine plays
+  the recording, waits up to 2 s for one on its way (never for a `high` line),
+  and otherwise uses the device.
+- **The device's voice is the most natural it has** (`pickVoice`, for the tell
+  box too): natural and neural voices first, then premium, enhanced, Google;
+  the person's region; a dated or joke voice only when there is nothing else. A
+  network voice that fails is passed over for the page instead of marking the
+  device silent. The old pick, the first voice in the language, was Microsoft
+  David on his PC.
+- Guide: `workout.md` (the voice row and Try, how big the demo is, the wait,
+  whose voice, working without signal; and "Not on this page" no longer says
+  progress is to come).
+
+**Driven** on a production build against the dev branch, on the founder's
+program (phase 1):
+
+- The start screen showed `Coach's voice` with Arcas chosen and fetched the
+  session's 13 lines (252 KB), all kept in the phone's store. Try played the
+  first exercise's line as a 6.3 s recording; the device's voice said nothing.
+- Start: the first exercise's line began as a recording 0.1 s after the tap.
+  The player was ready at 2.1 s and held, cued, with the waiting line; when the
+  line ended at 6.4 s it was told to play. (The pane refuses a video that starts
+  by itself, muted or not, as F2b's drive found, so it then asked for a tap. The
+  founder's own browser plays it.)
+- Exercise 3: play pressed 0.55 s into a 4.2 s line started the demo at once
+  and the coach carried on. Exercise 4: `With sound` 0.4 s into a 4.7 s line
+  stopped the recording, unmuted the demo, and read `Back to the loop`.
+- Voice switched off, reloaded mid-session: no wait.
+- Sizes: at 1906 × 907 (his window) the demo was 1271 × 715, nine times the 416
+  × 234 in his screenshot, with its buttons ending at 831 px and nothing
+  scrolling; at 1440 × 900, 992 × 558 beside a 384 px set column with Done in
+  view; at 375 px, 375 × 211 from edge to edge, square-cornered, with no
+  sideways scroll.
+- Helena chosen mid-session: 7 lines fetched and kept; a reload fetched none.
+  Vesta on the start screen: two requests side by side, the first four lines
+  back in 3.9 s and the rest in 5.9 s (one batch of 13 had taken 6.8 s; the
+  vendor took 0.8 to 3 s a line that evening, and each request pays the dev
+  database's sign-in checks from a laptop).
+- **Two bugs the drive found, fixed.** The start screen fetched nothing: a
+  child's effects run before its parent's, so it asked for its lines before the
+  workout screen had turned the recordings on. The recordings are turned on in
+  a layout effect now, which also keeps a reloaded set's line from going to
+  the device's voice. And one batch waited for its slowest line, so the first
+  four now go on their own.
+- The pane was left as it was: the voice switch on, Arcas, the demo speed his.
+  One test session on phase 1 (four exercises skipped, finished) is on the dev
+  branch.
+
+Tests: `tests/speech-voices.test.ts` (new, pure: the voices, the request's
+bounds, the binary answer and a body cut short), `tests/speech-say.test.ts`
+(`pickVoice` on the lists a Windows PC, Edge and an iPhone give, offline, a
+voice that failed, the region, another language), `tests/fitness-coach.test.ts`
+(`sessionLines`: the whole walk in order, every line the screen then says, the
+middle of a session, a split day, One more set, a finished session).
+
 ### 2026-09-27 — F3: progress and the gate (`claude/fitness-f3`)
 
 No migration and no seed. The founder approved the screens from a mockup
@@ -495,6 +584,12 @@ from the list above:
   day a session was is its start, on the space's clock. The home card says
   `Evening · 4 sets` and what is left, rather than "Morning: 1 of 2 sets",
   because a phase's exercises need different numbers of sets.
+- **F2d, after the founder used it** (2026-09-27: "the video is really
+  small. the voice starts talking and the video plays at the same time ...
+  the voice sounds very robotic"): the demo spreads out on a wide screen,
+  a new exercise's demo waits for the coach to finish, and the coach speaks
+  in a recorded natural voice ([ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
+  The build log has it.
 
 His posture tool (camera, feedback) is his to build, in parallel. F2 builds
 nothing camera-related and leaves three seams for it: the exercise screen's
@@ -654,10 +749,19 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   IFrame Player API, loaded once). `start-session-button.tsx` is the program
   page's Start/Resume/Do the rest, and `today-card.tsx` the Workouts home's
   Today card.
-- `src/modules/fitness/core/coach.ts` — every line the coach says (F2b).
+- `src/modules/fitness/core/coach.ts` — every line the coach says (F2b), and
+  `sessionLines`, every line a session can say from where it is (F2d).
 - `src/lib/speech/queue-policy.ts` and `voice-queue.ts` — the one voice
-  (ADR 0114): the rules, pure, and the queue that feeds `speakLine` in
-  `say.ts`.
+  (ADR 0114): the rules, pure, and the queue. Its engine (F2d) is a line's
+  recording (`clips.ts`) or else `speakLine` in `say.ts`; `isVoiceBusy` and
+  `subscribeVoiceBusy` are what the demo waits on.
+- The recorded voice (F2d, ADR 0115): `src/lib/speech/voices.ts` (the four
+  voices, the request's bounds, the answer's binary shape; pure),
+  `synthesis.ts` (Deepgram, server-only), `clips.ts` (fetching ahead, the
+  phone's Cache Storage, playing one), `src/lib/audio-context.ts` (the page's
+  one audio context, shared with the tones), and the route
+  `src/app/api/fitness/voice/route.ts`. `pickVoice` in `say.ts` picks the
+  device's most natural voice for the fallback.
 - `src/modules/fitness/components/` — `read-program-pdf.ts` (pdfjs on the
   device), `import-form.tsx`, `program-editor.tsx`, `program-view.tsx`,
   `video-player.tsx`, and the discard and delete buttons.
@@ -669,6 +773,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - `src/lib/pdf/browser.ts` — `loadPdfjs`, shared with Documents.
 - `tests/fitness-core.test.ts`, `tests/fitness-session.test.ts`,
   `tests/fitness-coach.test.ts`, `tests/speech-queue.test.ts`,
+  `tests/speech-voices.test.ts`, `tests/speech-say.test.ts` (`pickVoice`),
   `tests/fitness-ops.test.ts`, `tests/isolation/fitness.test.ts`.
 - `docs/help/fitness/` — `overview.md` (`**Route:** /personal/m/fitness/**`),
   `import.md`, `editor.md`, `program.md`, `workout.md`.
@@ -768,6 +873,33 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   error as proof that the device could not speak and switched the voice off
   for the page. The queue interrupts on purpose, so only a real failure
   counts now (`isRealSpeechFailure`).
+- **The coach speaks in a recorded voice** (F2d,
+  [ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
+  Deepgram's Aura-2, the tell box's vendor already; four voices, Arcas to
+  start (his choice). A session's lines are known in advance, so they are
+  fetched from the start screen and kept in the phone's Cache Storage, and
+  the device says any line whose recording is not there in time. The words go
+  to the vendor with its model-improvement opt-out; nothing personal does.
+- **A recording has to be stopped; a device line must not be.** The queue
+  interrupts a device line by speaking the next one, because stopping the
+  app's voice separately races the new line (ADR 0114). A recording has
+  nothing else to stop it, and a line still waiting for its recording would
+  start later over the new one. So an interrupt `cut`s: it stops a recording
+  or a wait, and leaves a device line to the next line's own call. And a
+  recording that starts hushes the device first, in case the line it cut was
+  the device's.
+- **The demo waits for the coach, once** (F2d). A new exercise's demo is made
+  as its screen appears, and the exercise's line is asked for in the same
+  commit, before YouTube's player can be ready. So a busy voice at `onReady`
+  is this exercise's line: the demo holds until the queue goes quiet (or play
+  is tapped, or 20 s), then never stops for the coach again. Reading the
+  voice in an effect instead would see it idle: the demo's effects run before
+  the set's `announce`.
+- **The wide layout belongs to one view.** Only a set with a demo spreads out
+  (at `lg`, 1024 px): the demo takes the left, as wide as `(100dvh - 12rem) *
+  16/9` allows but never under the phone column's 26rem, and the set a 24rem
+  column on the right. The start, the three taps and the finish keep the
+  phone's column, top bar included, so nothing else changes on a wide screen.
 - **The demo's player is made in a node React does not own.** The API
   replaces the element it is given with its iframe, so the demo hands it a
   `div` made in the effect, inside the box React renders empty. React never
@@ -795,6 +927,16 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   so a long line may be cut off by the next one. The build that adds VIBRATE
   and CAMERA can have the native voice report its end (`onDone`), and
   `speakLine` would use it where it is there.
+- **The recorded voice on a phone is unheard** (F2d). It plays through Web
+  Audio. Inside the app's WebView that is untried, and on an iPhone with the
+  ringer switch off Web Audio may be silent where speech was not
+  (`navigator.audioSession` could change that, at the price of pausing the
+  person's music). The drive was in a desktop browser.
+- **No per-space budget for the recorded voice.** Each new line costs about
+  $0.03 per 1,000 characters, bounded by the route's 40 lines of 300
+  characters a request and by the phone keeping every recording. Before
+  Workouts opens to everyone, a daily character budget per space (a table)
+  would bound a runaway client.
 - **The demo inside the Android app is unwatched.** A WebView can refuse even
   a muted video until a tap (`mediaPlaybackRequiresUserGesture`). The demo
   then says so and waits for play, but nobody has seen which way the app

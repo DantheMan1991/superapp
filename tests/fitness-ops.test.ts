@@ -40,6 +40,7 @@ import { dayProgress, shiftDay, toDayItem } from "../src/modules/fitness/core/da
 import {
   lastSession,
   latestFollowed,
+  programSessions,
   recentSessions,
   saveSession,
   sessionCount,
@@ -629,6 +630,38 @@ d("workouts: programs and imports", () => {
         programId: program.id,
         phaseId: p.phaseId,
       });
+    });
+
+    it("gives every session of a program, with its phase, how it felt and each exercise's effort (F3)", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...aProgram(), name: "Progress" }, { programId: null, source: "own" }),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      const p = sessionPlan(program, 0);
+      const at = (day: number, hour: number) => new Date(2026, 7, day, hour, 0, 0);
+      const set = (doc: SessionDoc, when: Date) =>
+        recordSet(p, doc, { itemIndex: 0, count: 8, setId: randomUUID(), exerciseId: randomUUID(), now: when });
+
+      let first = beginSession(p, { id: randomUUID(), now: at(3, 8), feelBefore: 4 });
+      first = set(set(first, at(3, 8)), at(3, 8));
+      first = finishExercise(p, first, {
+        itemIndex: 0,
+        effort: 6,
+        cuesFelt: [],
+        hurt: null,
+        hurtNote: "",
+        now: at(3, 8),
+      });
+      first = finishSession(first, { feelAfter: 7, now: at(3, 9) });
+      // A later day, started and left: no sets, no effort, not finished.
+      const later = beginSession(p, { id: randomUUID(), now: at(20, 8), feelBefore: null });
+      for (const doc of [first, later]) await inTenant((tx) => saveSession(tx, tenant.id, doc));
+
+      const all = await inTenant((tx) => programSessions(tx, tenant.id, program.id));
+      expect(all.map((s) => s.id)).toEqual([first.id, later.id]);
+      expect(all[0]).toMatchObject({ phaseId: p.phaseId, feelBefore: 4, feelAfter: 7, efforts: [6], finished: true });
+      expect(all[0].items).toEqual([{ itemId: p.items[0].itemId, sets: 2 }]);
+      expect(all[1]).toMatchObject({ efforts: [], items: [], finished: false, feelAfter: null });
     });
   });
 });

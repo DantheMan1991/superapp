@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { localDayIn, shiftDay } from "@/modules/fitness/core/day";
+import { localDayIn } from "@/modules/fitness/core/day";
 import { loadProgram } from "@/modules/fitness/program-ops";
-import { lastSession, recentSessions } from "@/modules/fitness/session-ops";
+import { lastSession, programSessions } from "@/modules/fitness/session-ops";
 import { ProgramView } from "@/modules/fitness/components/program-view";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ export default async function ProgramPage({
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
   const today = localDayIn(ctx.tenant.timezone, new Date());
-  const [program, last, recent] = await withTenant(
+  const [program, last, sessions] = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const loaded = await loadProgram(tx, ctx.tenant.id, id);
@@ -36,7 +36,8 @@ export default async function ProgramPage({
       return [
         loaded,
         await lastSession(tx, ctx.tenant.id, id),
-        await recentSessions(tx, ctx.tenant.id, id, shiftDay(today, -1), shiftDay(today, 1)),
+        // Every session: the phase's progress and gate (F3), and today's split day (F2c).
+        await programSessions(tx, ctx.tenant.id, id),
       ] as const;
     },
     { role: ctx.role },
@@ -57,7 +58,7 @@ export default async function ProgramPage({
       phaseIndex={phaseIndex}
       lastSession={last}
       today={today}
-      recent={recent}
+      sessions={sessions}
       timeZone={ctx.tenant.timezone}
     />
   );

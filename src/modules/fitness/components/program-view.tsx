@@ -4,10 +4,20 @@ import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { DaySession } from "../core/day";
+import { shiftDay, type DaySession } from "../core/day";
 import { breathPace, countOf, prescription } from "../core/program";
-import type { LoadedItem, LoadedProgram } from "../program-ops";
+import {
+  calendarWeeks,
+  effortWarning,
+  feelOf,
+  phaseGate,
+  programDays,
+  weekCount,
+  weeksOnTarget,
+} from "../core/progress";
+import { dayItemsOf, type LoadedItem, type LoadedProgram } from "../program-ops";
 import type { LastSession } from "../session-ops";
+import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
 import { StartSessionButton } from "./start-session-button";
 import { VideoPlayer } from "./video-player";
 
@@ -21,13 +31,19 @@ import { VideoPlayer } from "./video-player";
  * for view state, so a link or a refresh lands on the same phase. Without it
  * the page opens on the phase of the last workout, so every chip names its
  * phase outright. Only the video player and the Start button are client code.
+ *
+ * PROGRESS (F3): the phase's done days toward its gate, the week, the last
+ * four weeks, the effort warning and the feel, worked out here from every
+ * session of the program (core/progress.ts). When the gate opens, the next
+ * phase is offered with what is new in it; a phase whose gate has not opened
+ * says so above its Start, which still works (the founder's call).
  */
 export function ProgramView({
   program,
   phaseIndex,
   lastSession,
   today,
-  recent,
+  sessions,
   timeZone,
 }: {
   program: LoadedProgram;
@@ -35,13 +51,23 @@ export function ProgramView({
   lastSession: LastSession | null;
   /** The personal space's own today, `YYYY-MM-DD`. */
   today: string;
-  /** The program's sessions around today: the Start button adds up a split day from them (F2c). */
-  recent: DaySession[];
+  /** Every session of the program, oldest first (`programSessions`): progress (F3) and the day (F2c). */
+  sessions: DaySession[];
   /** The personal space's timezone. */
   timeZone: string;
 }) {
   const base = `/personal/m/fitness/programs/${program.id}`;
-  const phase = program.phases[phaseIndex] ?? program.phases[0];
+  const at = program.phases[phaseIndex] ? phaseIndex : 0;
+  const phase = program.phases[at];
+  // Around today, for the Start button's split day; all of it, for progress.
+  const recent = sessions.filter((s) => s.localDay >= shiftDay(today, -1) && s.localDay <= shiftDay(today, 1));
+  const days = programDays(program.phases.map((p) => ({ items: dayItemsOf(p) })), sessions);
+  const gate = phase ? phaseGate(phase.minDoneDays, days.perPhase[at].done.length) : null;
+  const previous = at > 0 ? program.phases[at - 1] : null;
+  const previousGate = previous ? phaseGate(previous.minDoneDays, days.perPhase[at - 1].done.length) : null;
+  const next = program.phases[at + 1] ?? null;
+  const zone =
+    program.effortMin != null ? { min: program.effortMin, max: program.effortMax ?? program.effortMin } : null;
   const facts = [
     range(program.sessionsPerWeekMin, program.sessionsPerWeekMax, "session a week", "sessions a week"),
     program.effortMin != null ? `effort ${range(program.effortMin, program.effortMax, "", "")} of 10` : null,
@@ -110,23 +136,43 @@ export function ProgramView({
             <h2 className="font-heading text-lg font-medium tracking-heading">{phase.name}</h2>
             <p className="text-sm text-muted-foreground">
               {phase.items.length} {phase.items.length === 1 ? "exercise" : "exercises"}, in this order
-              {phase.minDoneDays != null ? ` · ${phase.minDoneDays} days before moving on` : ""}
+              {phase.minDoneDays != null ? ` · ${countOf(phase.minDoneDays, "day", "days")} before moving on` : ""}
             </p>
             {phase.notes && <p className="mt-2 text-sm">{phase.notes}</p>}
           </div>
+          {previous && previousGate && <GateNotOpen previous={previous.name} gate={previousGate} />}
+          {gate && gate.open && gate.needed !== null && next && next.items.length > 0 && (
+            <NextPhaseOpen
+              name={next.name}
+              href={`${base}?phase=${at + 2}`}
+              exerciseCount={next.items.length}
+              {...newIn(phase.items, next.items)}
+            />
+          )}
+          {gate && sessions.length > 0 && (
+            <PhaseProgress
+              gate={gate}
+              nextName={next?.name ?? null}
+              week={{
+                count: weekCount(days.done, today),
+                min: program.sessionsPerWeekMin,
+                max: program.sessionsPerWeekMax,
+              }}
+              calendar={calendarWeeks(days.done, days.partial, today)}
+              streak={
+                program.sessionsPerWeekMin != null ? weeksOnTarget(days.done, today, program.sessionsPerWeekMin) : null
+              }
+              warning={effortWarning(sessions, zone, today)}
+              feel={feelOf(sessions, phase.id)}
+            />
+          )}
           {phase.items.length > 0 && (
             <div className="space-y-2">
               <StartSessionButton
                 programId={program.id}
                 phaseIds={program.phases.map((p) => p.id)}
-                phaseNumber={phaseIndex + 1}
-                items={phase.items.map((item) => ({
-                  itemId: item.id,
-                  name: item.exercise.name,
-                  optional: item.optional,
-                  setsMin: item.setsMin,
-                  setsMax: item.setsMax,
-                }))}
+                phaseNumber={at + 1}
+                items={dayItemsOf(phase)}
                 recent={recent}
                 today={today}
                 timeZone={timeZone}
@@ -220,6 +266,24 @@ function range(min: number | null, max: number | null, one: string, many: string
   const span = max != null && max !== min ? `${min}–${max}` : String(min);
   const word = (max ?? min) === 1 ? one : many;
   return word ? `${span} ${word}` : span;
+}
+
+/**
+ * What the next phase brings that this one does not, by name (each phase's
+ * exercises are rows of their own), and the video of the first new one, or of
+ * its first exercise when nothing is new.
+ */
+function newIn(current: LoadedItem[], next: LoadedItem[]) {
+  const known = new Set(current.map((item) => item.exercise.name.trim().toLowerCase()));
+  const fresh = next.filter((item) => !known.has(item.exercise.name.trim().toLowerCase()));
+  const shown = fresh[0] ?? next[0];
+  const video = shown?.exercise.videos[0];
+  return {
+    newNames: fresh.map((item) => item.exercise.name),
+    video: video
+      ? { id: video.id, startS: video.startS, endS: video.endS, embeddable: video.embeddable, title: shown.exercise.name }
+      : null,
+  };
 }
 
 /** "today", "yesterday", or the date: when a workout was, in the person's own days. */

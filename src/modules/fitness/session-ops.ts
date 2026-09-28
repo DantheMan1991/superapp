@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DaySession } from "./core/day";
 import { FitnessError } from "./core/errors";
@@ -356,70 +356,122 @@ function groupSides(
  * its own today, so a phone a timezone away from the space still finds the
  * morning it did.
  */
-export async function recentSessions(
+export function recentSessions(
   tx: Tx,
   tenantId: string,
   programId: string,
   fromDay: string,
   toDay: string,
 ): Promise<DaySession[]> {
+  return sessionsOfProgram(tx, tenantId, programId, { fromDay, toDay });
+}
+
+/**
+ * Every session of a program, oldest first (F3): the done days of each phase,
+ * the week, the calendar, the effort warning and the feel all come from these.
+ * A few years of daily workouts is a few thousand small rows.
+ */
+export function programSessions(tx: Tx, tenantId: string, programId: string): Promise<DaySession[]> {
+  return sessionsOfProgram(tx, tenantId, programId, null);
+}
+
+/** The most sessions read at once: about five years of one a day. */
+const HISTORY_LIMIT = 2_000;
+
+async function sessionsOfProgram(
+  tx: Tx,
+  tenantId: string,
+  programId: string,
+  days: { fromDay: string; toDay: string } | null,
+): Promise<DaySession[]> {
   const t = schema;
+  const ofProgram = and(
+    eq(t.fitnessSessions.tenantId, tenantId),
+    eq(t.fitnessEnrollments.programId, programId),
+    ...(days ? [gte(t.fitnessSessions.localDay, days.fromDay), lte(t.fitnessSessions.localDay, days.toDay)] : []),
+  );
+  const toEnrollment = and(
+    eq(t.fitnessEnrollments.tenantId, t.fitnessSessions.tenantId),
+    eq(t.fitnessEnrollments.id, t.fitnessSessions.enrollmentId),
+  );
   const sessions = await tx
     .select({
       id: t.fitnessSessions.id,
       localDay: t.fitnessSessions.localDay,
       startedAt: t.fitnessSessions.startedAt,
       finishedAt: t.fitnessSessions.finishedAt,
+      phaseId: t.fitnessSessions.phaseId,
+      feelBefore: t.fitnessSessions.feelBefore,
+      feelAfter: t.fitnessSessions.feelAfter,
     })
     .from(t.fitnessSessions)
-    .innerJoin(
-      t.fitnessEnrollments,
-      and(
-        eq(t.fitnessEnrollments.tenantId, t.fitnessSessions.tenantId),
-        eq(t.fitnessEnrollments.id, t.fitnessSessions.enrollmentId),
-      ),
-    )
-    .where(
-      and(
-        eq(t.fitnessSessions.tenantId, tenantId),
-        eq(t.fitnessEnrollments.programId, programId),
-        gte(t.fitnessSessions.localDay, fromDay),
-        lte(t.fitnessSessions.localDay, toDay),
-      ),
-    )
-    .orderBy(asc(t.fitnessSessions.startedAt))
-    .limit(50);
+    .innerJoin(t.fitnessEnrollments, toEnrollment)
+    .where(ofProgram)
+    // The newest, if ever there are more than the limit; oldest first after.
+    .orderBy(desc(t.fitnessSessions.startedAt))
+    .limit(HISTORY_LIMIT);
   if (sessions.length === 0) return [];
+  sessions.reverse();
 
-  const rows = await tx
-    .select({
-      sessionId: t.fitnessSessionExercises.sessionId,
-      exerciseId: t.fitnessSessionExercises.id,
-      itemId: t.fitnessSessionExercises.itemId,
-      perSide: t.fitnessSessionExercises.perSide,
-      side: t.fitnessSets.side,
-      doneAt: t.fitnessSets.doneAt,
-    })
-    .from(t.fitnessSets)
-    .innerJoin(
-      t.fitnessSessionExercises,
-      and(
-        eq(t.fitnessSessionExercises.tenantId, t.fitnessSets.tenantId),
-        eq(t.fitnessSessionExercises.id, t.fitnessSets.sessionExerciseId),
-      ),
-    )
-    .where(
-      and(
-        eq(t.fitnessSets.tenantId, tenantId),
-        inArray(
-          t.fitnessSessionExercises.sessionId,
-          sessions.map((session) => session.id),
+  // The same sessions' sets and efforts, found by the same filter rather than
+  // a list of thousands of ids.
+  const [setRows, effortRows] = await Promise.all([
+    tx
+      .select({
+        sessionId: t.fitnessSessionExercises.sessionId,
+        exerciseId: t.fitnessSessionExercises.id,
+        itemId: t.fitnessSessionExercises.itemId,
+        perSide: t.fitnessSessionExercises.perSide,
+        side: t.fitnessSets.side,
+        doneAt: t.fitnessSets.doneAt,
+      })
+      .from(t.fitnessSets)
+      .innerJoin(
+        t.fitnessSessionExercises,
+        and(
+          eq(t.fitnessSessionExercises.tenantId, t.fitnessSets.tenantId),
+          eq(t.fitnessSessionExercises.id, t.fitnessSets.sessionExerciseId),
         ),
-      ),
-    );
+      )
+      .innerJoin(
+        t.fitnessSessions,
+        and(
+          eq(t.fitnessSessions.tenantId, t.fitnessSessionExercises.tenantId),
+          eq(t.fitnessSessions.id, t.fitnessSessionExercises.sessionId),
+        ),
+      )
+      .innerJoin(t.fitnessEnrollments, toEnrollment)
+      .where(and(eq(t.fitnessSets.tenantId, tenantId), ofProgram)),
+    tx
+      .select({ sessionId: t.fitnessSessionExercises.sessionId, effort: t.fitnessSessionExercises.effort })
+      .from(t.fitnessSessionExercises)
+      .innerJoin(
+        t.fitnessSessions,
+        and(
+          eq(t.fitnessSessions.tenantId, t.fitnessSessionExercises.tenantId),
+          eq(t.fitnessSessions.id, t.fitnessSessionExercises.sessionId),
+        ),
+      )
+      .innerJoin(t.fitnessEnrollments, toEnrollment)
+      .where(and(eq(t.fitnessSessionExercises.tenantId, tenantId), ofProgram, isNotNull(t.fitnessSessionExercises.effort))),
+  ]);
+
+  const setsBySession = new Map<string, typeof setRows>();
+  for (const row of setRows) {
+    const list = setsBySession.get(row.sessionId);
+    if (list) list.push(row);
+    else setsBySession.set(row.sessionId, [row]);
+  }
+  const effortsBySession = new Map<string, number[]>();
+  for (const row of effortRows) {
+    if (row.effort === null) continue;
+    const list = effortsBySession.get(row.sessionId);
+    if (list) list.push(row.effort);
+    else effortsBySession.set(row.sessionId, [row.effort]);
+  }
 
   return sessions.map((session) => {
-    const mine = rows.filter((row) => row.sessionId === session.id);
+    const mine = setsBySession.get(session.id) ?? [];
     const itemOf = new Map(mine.map((row) => [row.exerciseId, row.itemId]));
     const items = new Map<string, number>();
     for (const [exerciseId, { perSide, sides }] of groupSides(mine)) {
@@ -438,6 +490,10 @@ export async function recentSessions(
       endedAt: (session.finishedAt ?? lastSet ?? session.startedAt).toISOString(),
       finished: session.finishedAt !== null,
       items: [...items].map(([itemId, sets]) => ({ itemId, sets })),
+      phaseId: session.phaseId,
+      feelBefore: session.feelBefore,
+      feelAfter: session.feelAfter,
+      efforts: effortsBySession.get(session.id) ?? [],
     };
   });
 }

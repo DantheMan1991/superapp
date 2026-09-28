@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { FitnessVideo } from "@/db/schema";
 import { FitnessError } from "./core/errors";
 import { breathPace, type ItemInput, type ProgramInput, type VideoInput } from "./core/program";
+import type { DayItem } from "./core/day";
 import type { SessionPlan } from "./core/session";
 
 /**
@@ -301,6 +302,17 @@ export interface LoadedPhase {
   minDoneDays: number | null;
   notes: string;
   items: LoadedItem[];
+}
+
+/** A phase's items as a day adds them up (core/day.ts, core/progress.ts). */
+export function dayItemsOf(phase: LoadedPhase): DayItem[] {
+  return phase.items.map((item) => ({
+    itemId: item.id,
+    name: item.exercise.name,
+    optional: item.optional,
+    setsMin: item.setsMin,
+    setsMax: item.setsMax,
+  }));
 }
 
 export interface LoadedProgram {

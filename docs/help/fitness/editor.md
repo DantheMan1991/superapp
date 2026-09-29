@@ -45,6 +45,12 @@ You reach this screen three ways. After an import, it opens on the draft, titled
   - **`Side, once yours is known`**, when `Per side` is ticked. What the program says to do once you know which side you lean to: `Both sides`, the default, `Only the side you lean toward` or `Only the side you lean away from`. Untick `Per side` and the exercise goes back to both sides. Your side comes from the program's tests, under `Your side` on the program's page. See [Finding your side](side.md).
   - **`That side is`**, when the exercise is done on one side. How the side is named, for an exercise done lying down: `The side`, `The side you lie on` or `The leg on top`. Under it, the words for someone who leans left, for example `Leaning left, a workout says: Lying on your left side.`
   - **`Optional`.** Tick it when the program says the exercise is extra.
+  - **`Levels`**, for an exercise that gets harder in steps, like a calf raise done one way until you can do more, then a harder way. Without levels it reads `For an exercise that gets harder in steps. Name each step, and you are told when you have made the mark to move up.`, with {button:Add levels|outline|plus}. That adds two levels, `Level 1` and `Level 2`. With levels:
+    - **{button:Remove levels|ghost|trash}** takes them all off the exercise.
+    - **Each level**, easiest first, in its own box: its number, its name, and {icon:trash} to remove it. A program usually shows its levels in its video rather than naming them in words, so name each one as the video does, for example `Seated`, then `Standing`.
+    - **`Plays` and `to`**, under each name: the part of the exercise's video that shows that level, written as minutes and seconds like `0:42`. Leave them empty and the whole video plays. On the program page and in a workout, the video plays the part for your level.
+    - **{button:Add a level|outline|plus}** adds one at the end, up to twenty.
+    - **`Move up after`**, the mark: how many sets of how many, for example `2` sets of `15` reps, each side. A new set of levels starts from the exercise's own fewest sets and the top of its count. The line under it says the rest of the mark: `And with the effort no higher than the program's, and nothing hurt.`
   - **`How to know you are doing it right`.** The program's checks, one per line. They show under the exercise while you follow the program.
   - **`Videos`.** Each video has its own box. Paste a YouTube link into `Paste a YouTube link`. The line under it tells you what happens to it: `plays here`, `only plays on YouTube`, or `checked when you save`. From the second video on, `Name (optional)` names the video, for example `Alternative`. Leave it empty and the video's own title on YouTube is filled in when you save, for example `Inner Foot Roll`. The first video has no name box: it shows under the exercise's own name. `Start` and `End` play just part of the video, written as minutes and seconds like `0:42`. In a session, the demo goes round and round that part; see [Doing a session](workout.md). {icon:trash} removes a video. {button:Add a video|outline|plus} adds another. With no video, it reads `No video yet.`
   - **`Notes`.** Anything about this exercise you need while doing it: which side, when to move to a harder version, equipment.
@@ -78,6 +84,14 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 1. Open the program and click {button:Edit program|outline|pencil}.
 2. Change what you need. Everything you keep stays the same program, so nothing about it is lost.
 3. Click {button:Save program|primary}. You see `Program saved`.
+
+## How to add levels to an exercise
+
+1. Open the exercise and click {button:Add levels|outline|plus}.
+2. Watch the exercise's video. Name each level the way it does, and click {button:Add a level|outline|plus} for each one past the second.
+3. For each level, fill in `Plays` and `to` with where it starts and ends in the video, if you want only that part to play.
+4. Check `Move up after`: the sets and the count the program says to reach before moving on.
+5. Click {button:Save program|primary}. Your level starts at the first. See [Following a program](program.md) for moving between them.
 
 ## How to add a side self-assessment by hand
 
@@ -120,6 +134,12 @@ For a program imported from a PDF, the PDF can fill this in for you. See [Readin
 | `Self-assessment: tests that must agree must be between 1 and 20.` | The number is 0, or too large. |
 | `The self-assessment asks for 4 tests to agree but has 3 tests.` | More tests must agree than there are. Lower the number, or add the missing tests. |
 | `Self-assessment: That is not a link to one YouTube video.` | The video link is not YouTube, or it is a playlist. Paste the link to the one video. |
+| `Weeks 1–2, exercise 2: levels need at least two. Remove them instead.` | An exercise with levels has at least two. Add one, or click {button:Remove levels|ghost|trash}. |
+| `Weeks 1–2, exercise 2: level 3 needs a name.` | A level's name box is empty. |
+| `Weeks 1–2, exercise 2: write level 2's start as minutes and seconds, like 0:42.` | `Plays` could not be read. The same goes for `to`, which asks for an end like `1:10`. |
+| `Weeks 1–2, exercise 2: level 2's end must come after its start.` | The level's `to` is before its `Plays`. |
+| `Weeks 1–2, exercise 2: sets to move up needs a number.` | The sets box of `Move up after` is empty. The same goes for the count. |
+| `Weeks 1–2, exercise 2: count to move up must be between 1 and 1000.` | The count to reach is out of range. Sets to move up go from 1 to 20. |
 | `This program changed since you opened it. Reload the page to see the latest, then make your change again.` | It was saved somewhere else, for example in another tab, after you opened it. Reload, then make your change again. |
 | `That program is not here any more. It may have been deleted.` | The program was deleted after you opened it. |
 | `The program could not be saved. Try again.` | Something went wrong. Click {button:Save program|primary} again. |

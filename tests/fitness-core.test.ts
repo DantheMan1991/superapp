@@ -31,6 +31,7 @@ import {
   type ProgramInput,
 } from "../src/modules/fitness/core/program";
 import {
+  emptyEditorProgression,
   emptyEditorVideo,
   fromEditor,
   readEditorVideo,
@@ -646,5 +647,75 @@ describe("the side, in the save's rules and the editor (F4b)", () => {
     });
     expect(asked).toContain("fBViIToMhKA");
     expect(marked.assessment?.video).toMatchObject({ id: "fBViIToMhKA", embeddable: true, label: null });
+  });
+});
+
+describe("an exercise's levels, in the save's rules and the editor (F4c)", () => {
+  function leveled(): ProgramInput {
+    const program = normalizeDraft(modelAnswer());
+    program.phases[0].items[1] = {
+      ...program.phases[0].items[1],
+      progression: {
+        levels: [
+          { name: "Step 1", startS: 10, endS: 40 },
+          { name: "Step 2", startS: null, endS: null },
+        ],
+        sets: 2,
+        target: 8,
+      },
+    };
+    return program;
+  }
+
+  it("round-trips through the editor, the times as minutes and seconds", () => {
+    const program = leveled();
+    const form = toEditor(program);
+    expect(form.phases[0].items[1].progression).toMatchObject({
+      levels: [
+        { name: "Step 1", start: "0:10", end: "0:40" },
+        { name: "Step 2", start: "", end: "" },
+      ],
+      sets: "2",
+      target: "8",
+    });
+    expect(fromEditor(form)).toEqual({ program, problems: [] });
+    expect(programInputSchema.safeParse(program).success).toBe(true);
+    // A draft never has levels: a program shows them in its videos.
+    expect(normalizeDraft(modelAnswer()).phases[0].items.every((item) => item.progression === null)).toBe(true);
+  });
+
+  it("starts new levels from the exercise's own prescription", () => {
+    const hinge = toEditor(normalizeDraft(modelAnswer())).phases[0].items[1];
+    expect(emptyEditorProgression(hinge)).toMatchObject({
+      levels: [{ name: "Level 1" }, { name: "Level 2" }],
+      sets: "2",
+      target: "8",
+    });
+  });
+
+  it("says what to fix: a name, a time, the mark, and at least two levels", () => {
+    const form = toEditor(leveled());
+    const levels = form.phases[0].items[1].progression;
+    if (!levels) throw new Error("expected levels");
+    form.phases[0].items[1].progression = {
+      ...levels,
+      levels: [
+        { ...levels.levels[0], name: " ", start: "soon" },
+        { ...levels.levels[1], start: "1:00", end: "0:30" },
+      ],
+      sets: "",
+      target: "0",
+    };
+    expect(fromEditor(form).problems).toEqual(
+      expect.arrayContaining([
+        "Weeks 1–2, exercise 2: write level 1's start as minutes and seconds, like 0:42.",
+        "Weeks 1–2, exercise 2: sets to move up needs a number.",
+        "Weeks 1–2, exercise 2: level 1 needs a name.",
+        "Weeks 1–2, exercise 2: level 2's end must come after its start.",
+        "Weeks 1–2, exercise 2: count to move up must be between 1 and 1000.",
+      ]),
+    );
+    form.phases[0].items[1].progression = { ...levels, levels: levels.levels.slice(0, 1) };
+    expect(fromEditor(form).problems).toContain("Weeks 1–2, exercise 2: levels need at least two. Remove them instead.");
   });
 });

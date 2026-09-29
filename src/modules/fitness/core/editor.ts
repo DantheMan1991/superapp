@@ -10,6 +10,7 @@ import {
   type SideRule,
   type VideoInput,
 } from "./program";
+import type { Progression } from "./levels";
 import { formatTimestamp, parseTimestamp, parseYouTubeUrl } from "./youtube";
 
 /**
@@ -63,6 +64,23 @@ export interface EditorItem {
   /** One side only, once the person's side is known (F4b). */
   sideRule: SideRule;
   sideMeans: SideMeans;
+  /** Its levels, for an exercise that gets harder in steps (F4c); null without. */
+  progression: EditorProgression | null;
+}
+
+export interface EditorLevel {
+  key: string;
+  name: string;
+  /** The part of the exercise's video that shows it, "m:ss" as typed; empty for the whole video. */
+  start: string;
+  end: string;
+}
+
+/** An exercise's levels as the editor holds them (F4c), the mark as typed. */
+export interface EditorProgression {
+  levels: EditorLevel[];
+  sets: string;
+  target: string;
 }
 
 export interface EditorTest {
@@ -149,6 +167,39 @@ export function toEditorItem(item: ItemInput): EditorItem {
     videos: item.videos.map(toEditorVideo),
     sideRule: item.sideRule,
     sideMeans: item.sideMeans,
+    progression: item.progression ? toEditorProgression(item.progression) : null,
+  };
+}
+
+export function toEditorProgression(progression: Progression): EditorProgression {
+  return {
+    levels: progression.levels.map((level) => ({
+      key: newKey(),
+      name: level.name,
+      start: level.startS != null ? formatTimestamp(level.startS) : "",
+      end: level.endS != null ? formatTimestamp(level.endS) : "",
+    })),
+    sets: String(progression.sets),
+    target: String(progression.target),
+  };
+}
+
+/** A new level row: "Level 3" after two. */
+export function emptyEditorLevel(number: number): EditorLevel {
+  return { key: newKey(), name: `Level ${number}`, start: "", end: "" };
+}
+
+/**
+ * Levels added to an exercise: two to start, and the mark from its own
+ * prescription as typed, the top of its range for its fewest sets.
+ */
+export function emptyEditorProgression(
+  item: Pick<EditorItem, "setsMin" | "targetMin" | "targetMax">,
+): EditorProgression {
+  return {
+    levels: [emptyEditorLevel(1), emptyEditorLevel(2)],
+    sets: item.setsMin.trim() || "1",
+    target: item.targetMax.trim() || item.targetMin.trim() || "1",
   };
 }
 
@@ -299,10 +350,35 @@ export function fromEditor(
           // since keeps no rule it can no longer show.
           sideRule: item.perSide ? item.sideRule : "both",
           sideMeans: item.perSide ? item.sideMeans : "side",
+          progression: item.progression ? readProgression(item.progression, where) : null,
         };
       }),
     };
   });
+
+  /** An exercise's levels from the form, each field's problem said where it is. */
+  function readProgression(row: EditorProgression, where: string): Progression | null {
+    if (row.levels.length < 2) {
+      problems.push(`${where}: levels need at least two. Remove them instead.`);
+      return null;
+    }
+    const levels = row.levels.map((level, l) => {
+      const start = level.start.trim() === "" ? null : parseTimestamp(level.start);
+      const end = level.end.trim() === "" ? null : parseTimestamp(level.end);
+      if (level.start.trim() !== "" && start == null) {
+        problems.push(`${where}: write level ${l + 1}'s start as minutes and seconds, like 0:42.`);
+      }
+      if (level.end.trim() !== "" && end == null) {
+        problems.push(`${where}: write level ${l + 1}'s end as minutes and seconds, like 1:10.`);
+      }
+      return { name: level.name.trim(), startS: start, endS: end };
+    });
+    return {
+      levels,
+      sets: need(`${where}: sets to move up`, row.sets, true) ?? 1,
+      target: need(`${where}: count to move up`, row.target, true) ?? 1,
+    };
+  }
 
   let assessment: AssessmentInput | null = null;
   if (editor.assessment) {
@@ -350,6 +426,10 @@ export function fromEditor(
       const where = `${phaseName}, exercise ${i + 1}`;
       outOfRange(problems, `${where}: sets`, [item.setsMin, item.setsMax], 20);
       outOfRange(problems, `${where}: count`, [item.targetMin, item.targetMax], 1000);
+      if (item.progression) {
+        outOfRange(problems, `${where}: sets to move up`, [item.progression.sets], 20);
+        outOfRange(problems, `${where}: count to move up`, [item.progression.target], 1000);
+      }
     });
   });
   if (problems.length > 0) return { program: null, problems: [...new Set(problems)] };

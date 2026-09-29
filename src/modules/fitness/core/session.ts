@@ -64,6 +64,10 @@ export const sessionExerciseSchema = z.object({
    * the server keeps each set's side, which says the same.
    */
   onlySide: z.enum(SIDES).nullable().optional(),
+  /** The level it is done at, 0-based, for an exercise with levels (F4c). */
+  level: z.number().int().min(0).max(19).nullable().optional(),
+  /** "Move up" chosen after it (F4c): the server moves the level on, once. */
+  levelUp: z.boolean().optional(),
   /**
    * How many sets this exercise is being done for: the program's minimum,
    * raised by "one more set" up to its maximum. The phone's alone; the server
@@ -150,6 +154,18 @@ export interface PlanItem {
   onlySide?: Side | null;
   /** How that side is said: the side itself, the side lain on, or the leg on top. */
   sideMeans?: SideMeans;
+  /**
+   * The level it is done at today, for an exercise with levels (F4c): which,
+   * its name, the next level's name (null on the last), and the mark for
+   * moving up. Absent for everything else.
+   */
+  level?: {
+    index: number;
+    count: number;
+    name: string;
+    next: string | null;
+    mark: { sets: number; target: number };
+  };
 }
 
 export interface SessionPlan {
@@ -301,6 +317,8 @@ function startExercise(plan: SessionPlan, doc: SessionDoc, itemIndex: number, id
     // Only when there is one: every document before F4b, and every exercise
     // done on both sides, looks exactly as it did.
     ...(item.onlySide ? { onlySide: item.onlySide } : {}),
+    // And the level, for an exercise with levels (F4c).
+    ...(item.level ? { level: item.level.index } : {}),
     // At least one: an item is only started for a set it has, or to skip it.
     plannedSets: Math.max(1, plannedFor(doc, item).sets),
     effort: null,
@@ -375,7 +393,11 @@ export function canAddSet(plan: SessionPlan, doc: SessionDoc, itemIndex: number)
   return !!logged && logged.plannedSets < plannedFor(doc, item).max;
 }
 
-/** The three taps after an exercise, which finish it. */
+/**
+ * The three taps after an exercise, which finish it; and, for an exercise
+ * with levels whose mark was made, the choice to move up (F4c), kept only
+ * when it is a move up from the level the exercise was done at.
+ */
 export function finishExercise(
   plan: SessionPlan,
   doc: SessionDoc,
@@ -386,10 +408,13 @@ export function finishExercise(
     hurt: Hurt | null;
     hurtNote: string;
     now: Date;
+    levelUp?: boolean;
   },
 ): SessionDoc {
-  const logged = loggedFor(doc, plan.items[input.itemIndex]);
+  const item = plan.items[input.itemIndex];
+  const logged = loggedFor(doc, item);
   if (!logged || logged.finishedAt) return doc;
+  const levelUp = input.levelUp === true && logged.level != null && item.level?.next != null;
   return bump(
     doc,
     replace(doc.exercises, {
@@ -399,6 +424,7 @@ export function finishExercise(
       hurt: input.hurt,
       hurtNote: input.hurt && input.hurt !== "none" ? input.hurtNote.trim().slice(0, 500) : "",
       finishedAt: input.now.toISOString(),
+      ...(levelUp ? { levelUp: true } : {}),
     }),
   );
 }

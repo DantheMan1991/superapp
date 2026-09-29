@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { progressionSchema } from "./levels";
 
 /**
  * A PROGRAM AS IT TRAVELS: from Claude's draft to the review screen, from the
@@ -60,6 +61,8 @@ export const itemInputSchema = z.object({
   /** `default`s so a draft stored before F4b still opens. */
   sideRule: z.enum(SIDE_RULES).default("both"),
   sideMeans: z.enum(SIDE_MEANS).default("side"),
+  /** Its levels and the mark for moving up (F4c, core/levels.ts); null without. */
+  progression: progressionSchema.nullable().default(null),
 });
 
 export const phaseInputSchema = z.object({
@@ -165,6 +168,12 @@ export function programProblems(program: ProgramInput): string[] {
       if (item.sideRule !== "both" && !item.perSide) {
         problems.push(`${where}: only an exercise done per side can be done on one side.`);
       }
+      item.progression?.levels.forEach((level, l) => {
+        if (level.name.trim() === "") problems.push(`${where}: level ${l + 1} needs a name.`);
+        if (level.startS != null && level.endS != null && level.endS <= level.startS) {
+          problems.push(`${where}: level ${l + 1}'s end must come after its start.`);
+        }
+      });
     });
   });
   const assessment = program.assessment;
@@ -277,5 +286,6 @@ export function emptyItem(): ItemInput {
     notes: "",
     sideRule: "both",
     sideMeans: "side",
+    progression: null,
   };
 }

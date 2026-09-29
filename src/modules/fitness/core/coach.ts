@@ -93,7 +93,10 @@ export function setIntro(plan: SessionPlan, doc: SessionDoc, step: Extract<Step,
   if (done === 0) {
     const aimed = plannedFor(doc, item).sets;
     // A split day's share (F2c) says this session's sets: "1 set of 8 breaths".
-    parts.push(item.name, spokenPrescription(aimed === item.setsMin ? item : { ...item, setsMin: aimed, setsMax: null }));
+    // An exercise with levels (F4c) says which, after its name.
+    parts.push(item.name);
+    if (item.level) parts.push(item.level.name);
+    parts.push(spokenPrescription(aimed === item.setsMin ? item : { ...item, setsMin: aimed, setsMax: null }));
     if (only) parts.push(only);
     else if (step.side) parts.push(`${sideName(step.side)} first`);
   } else if (!only && step.side && step.side !== SIDE_ORDER[0]) {

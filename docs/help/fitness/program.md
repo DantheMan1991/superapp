@@ -29,6 +29,7 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
   - **The video.** `Tap to play here` plays it on this page. When only part of the video is set to play, the times show beside it, for example `Tap to play here · 0:42–1:10`. One video plays at a time: tapping another stops the one already playing, and it starts from the beginning when you tap it again. A video that only plays on YouTube reads `This video only plays on YouTube.` with {button:Open in YouTube|link|external-link}.
   - **Its number and name**, with {badge:Optional} when it is extra.
   - **What to do**, for example {badge:2 × 8 breaths per side|secondary}.
+  - **{icon:trending-up} `Your level`**, on an exercise with levels, for example `Your level: Level 1 of 4`. Its video plays the part for your level, when the level has one. See [Your level](#your-level).
   - **What it is for**, in a sentence or two.
   - **`Doing it right`.** The program's checks, as a short list.
   - **{icon:arrow-left-right} The side**, on an exercise the program does on one side for someone who leans to a side, for example `For someone who leans to a side: lying on the side you lean toward. Otherwise both sides.` Until you know your side, do both sides. Once your tests have found it, the line says your side instead, for example `Lying on your left side only, because you lean left.`, and What to do loses `per side`, since each set is on that one side.
@@ -77,6 +78,15 @@ Tap the notification and the app opens this program. It follows the phase of you
 - A workout done with no signal counts once it is sent, so until then the evening reminder may say more sets are left than there are.
 - Reminders come to the Yosher app on Android. The iPhone app cannot get notifications yet.
 
+## Your level
+
+An exercise with levels gets harder in steps. You do it at your level until you make the mark for moving up. The levels and the mark are set in the editor. See [Building and editing a program](editor.md#how-to-add-levels-to-an-exercise).
+
+- **`Your level`**, with the level's name and how many there are, for example `Your level: Level 1 of 4`. You start at the first.
+- **{button:Move up|outline}** puts you on the next level, and **{button:Back a level|ghost}** on the one before. You see `Now on Level 2`. Neither shows at the end it cannot go past.
+- **The `Ready for` line**, when your last session at this level made the mark, for example `Ready for Level 2: your last session did 2 × 15 at Level 1, effort 3, nothing hurt.` The mark is the program's sets and count, on each side for an exercise done per side, with your effort no higher than the program's and nothing hurt. It stays until you move up, or until a later session at this level falls short.
+- Moving up is always yours to choose. Workout mode offers it too, right after the exercise. See [Doing a session](workout.md).
+
 ## Your side
 
 A card under Reminders, on a program with a side self-assessment: a few tests that find which side you lean to. The program does a few exercises on one side only for someone who leans, and the card is where you find yours.
@@ -107,7 +117,7 @@ To read the program without starting, go down the exercises on this page. Tap a 
 ## Not on this page
 
 - **Doing a one-sided exercise on both sides for one session.** Your side holds for every session until you take the tests again.
-- **Progressions**, such as moving to the next level of a calf raise when the log says you are ready. Not built yet.
+- **Levels read from the PDF.** A program shows its levels in its video, which the app cannot watch, so you name them in the editor.
 - **Reminders by email.** Reminders come only as a notification on your phone.
 
 ## Who can do what

@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, notInArray, sq
 import { schema, type Tx } from "@/db";
 import type { DaySession } from "./core/day";
 import { FitnessError } from "./core/errors";
+import { levelOf } from "./core/levels";
 import { fullSets, type SessionDoc, type Side } from "./core/session";
 
 /**
@@ -140,6 +141,26 @@ export async function saveSession(
     if (clash.length > 0) throw new FitnessError("INVALID", "Part of that session belongs to another one.");
   }
 
+  // A move up chosen after an exercise with levels (F4c) moves the level the
+  // first time it arrives, and never again for that exercise: a resend, or a
+  // later revision after the person went back a level, finds it applied.
+  const upAlready = new Set(
+    exerciseIds.length > 0
+      ? (
+          await tx
+            .select({ id: t.fitnessSessionExercises.id })
+            .from(t.fitnessSessionExercises)
+            .where(
+              and(
+                eq(t.fitnessSessionExercises.tenantId, tenantId),
+                inArray(t.fitnessSessionExercises.id, exerciseIds),
+                eq(t.fitnessSessionExercises.levelUp, true),
+              ),
+            )
+        ).map((row) => row.id)
+      : [],
+  );
+
   if (doc.exercises.length > 0) {
     await tx
       .insert(t.fitnessSessionExercises)
@@ -155,6 +176,8 @@ export async function saveSession(
           name: exercise.name,
           unit: exercise.unit,
           perSide: exercise.perSide,
+          level: exercise.level ?? null,
+          levelUp: exercise.levelUp === true,
           effort: exercise.effort,
           cuesFelt: exercise.cuesFelt,
           hurt: exercise.hurt,
@@ -173,6 +196,9 @@ export async function saveSession(
           name: sql`excluded.name`,
           unit: sql`excluded.unit`,
           perSide: sql`excluded.per_side`,
+          level: sql`excluded.level`,
+          // Once chosen, kept: the phone never takes it back.
+          levelUp: sql`excluded.level_up or ${t.fitnessSessionExercises.levelUp}`,
           effort: sql`excluded.effort`,
           cuesFelt: sql`excluded.cues_felt`,
           hurt: sql`excluded.hurt`,
@@ -239,7 +265,55 @@ export async function saveSession(
       ),
     );
 
+  const ups = doc.exercises.filter(
+    (exercise) =>
+      exercise.levelUp === true &&
+      !upAlready.has(exercise.id) &&
+      exercise.level != null &&
+      exercise.itemId !== null &&
+      known.items.has(exercise.itemId),
+  );
+  if (ups.length > 0) await applyLevelUps(tx, tenantId, enrollment.id, ups);
+
   return { revision: doc.revision, stale: false };
+}
+
+/**
+ * Move each item up from the level its exercise was done at (F4c), when the
+ * person is still on that level and a next one exists. A level moved since,
+ * on the program page, is left as it is.
+ */
+async function applyLevelUps(
+  tx: Tx,
+  tenantId: string,
+  enrollmentId: string,
+  ups: readonly { itemId: string | null; level?: number | null }[],
+): Promise<void> {
+  const t = schema;
+  const itemIds = ups.map((up) => up.itemId).filter((id): id is string => id !== null);
+  const [enrollment] = await tx
+    .select({ levels: t.fitnessEnrollments.levels })
+    .from(t.fitnessEnrollments)
+    .where(and(eq(t.fitnessEnrollments.tenantId, tenantId), eq(t.fitnessEnrollments.id, enrollmentId)));
+  const items = await tx
+    .select({ id: t.fitnessPhaseItems.id, progression: t.fitnessPhaseItems.progression })
+    .from(t.fitnessPhaseItems)
+    .where(and(eq(t.fitnessPhaseItems.tenantId, tenantId), inArray(t.fitnessPhaseItems.id, itemIds)));
+  const counts = new Map(items.map((item) => [item.id, item.progression?.levels.length ?? 0]));
+  const levels = { ...(enrollment?.levels ?? {}) };
+  let changed = false;
+  for (const up of ups) {
+    if (up.itemId === null || up.level == null) continue;
+    const count = counts.get(up.itemId) ?? 0;
+    if (levelOf(levels, up.itemId, count) !== up.level || up.level + 1 >= count) continue;
+    levels[up.itemId] = up.level + 1;
+    changed = true;
+  }
+  if (!changed) return;
+  await tx
+    .update(t.fitnessEnrollments)
+    .set({ levels, updatedAt: new Date() })
+    .where(and(eq(t.fitnessEnrollments.tenantId, tenantId), eq(t.fitnessEnrollments.id, enrollmentId)));
 }
 
 async function programRows(

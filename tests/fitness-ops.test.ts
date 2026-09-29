@@ -8,6 +8,7 @@ import { FitnessError } from "../src/modules/fitness/core/errors";
 import { normalizeDraft } from "../src/modules/fitness/core/draft";
 import type { ProgramInput } from "../src/modules/fitness/core/program";
 import { READ_AGAIN_WORDS } from "../src/modules/fitness/core/read-again";
+import type { Progression } from "../src/modules/fitness/core/levels";
 import {
   deleteProgram,
   listPrograms,
@@ -49,6 +50,7 @@ import {
 } from "../src/modules/fitness/session-ops";
 import { loadReminders, runWorkoutReminders, saveReminder } from "../src/modules/fitness/reminder-ops";
 import { loadSide, saveSide } from "../src/modules/fitness/side-ops";
+import { latestTries, loadLevels, setLevel } from "../src/modules/fitness/level-ops";
 
 /**
  * Workouts against a real database (docs/modules/fitness.md, F1): a program
@@ -117,6 +119,7 @@ function item(name: string, unit: "reps" | "breaths", sets: number, target: numb
     notes: "",
     sideRule: "both" as const,
     sideMeans: "side" as const,
+    progression: null as Progression | null,
   };
 }
 
@@ -1083,6 +1086,130 @@ d("workouts: programs and imports", () => {
       expect(sides.flat()).toEqual([{ side: "left" }, { side: "left" }]);
       // Two sets, each on its one side, are two sets.
       expect((await inTenant((tx) => lastSession(tx, tenant.id, program.id)))?.sets).toBe(2);
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+    });
+  });
+
+  describe("an exercise with levels (F4c)", () => {
+    /** Invented, as every fitness test is: a heel raise of three steps, 2 × 15 each side to move up. */
+    const ladder: Progression = {
+      levels: [
+        { name: "Step 1", startS: 5, endS: 20 },
+        { name: "Step 2", startS: 21, endS: null },
+        { name: "Step 3", startS: null, endS: null },
+      ],
+      sets: 2,
+      target: 15,
+    };
+
+    function leveledProgram(name: string): ProgramInput {
+      const base = aProgram();
+      return {
+        ...base,
+        name,
+        phases: [
+          {
+            ...base.phases[0],
+            items: [
+              { ...item("Heel raise", "reps", 2, 6), targetMax: 15, perSide: true, progression: ladder },
+              item("Hip lift", "breaths", 2, 8),
+            ],
+          },
+          base.phases[1],
+        ],
+      };
+    }
+
+    it("keeps an exercise's levels, gives them back to the editor, and plays each level's part", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, leveledProgram("Levels, saved"), { programId: null, source: "own" }),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      expect(program.phases[0].items[0].progression).toEqual(ladder);
+      expect(program.phases[0].items[1].progression).toBeNull();
+      expect(programToInput(program).phases[0].items[0].progression).toEqual(ladder);
+
+      // Workout mode: the first step until another is saved, playing that step's part of the video.
+      const first = sessionPlan(program, 0).items[0];
+      expect(first.level).toEqual({ index: 0, count: 3, name: "Step 1", next: "Step 2", mark: { sets: 2, target: 15 } });
+      expect(first.video).toMatchObject({ startS: 5, endS: 20 });
+      const second = sessionPlan(program, 0, null, { [program.phases[0].items[0].id]: 1 }).items[0];
+      expect(second.level).toMatchObject({ index: 1, name: "Step 2", next: "Step 3" });
+      expect(second.video).toMatchObject({ startS: 21, endS: null });
+      // A step with no part of its own plays the video's own.
+      const third = sessionPlan(program, 0, null, { [program.phases[0].items[0].id]: 2 }).items[0];
+      expect(third.level).toMatchObject({ index: 2, next: null });
+      expect(third.video).toMatchObject({ startS: null, endS: null });
+      expect(sessionPlan(program, 0).items[1]).not.toHaveProperty("level");
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+    });
+
+    it("puts the person on a level from the program page, following the program from then", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, leveledProgram("Levels, moved"), { programId: null, source: "own" }),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      const [raise, lift] = program.phases[0].items;
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({});
+      await inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: raise.id, level: 2 }, "2026-09-29"));
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({ [raise.id]: 2 });
+      await inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: raise.id, level: 1 }, "2026-09-29"));
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({ [raise.id]: 1 });
+
+      // Refused: a level it does not have, an exercise without levels, one from no program here.
+      await expect(
+        inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: raise.id, level: 3 }, "2026-09-29")),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      await expect(
+        inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: lift.id, level: 0 }, "2026-09-29")),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      await expect(
+        inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: randomUUID(), level: 0 }, "2026-09-29")),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+    });
+
+    it("moves up once when a workout's move up arrives, however often it is sent, and finds the latest go", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, leveledProgram("Levels, done"), { programId: null, source: "own" }),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      const raise = program.phases[0].items[0];
+      const p = sessionPlan(program, 0, null, {});
+      const at = (minute: number) => new Date(Date.UTC(2026, 8, 29, 14, minute, 0));
+      let doc = beginSession(p, { id: randomUUID(), now: at(0), feelBefore: null });
+      for (let k = 0; k < 4; k++) {
+        doc = recordSet(p, doc, { itemIndex: 0, count: 15, setId: randomUUID(), exerciseId: randomUUID(), now: at(1 + k) });
+      }
+      doc = finishExercise(p, doc, {
+        itemIndex: 0,
+        effort: 3,
+        cuesFelt: [],
+        hurt: "none",
+        hurtNote: "",
+        now: at(6),
+        levelUp: true,
+      });
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({ [raise.id]: 1 });
+
+      // Sent again, and a later revision of it: still one step up, not two.
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      doc = finishSession(doc, { feelAfter: 7, now: at(20) });
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({ [raise.id]: 1 });
+
+      // Gone back a level on the program page: the session's move up is not made again.
+      await inTenant((tx) => setLevel(tx, tenant.id, { programId: program.id, itemId: raise.id, level: 0 }, "2026-09-29"));
+      doc = { ...doc, note: "Felt good.", revision: doc.revision + 1 };
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      expect(await inTenant((tx) => loadLevels(tx, tenant.id, program.id))).toEqual({ [raise.id]: 0 });
+
+      // The program page's "Ready for" line reads the latest go, sets and all.
+      const tries = await inTenant((tx) => latestTries(tx, tenant.id, [raise.id]));
+      expect(tries.get(raise.id)).toMatchObject({ level: 0, perSide: true, effort: 3, hurt: "none" });
+      expect(tries.get(raise.id)?.sets).toHaveLength(4);
+      expect(tries.get(raise.id)?.sets.every((s) => s.count === 15)).toBe(true);
       await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
     });
   });

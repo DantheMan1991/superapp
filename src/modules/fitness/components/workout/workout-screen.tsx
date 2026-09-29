@@ -21,6 +21,7 @@ import {
   Play,
   Plus,
   SkipForward,
+  TrendingUp,
   TriangleAlert,
   Volume2,
   VolumeX,
@@ -48,6 +49,7 @@ import {
   type DaySession,
   type SplitChoice,
 } from "../../core/day";
+import { madeWords, markMade } from "../../core/levels";
 import { countOf, prescription } from "../../core/program";
 import { sideWords as oneSideWords } from "../../core/side";
 import {
@@ -546,6 +548,12 @@ function BeforeView({
                       {oneSideWords(item.sideMeans ?? "side", item.onlySide)}
                     </span>
                   )}
+                  {item.level && (
+                    // An exercise with levels (F4c): the person's.
+                    <span className="block text-xs text-module-accent">
+                      {`${item.level.name} of ${item.level.count}`}
+                    </span>
+                  )}
                 </span>
               </span>
               <span className={cn("shrink-0", !doneToday && "text-foreground")}>
@@ -630,6 +638,10 @@ function SetView({
               </Badge>
             )}
           </h1>
+          {item.level && (
+            // An exercise with levels (F4c): the level it is done at.
+            <p className="text-sm font-medium text-module-accent">{`${item.level.name} of ${item.level.count}`}</p>
+          )}
           <p className="text-muted-foreground">
             Set {step.number} of {planned}
             {side && (
@@ -669,7 +681,14 @@ function SetView({
             onSecond={(elapsed) => coachSay(holdLine(elapsed, max, cue))}
           />
         ) : (
-          <ConfirmCount key={key} target={item.targetMin} unit={item.unit} onFinish={finishSet} />
+          <ConfirmCount
+            key={key}
+            target={item.targetMin}
+            // With levels (F4c), where the set before got to.
+            start={item.level && logged && done > 0 ? logged.sets[done - 1].count : item.targetMin}
+            unit={item.unit}
+            onFinish={finishSet}
+          />
         )}
 
         {cue && <p className="text-center text-lg leading-snug">{cue}</p>}
@@ -700,15 +719,31 @@ function CheckView({
   doc: SessionDoc;
   itemIndex: number;
   onOneMore: () => void;
-  onDone: (answers: { effort: number | null; cuesFelt: string[]; hurt: Hurt | null; hurtNote: string }) => void;
+  onDone: (answers: {
+    effort: number | null;
+    cuesFelt: string[];
+    hurt: Hurt | null;
+    hurtNote: string;
+    levelUp: boolean;
+  }) => void;
 }) {
   const item = plan.items[itemIndex];
   const [effort, setEffort] = useState<number | null>(null);
   const [felt, setFelt] = useState<string[]>([]);
   const [hurt, setHurt] = useState<Hurt | null>(null);
   const [hurtNote, setHurtNote] = useState("");
+  const [choice, setChoice] = useState<"up" | "stay" | null>(null);
   const next = plan.items[itemIndex + 1];
   const zone = plan.effort;
+  // An exercise with levels (F4c): the mark made at the level it was done at,
+  // judged on these sets and these answers, and the choice to move up.
+  const logged = loggedFor(doc, item);
+  const level = item.level;
+  const made =
+    !!level?.next &&
+    !!logged &&
+    logged.level === level.index &&
+    markMade(level.mark, { perSide: logged.perSide, sets: logged.sets, effort, hurt }, zone?.max ?? null);
   // A timed set can end with the person on the floor: this is the word to
   // pick up the phone.
   useEffect(() => {
@@ -806,6 +841,37 @@ function CheckView({
         )}
       </fieldset>
 
+      {made && level?.next && (
+        <div className="space-y-2 rounded-xl bg-module-accent/10 p-3 text-sm">
+          <p className="flex items-start gap-2">
+            <TrendingUp className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+            {`${madeWords(level.mark, level.name, effort)} That's the program's mark to move on.`}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={choice === "up" ? "default" : "outline"}
+              aria-pressed={choice === "up"}
+              onClick={() => setChoice(choice === "up" ? null : "up")}
+            >
+              {`Move up to ${level.next}`}
+            </Button>
+            <Button
+              size="sm"
+              variant={choice === "stay" ? "secondary" : "ghost"}
+              aria-pressed={choice === "stay"}
+              onClick={() => setChoice(choice === "stay" ? null : "stay")}
+            >
+              Not yet
+            </Button>
+          </div>
+          {choice === "up" && <p className="text-muted-foreground">{`${level.next} from your next session.`}</p>}
+          {choice === "stay" && (
+            <p className="text-muted-foreground">{`Staying at ${level.name}. The program page keeps the suggestion.`}</p>
+          )}
+        </div>
+      )}
+
       <div className="flex-1" />
       {canAddSet(plan, doc, itemIndex) && (
         <Button variant="outline" size="lg" className="h-12 w-full" onClick={onOneMore}>
@@ -815,7 +881,7 @@ function CheckView({
       <Button
         size="lg"
         className="h-14 w-full text-lg"
-        onClick={() => onDone({ effort, cuesFelt: felt, hurt, hurtNote })}
+        onClick={() => onDone({ effort, cuesFelt: felt, hurt, hurtNote, levelUp: made && choice === "up" })}
       >
         {next ? `Next: ${next.name}` : "On to the finish"}
       </Button>

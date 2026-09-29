@@ -553,6 +553,9 @@ export function normalizeDraft(raw: unknown): ProgramInput {
         // One side only is only for an exercise done per side.
         sideRule: item.perSide ? item.sideRule : "both",
         sideMeans: item.perSide && item.sideRule !== "both" ? item.sideMeans : "side",
+        // Levels (F4c) are the person's to add: a program shows them in its
+        // videos, which a draft cannot watch. Its words keep the mark, in notes.
+        progression: null,
       });
     }
     if (items.length === 0) continue;

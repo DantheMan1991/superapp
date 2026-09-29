@@ -36,6 +36,7 @@ At the top, on every step:
   - What is left, for example `1 more set`, after a session earlier today.
   - `done today`, with {icon:check}, for an exercise the day has already had its sets of. The session passes over it.
   - Under an exercise done on one side, your side for it, for example `Lying on your left side`, once the program's tests have found your side.
+  - Under an exercise with levels, your level, for example `Level 2 of 4`.
 - **{button:Start|primary|play}.** Starts the session on the first exercise it does. It reads {button:Start the rest|primary|play} after a session earlier today, and {button:Start another session|primary|play} once the day is done: that session does every exercise again, and counts as well.
 
 ### During an exercise
@@ -44,6 +45,7 @@ At the top, on every step:
 - **The exercise's name**, with {badge:Optional} when the program says it is extra.
 - **The set line**, for example `Set 1 of 2 · Right side · 2 × 8 breaths per side`. For an exercise done per side, you do the right side, then the left, for each set.
 - **An exercise done on one side**, once the program's tests have found your side, says that side instead, for example `Set 1 of 2 · Lying on your left side · 2 × 5–8 breaths`, with `One side only: you lean left.` under it. You do every set on that side, and never the other. An exercise you started on both sides before saving your side finishes on both. See [Finding your side](side.md).
+- **An exercise with levels** shows your level under its name, for example `Level 2 of 4`, and its demo plays that level's part of the video. A set counted in reps starts at what you did in the set before, so you tap only to change it.
 - **One of the program's checks** in large type, for example `Low back relaxed`. It changes with each set.
 - **The exercise's notes**, in a gray box, when the program has any.
 - **{button:Skip this exercise|ghost|player-skip-forward}.** Moves on without it. Use it for an optional exercise, or one you cannot do today.
@@ -90,6 +92,7 @@ After the first set of an exercise, each next set starts itself after a five-sec
 - **`How hard was that?`**, with the numbers 1 to 10. The program's own zone is outlined, and a line says it, for example `3–5 is the program's zone.` Choose a number above it and you see `That is harder than it asks for.`
 - **`What did you feel?`** The exercise's checks, each with a box to tick for the ones you felt.
 - **`Anything hurt?`** {button:No|outline}, {button:A pinch|outline} or {button:Yes|outline}. After A pinch or Yes, a box asks `Where, and what it felt like`.
+- **When you made the mark for moving up**, on an exercise with levels: a box says so, for example `2 × 15 at Level 1, effort 3, nothing hurt. That's the program's mark to move on.` The mark is the program's sets and count at your level, on each side for an exercise done per side, with your effort no higher than the program's and nothing hurt, so it shows once you have answered both. {button:Move up to Level 2|outline} puts you on the next level from your next session, and says `Level 2 from your next session.` {button:Not yet|ghost} keeps you where you are, and says `Staying at Level 1. The program page keeps the suggestion.` Tap either again to undo it. Your choice goes with the session when you tap Next, so it works with no signal.
 - **{button:One more set|outline|plus}**, when the program allows more sets than you have done, for example the third set of `2–3 × 8`. On a split day it counts the day's earlier sets too: with one set this morning, tonight can go to two of `2–3`.
 - **{button:Next: Wall stack|primary}.** Saves your answers and starts the next exercise. On the last exercise it reads {button:On to the finish|primary}.
 
@@ -133,7 +136,7 @@ If YouTube's player cannot load at all, you get the program page's player instea
 
 A voice tells you what the screen says at the moments you cannot see it: when you are on the floor, between sets, and when a set ends by itself.
 
-- **When a set appears**, what it is. On an exercise's first set, its name, what to do and which side to start on, for example `Side-lying pullback. 2 sets of 5 to 8 breaths, each side. Right side first.` After that, `Now the left side.` or `Set 2 of 3. Right side.` An exercise done on one side says its side every set instead, for example `Knee sway. 2 sets of 5 to 8 breaths. Lying on your left side.`, then `Set 2 of 2. Lying on your left side.` For an exercise counted in reps or rolls, one of its checks comes straight after, for example `Slow, about an inch a second.`
+- **When a set appears**, what it is. On an exercise's first set, its name, what to do and which side to start on, for example `Side-lying pullback. 2 sets of 5 to 8 breaths, each side. Right side first.` After that, `Now the left side.` or `Set 2 of 3. Right side.` An exercise with levels says your level after its name on its first set, for example `Heel raise. Level 2. 2 sets of 6 to 15 reps, each side. Right side first.` An exercise done on one side says its side every set instead, for example `Knee sway. 2 sets of 5 to 8 breaths. Lying on your left side.`, then `Set 2 of 2. Lying on your left side.` For an exercise counted in reps or rolls, one of its checks comes straight after, for example `Slow, about an inch a second.`
 - **During a set counted in breaths**, one of the exercise's checks as the middle breath starts, and `Last one.` as the last breath starts. The tones still mark every breath.
 - **During a hold**, one of the checks halfway through, and `Ten seconds left.` when the hold is 30 seconds or more.
 - **After the last set of an exercise**, `Exercise done.` That is your cue to pick up the phone for the three questions.

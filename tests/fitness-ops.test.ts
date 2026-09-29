@@ -45,6 +45,7 @@ import {
   saveSession,
   sessionCount,
 } from "../src/modules/fitness/session-ops";
+import { loadReminders, runWorkoutReminders, saveReminder } from "../src/modules/fitness/reminder-ops";
 
 /**
  * Workouts against a real database (docs/modules/fitness.md, F1): a program
@@ -128,6 +129,8 @@ d("workouts: programs and imports", () => {
           slug: `${STAMP}-slug`,
           kind: "personal",
           personalOwnerClerkUserId: `user_fitnessops${process.pid}`,
+          // The space's clock is what a reminder goes by (F4a): UTC keeps the tests' times exact.
+          timezone: "UTC",
         })
         .returning();
       return row;
@@ -662,6 +665,187 @@ d("workouts: programs and imports", () => {
       expect(all[0]).toMatchObject({ phaseId: p.phaseId, feelBefore: 4, feelAfter: 7, efforts: [6], finished: true });
       expect(all[0].items).toEqual([{ itemId: p.items[0].itemId, sets: 2 }]);
       expect(all[1]).toMatchObject({ efforts: [], items: [], finished: false, feelAfter: null });
+    });
+  });
+
+  describe("reminders (F4a)", () => {
+    /**
+     * Workouts switched on for the space, as the door does. The run sends
+     * nothing for a space without it, so a database the seed has not reached
+     * FAILS the sending tests below rather than passing them unrun.
+     */
+    let workoutsOn = false;
+
+    beforeAll(async () => {
+      workoutsOn = await withSystem(async (tx) => {
+        const [fitness] = await tx
+          .select({ id: schema.modules.id })
+          .from(schema.modules)
+          .where(eq(schema.modules.id, "fitness"));
+        if (!fitness) return false;
+        await tx
+          .insert(schema.tenantModules)
+          .values({ tenantId: tenant.id, moduleId: "fitness", enabled: true })
+          .onConflictDoUpdate({
+            target: [schema.tenantModules.tenantId, schema.tenantModules.moduleId],
+            set: { enabled: true },
+          });
+        return true;
+      });
+    });
+
+    async function reminderProgram(name: string): Promise<LoadedProgram> {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...aProgram(), name }, { programId: null, source: "own" }),
+      );
+      return (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+    }
+
+    function rowsOf(programId: string) {
+      return inTenant((tx) =>
+        tx
+          .select({
+            slot: schema.fitnessReminders.slot,
+            atMinute: schema.fitnessReminders.atMinute,
+            enabled: schema.fitnessReminders.enabled,
+            lastHandledOn: schema.fitnessReminders.lastHandledOn,
+          })
+          .from(schema.fitnessReminders)
+          .where(eq(schema.fitnessReminders.programId, programId))
+          .orderBy(schema.fitnessReminders.slot),
+      );
+    }
+
+    /** A sender that remembers, standing in for the phone. */
+    function phone(devices = 1) {
+      const sent: { to: string; title: string; body: string; url: string; collapseId: string; badge?: number }[] = [];
+      const send = async (to: string, message: { title: string; body: string; url: string; collapseId: string; badge?: number }) => {
+        sent.push({ to, ...message });
+        return { devices, delivered: devices, disabled: 0, failed: 0, unconfigured: 0 };
+      };
+      return { sent, send };
+    }
+
+    /** Every set of phase 1 of `aProgram` (2 × Hip lift, 2 × Block squeeze), or only the first `count`. */
+    async function workout(program: LoadedProgram, when: Date, count = 4) {
+      const p = sessionPlan(program, 0);
+      let doc = beginSession(p, { id: randomUUID(), now: when, feelBefore: null });
+      for (let n = 0; n < count; n++) {
+        const itemIndex = n < 2 ? 0 : 1;
+        if (n === 2) {
+          doc = finishExercise(p, doc, { itemIndex: 0, effort: null, cuesFelt: [], hurt: null, hurtNote: "", now: when });
+        }
+        doc = recordSet(p, doc, { itemIndex, count: 8, setId: randomUUID(), exerciseId: randomUUID(), now: when });
+      }
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+    }
+
+    it("keeps a morning and an evening per program, a time already gone today starting tomorrow", async () => {
+      const program = await reminderProgram("Reminders, saved");
+      // Never saved: both off, at their defaults.
+      expect(await inTenant((tx) => loadReminders(tx, tenant.id, program.id))).toEqual([
+        { slot: "morning", atMinute: 420, enabled: false },
+        { slot: "evening", atMinute: 1170, enabled: false },
+      ]);
+      const ten = { day: "2026-09-28", minute: 600 };
+      await inTenant((tx) =>
+        saveReminder(tx, tenant.id, { programId: program.id, slot: "morning", atMinute: 450, enabled: true }, ten),
+      );
+      await inTenant((tx) =>
+        saveReminder(tx, tenant.id, { programId: program.id, slot: "evening", atMinute: 1170, enabled: true }, ten),
+      );
+      // 7:30 had gone by 10:00, so the morning starts tomorrow; the evening goes today.
+      expect(await rowsOf(program.id)).toEqual([
+        { slot: "morning", atMinute: 450, enabled: true, lastHandledOn: "2026-09-28" },
+        { slot: "evening", atMinute: 1170, enabled: true, lastHandledOn: null },
+      ]);
+      // Changed again: still one row a slot.
+      await inTenant((tx) =>
+        saveReminder(tx, tenant.id, { programId: program.id, slot: "morning", atMinute: 480, enabled: false }, ten),
+      );
+      expect(await inTenant((tx) => loadReminders(tx, tenant.id, program.id))).toEqual([
+        { slot: "morning", atMinute: 480, enabled: false },
+        { slot: "evening", atMinute: 1170, enabled: true },
+      ]);
+      // A program that is not here.
+      await expect(
+        inTenant((tx) =>
+          saveReminder(tx, tenant.id, { programId: randomUUID(), slot: "morning", atMinute: 480, enabled: true }, ten),
+        ),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      // Deleting the program takes its reminders (and keeps them out of the runs below).
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+      expect(await rowsOf(program.id)).toEqual([]);
+    });
+
+    it("tells the phone once when a reminder's time comes, with what the day needs, and skips a day that is done", async () => {
+      expect(workoutsOn, "the catalogue has no Workouts row: run the seed on this database").toBe(true);
+      const program = await reminderProgram("Reminders, sent");
+      await inTenant((tx) =>
+        saveReminder(
+          tx,
+          tenant.id,
+          { programId: program.id, slot: "evening", atMinute: 1170, enabled: true },
+          { day: "2026-09-01", minute: 600 },
+        ),
+      );
+      const { sent, send } = phone();
+      const run = (iso: string) => runWorkoutReminders(new Date(iso), { send, onlyTenants: [tenant.id] });
+
+      // Before its time: nothing taken.
+      expect(await run("2026-09-01T19:20:00Z")).toMatchObject({ taken: 0, sent: 0 });
+      // At its time, with nothing done: the whole day, and the tap opens the program through the door.
+      expect(await run("2026-09-01T19:30:00Z")).toMatchObject({ taken: 1, sent: 1 });
+      expect(sent[0]).toEqual({
+        to: `user_fitnessops${process.pid}`,
+        title: "Today's workout",
+        body: "Weeks 1–2 · 2 exercises, 4 sets",
+        url: `/personal/open?next=${encodeURIComponent(`/personal/m/fitness/programs/${program.id}`)}`,
+        collapseId: expect.stringMatching(/^workout:[0-9a-f-]+:2026-09-01$/),
+      });
+      // It never carries a badge: the icon's count is the digest's.
+      expect(sent[0]).not.toHaveProperty("badge");
+      // Ten minutes on, and again later: taken once only.
+      expect(await run("2026-09-01T19:40:00Z")).toMatchObject({ taken: 0 });
+      expect(await run("2026-09-01T20:20:00Z")).toMatchObject({ taken: 0 });
+      expect(sent).toHaveLength(1);
+
+      // The next day, two of the four sets done that morning: what is left.
+      await workout(program, new Date(2026, 8, 2, 8, 0, 0), 2);
+      expect(await run("2026-09-02T19:30:00Z")).toMatchObject({ taken: 1, sent: 1 });
+      expect(sent[1]).toMatchObject({ title: "The rest of today", body: "2 sets left · Weeks 1–2" });
+
+      // The day after, every set done: taken, and skipped.
+      await workout(program, new Date(2026, 8, 3, 8, 0, 0), 4);
+      expect(await run("2026-09-03T19:30:00Z")).toMatchObject({ taken: 1, sent: 0, skippedDone: 1 });
+      expect(sent).toHaveLength(2);
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+    });
+
+    it("stays quiet for a reminder switched off, one past its hour's grace, and says when no phone heard it", async () => {
+      expect(workoutsOn, "the catalogue has no Workouts row: run the seed on this database").toBe(true);
+      const program = await reminderProgram("Reminders, quiet");
+      const saveAt = (atMinute: number, enabled: boolean) =>
+        inTenant((tx) =>
+          saveReminder(
+            tx,
+            tenant.id,
+            { programId: program.id, slot: "morning", atMinute, enabled },
+            { day: "2026-08-01", minute: 0 },
+          ),
+        );
+      const { sent, send } = phone(0);
+      const run = (iso: string) => runWorkoutReminders(new Date(iso), { send, onlyTenants: [tenant.id] });
+
+      await saveAt(420, false);
+      expect(await run("2026-08-01T07:00:00Z")).toMatchObject({ taken: 0 });
+      await saveAt(420, true);
+      // An hour and a minute late: the morning's is not sent at lunch.
+      expect(await run("2026-08-01T08:01:00Z")).toMatchObject({ taken: 0 });
+      // In time, but no phone registered: taken, and counted as heard by nobody.
+      expect(await run("2026-08-02T07:10:00Z")).toMatchObject({ taken: 1, sent: 0, noPhone: 1 });
+      expect(sent).toHaveLength(1);
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
     });
   });
 });

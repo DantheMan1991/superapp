@@ -14,6 +14,18 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-28 — The door can go on to a page (`claude/fitness-f4`)
+
+`/personal/open?next=<path>`: once it has switched into the space, the door goes
+to that page instead of the space's home. Workouts' reminders (F4a) need it: a
+push is tapped with the phone in whatever workspace it was in, and the space's
+own pages refuse a business session. `doorDestination`
+(`personal-space-core.ts`, pure) passes only a plain path inside the space, in a
+strict alphabet (no other origin, no `//`, no `..`, nothing encoded, not the
+door itself); anything else goes home. Tested in
+`tests/personal-space-core.test.ts`, and driven: a program's path landed on the
+program, `/dashboard` on the space's home.
+
 ### 2026-09-27 — The first tool in it: Workouts (`claude/fitness-f1`)
 
 Fitness F1 ([fitness.md](fitness.md)) is the first personal tool, so it

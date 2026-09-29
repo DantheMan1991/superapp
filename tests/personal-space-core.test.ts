@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   PERSONAL_CATEGORY,
   PERSONAL_REFUSALS,
+  doorDestination,
+  doorTo,
   kindFromOrgMetadata,
   moduleFitsTenant,
   moduleRefusal,
@@ -106,5 +108,40 @@ describe("who may open one, for now", () => {
     expect(personalSpacesOpen({ isSuperAdmin: true, personalToolsAvailable: false })).toBe(true);
     expect(personalSpacesOpen({ isSuperAdmin: false, personalToolsAvailable: false })).toBe(false);
     expect(personalSpacesOpen({ isSuperAdmin: false, personalToolsAvailable: true })).toBe(true);
+  });
+});
+
+describe("where the door goes once it has switched in (F4a)", () => {
+  it("goes on to a page inside the space when one is asked for: a workout reminder's tap", () => {
+    const program = "/personal/m/fitness/programs/0f8fad5b-d9cb-469f-a165-70867728950e";
+    expect(doorDestination(program)).toBe(program);
+    expect(doorDestination(`${program}?phase=2`)).toBe(`${program}?phase=2`);
+    expect(doorDestination("/personal/m/fitness")).toBe("/personal/m/fitness");
+    expect(doorTo(program)).toBe(`/personal/open?next=${encodeURIComponent(program)}`);
+    // What the tap sends is what the door reads back.
+    expect(doorDestination(decodeURIComponent(doorTo(program).split("next=")[1]))).toBe(program);
+  });
+
+  it("goes home for anything else, so it can never be aimed out of the space", () => {
+    for (const next of [
+      undefined,
+      "",
+      "/personal",
+      "/dashboard",
+      "/dashboard/today",
+      "https://evil.example/personal/x",
+      "//evil.example/personal",
+      "/personal//evil.example",
+      "/personal/../dashboard",
+      "/personal/%2e%2e/dashboard",
+      "/personal/m/fitness\\..\\x",
+      "/personal/open",
+      "/personal/open?next=/personal/m",
+      "/personal/m/fitness#top",
+      `/personal/${"a".repeat(300)}`,
+      42,
+    ]) {
+      expect(doorDestination(next)).toBe("/personal");
+    }
   });
 });

@@ -514,6 +514,48 @@ export const fitnessSets = pgTable(
   ],
 );
 
+/** The two halves of a split day the program allows: a reminder for each. */
+export const fitnessReminderSlot = pgEnum("fitness_reminder_slot", ["morning", "evening"]);
+
+/**
+ * A WORKOUT REMINDER (F4a, ADR 0116): a time of day on the space's clock at
+ * which the person's phone is told about today's workout on this program,
+ * unless the day's sets are already done. The founder's call, 2026-09-28: a
+ * day that is done is skipped, which is what makes a reminder clear itself by
+ * the workout being done (the notifications rule).
+ *
+ * `last_handled_on` is the space's day the cron last took it, sent or skipped
+ * as done: the cron claims a reminder by moving it forward, so two runs that
+ * overlap send it once.
+ */
+export const fitnessReminders = pgTable(
+  "fitness_reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    programId: uuid("program_id").notNull(),
+    slot: fitnessReminderSlot("slot").notNull(),
+    /** Minutes after midnight on the space's clock, in tens (the cron's step): 1170 is 7:30 PM. */
+    atMinute: integer("at_minute").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastHandledOn: date("last_handled_on"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_reminders_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("fitness_reminders_program_slot_idx").on(t.tenantId, t.programId, t.slot),
+    foreignKey({
+      name: "fitness_reminders_program_fk",
+      columns: [t.tenantId, t.programId],
+      foreignColumns: [fitnessPrograms.tenantId, fitnessPrograms.id],
+    }).onDelete("cascade"),
+    check("fitness_reminders_at_minute_range", sql`${t.atMinute} between 0 and 1430 and ${t.atMinute} % 10 = 0`),
+  ],
+);
+
 export type FitnessProgram = typeof fitnessPrograms.$inferSelect;
 export type FitnessPhase = typeof fitnessPhases.$inferSelect;
 export type FitnessExercise = typeof fitnessExercises.$inferSelect;
@@ -523,3 +565,4 @@ export type FitnessEnrollment = typeof fitnessEnrollments.$inferSelect;
 export type FitnessSession = typeof fitnessSessions.$inferSelect;
 export type FitnessSessionExercise = typeof fitnessSessionExercises.$inferSelect;
 export type FitnessSet = typeof fitnessSets.$inferSelect;
+export type FitnessReminder = typeof fitnessReminders.$inferSelect;

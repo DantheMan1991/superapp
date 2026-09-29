@@ -29,6 +29,30 @@ export const PERSONAL_HOME = "/personal";
 export const PERSONAL_OPEN = "/personal/open";
 
 /**
+ * Where the door goes once it has switched in: a page inside the space, when
+ * one was asked for (`?next=`), or home. A workout reminder's tap opens the
+ * program it is about this way (F4a), because the phone may be in the
+ * business when it is tapped.
+ *
+ * Only a plain path inside the space passes, in a strict alphabet: no other
+ * origin, no `//`, no `..`, nothing encoded, and not the door itself. Anything
+ * else is home, so the door cannot be aimed anywhere else.
+ */
+export function doorDestination(next: unknown): string {
+  if (typeof next !== "string" || next.length > 200) return PERSONAL_HOME;
+  if (!/^\/personal\/[A-Za-z0-9_\-/]*(\?[A-Za-z0-9_\-=&]*)?$/.test(next)) return PERSONAL_HOME;
+  if (next.includes("//") || next === PERSONAL_OPEN || next.startsWith(`${PERSONAL_OPEN}/`) || next.startsWith(`${PERSONAL_OPEN}?`)) {
+    return PERSONAL_HOME;
+  }
+  return next;
+}
+
+/** The door, going on to a page in the space: what a reminder's tap opens. */
+export function doorTo(path: string): string {
+  return `${PERSONAL_OPEN}?next=${encodeURIComponent(path)}`;
+}
+
+/**
  * The Clerk organization's name. The same for everybody, because the switcher
  * lists it beside the person's businesses and "Personal" is the whole of what
  * it needs to say. Clerk does not require names to be unique; slugs, it does.

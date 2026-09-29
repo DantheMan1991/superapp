@@ -5,11 +5,14 @@ import { z } from "zod";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { localDayIn } from "./core/day";
 import { draftRequestSchema } from "./core/draft";
 import { FitnessError, fitnessMessage } from "./core/errors";
 import { programInputSchema, programProblems } from "./core/program";
+import { minuteIn, minuteOfTime, reminderInputSchema, timeOfMinute } from "./core/reminders";
 import { sessionDocSchema } from "./core/session";
 import { markVideos } from "./embeds";
+import { saveReminder } from "./reminder-ops";
 import { saveSession } from "./session-ops";
 import { discardImport, draftProgram, markImportSaved } from "./import-ops";
 import { deleteProgram, saveProgram } from "./program-ops";
@@ -149,6 +152,32 @@ export async function saveSessionAction(input: unknown): Promise<Outcome<{ revis
   } catch (err) {
     return failure(err, "The session could not be saved just now. It is kept on this phone and will be sent again.");
   }
+}
+
+/**
+ * Set one of a program's reminders (F4a): its time, rounded to the ten
+ * minutes the cron keeps, and whether it is on. The space's clock decides
+ * whether that time has already gone today.
+ */
+export async function saveReminderAction(input: unknown): Promise<Outcome<{ time: string; enabled: boolean }>> {
+  const ctx = await gate();
+  const parsed = reminderInputSchema.safeParse(input);
+  if (!parsed.success) return { error: "That reminder could not be read. Reload the page and try again." };
+  const atMinute = minuteOfTime(parsed.data.time);
+  if (atMinute === null) return { error: "Choose a time for the reminder." };
+  const at = new Date();
+  const now = { day: localDayIn(ctx.tenant.timezone, at), minute: minuteIn(ctx.tenant.timezone, at) };
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => saveReminder(tx, ctx.tenant.id, { ...parsed.data, atMinute }, now),
+      { role: ctx.role },
+    );
+  } catch (err) {
+    return failure(err, "The reminder could not be saved. Try again.");
+  }
+  revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
+  return { ok: true, time: timeOfMinute(atMinute), enabled: parsed.data.enabled };
 }
 
 const programIdSchema = z.object({ programId: z.string().uuid() });

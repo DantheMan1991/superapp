@@ -5,9 +5,9 @@ import { withTenant, withSystem, schema } from "../../src/db";
 import { d } from "./_shared";
 
 /**
- * WORKOUTS' NINE TABLES ARE ORDINARY TENANT TABLES (docs/modules/fitness.md):
- * F1's program, phases, exercises, items and imports, and F2's enrollments,
- * sessions, session exercises and sets.
+ * WORKOUTS' TEN TABLES ARE ORDINARY TENANT TABLES (docs/modules/fitness.md):
+ * F1's program, phases, exercises, items and imports, F2's enrollments,
+ * sessions, session exercises and sets, and F4a's reminders.
  *
  * They only ever hold rows in a personal space, but to the database a personal
  * space is a tenant like any other (ADR 0111) — so this proves what
@@ -30,6 +30,7 @@ const ids = {
   session: "",
   sessionExercise: "",
   set: "",
+  reminder: "",
 };
 
 async function names(err: Promise<unknown>): Promise<string> {
@@ -126,7 +127,12 @@ d("workouts tables (RLS)", () => {
         .insert(schema.fitnessSets)
         .values({ tenantId: a, sessionExerciseId: sessionExercise.id, number: 1, target: 8, count: 8, doneAt: new Date() })
         .returning();
+      const [reminder] = await tx
+        .insert(schema.fitnessReminders)
+        .values({ tenantId: a, programId: program.id, slot: "evening", atMinute: 1170 })
+        .returning();
       Object.assign(ids, {
+        reminder: reminder.id,
         program: program.id,
         phase: phase.id,
         exercise: exercise.id,
@@ -144,8 +150,9 @@ d("workouts tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.tenants).where(inArray(schema.tenants.id, [a, b])));
   });
 
-  it("A reads its own program, phase, exercise, item and import, and its workouts", async () => {
+  it("A reads its own program, phase, exercise, item and import, its workouts and its reminders", async () => {
     const seen = await withTenant(a, async (tx) => ({
+      reminders: await tx.select({ id: schema.fitnessReminders.id }).from(schema.fitnessReminders),
       programs: await tx.select({ id: schema.fitnessPrograms.id }).from(schema.fitnessPrograms),
       phases: await tx.select({ id: schema.fitnessPhases.id }).from(schema.fitnessPhases),
       exercises: await tx.select({ id: schema.fitnessExercises.id }).from(schema.fitnessExercises),
@@ -165,6 +172,7 @@ d("workouts tables (RLS)", () => {
     expect(seen.sessions.map((r) => r.id)).toEqual([ids.session]);
     expect(seen.sessionExercises.map((r) => r.id)).toEqual([ids.sessionExercise]);
     expect(seen.sets.map((r) => r.id)).toEqual([ids.set]);
+    expect(seen.reminders.map((r) => r.id)).toEqual([ids.reminder]);
   });
 
   it("B cannot read any of A's rows, even by id", async () => {
@@ -181,6 +189,7 @@ d("workouts tables (RLS)", () => {
         .from(schema.fitnessSessionExercises)
         .where(eq(schema.fitnessSessionExercises.id, ids.sessionExercise))),
       ...(await tx.select().from(schema.fitnessSets).where(eq(schema.fitnessSets.id, ids.set))),
+      ...(await tx.select().from(schema.fitnessReminders).where(eq(schema.fitnessReminders.id, ids.reminder))),
     ]);
     expect(seen).toHaveLength(0);
   });
@@ -206,6 +215,12 @@ d("workouts tables (RLS)", () => {
         .returning()),
       ...(await tx.delete(schema.fitnessSets).where(eq(schema.fitnessSets.id, ids.set)).returning()),
       ...(await tx.delete(schema.fitnessEnrollments).where(eq(schema.fitnessEnrollments.id, ids.enrollment)).returning()),
+      ...(await tx
+        .update(schema.fitnessReminders)
+        .set({ atMinute: 0, lastHandledOn: "2026-09-28" })
+        .where(eq(schema.fitnessReminders.id, ids.reminder))
+        .returning()),
+      ...(await tx.delete(schema.fitnessReminders).where(eq(schema.fitnessReminders.id, ids.reminder)).returning()),
     ]);
     expect(changed).toHaveLength(0);
     const [program] = await withSystem((tx) =>
@@ -242,6 +257,13 @@ d("workouts tables (RLS)", () => {
         ),
       ),
     ).toContain("fitness_imports_program_fk");
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessReminders).values({ tenantId: b, programId: ids.program, slot: "morning", atMinute: 420 }),
+        ),
+      ),
+    ).toContain("fitness_reminders_program_fk");
   });
 
   it("B cannot hang a workout of its own off A's program, enrollment, session or exercise", async () => {

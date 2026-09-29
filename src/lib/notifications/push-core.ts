@@ -12,6 +12,10 @@ import { deltaSentence, digestSubject } from "./email";
  * (docs/modules/notifications.md, "derived obligations, not stored events").
  * One notification per person per business per day, at the same local hour
  * as the email, carrying the same subject, opening the same page.
+ *
+ * The one other sender is a workout reminder (ADR 0116): the same kind of
+ * thing, what is still owed today and gone once it is done, at the hour the
+ * person chose rather than the digest's.
  */
 
 export interface PushMessage {
@@ -21,8 +25,12 @@ export interface PushMessage {
   url: string;
   /** Same id on both providers: a second send the same day replaces the first. */
   collapseId: string;
-  /** The count on the icon. Zero clears it. */
-  badge: number;
+  /**
+   * The count on the icon. Zero clears it. Left out, the icon keeps what it
+   * has: a workout reminder is not one of the digest's items and must not
+   * overwrite its count.
+   */
+  badge?: number;
 }
 
 /**
@@ -171,7 +179,7 @@ export function apnsRequestBody(message: PushMessage): Record<string, unknown> {
   return {
     aps: {
       alert: { title: message.title, body: message.body },
-      badge: message.badge,
+      ...(message.badge === undefined ? {} : { badge: message.badge }),
       sound: "default",
     },
     url: message.url,
@@ -206,7 +214,7 @@ export function fcmRequestBody(
       android: {
         collapse_key: message.collapseId,
         priority: "HIGH",
-        notification: { notification_count: message.badge },
+        ...(message.badge === undefined ? {} : { notification: { notification_count: message.badge } }),
       },
     },
   };

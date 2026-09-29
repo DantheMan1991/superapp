@@ -13,6 +13,81 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-29 — F4c: an exercise's levels, and moving up (`claude/fitness-f4c`)
+
+The last of F4. His program starts the calf raise at a first level and says
+when to move on (a number of good sets without much fatigue), but it names
+the levels nowhere in its words: they are only shown in the exercise's video,
+which the app cannot watch (YouTube also answered a bot check when its page
+was fetched for chapters; nothing tried to get past it). The founder approved
+a mockup with four calls: **he names the levels** in the editor, each with the
+part of the video that shows it; the app suggests moving up after **the first
+session that makes the mark**; it does so **right after the exercise and on
+the program page**; and **a level can be gone back to**.
+
+**Migration `0433`**: `fitness_phase_items.progression` (jsonb),
+`fitness_enrollments.levels` (jsonb), `fitness_session_exercises.level` and
+`level_up`, and a range check. Additive only. On dev; production on his word,
+before the merge. No new table: `verify-rls -- --dev` passed (255 tables).
+
+- **The model** (`core/levels.ts`, pure): an item's levels (a name and a part
+  of the video each, two to twenty) and its mark, `sets` × `target`, on each
+  side for an exercise done per side. `markMade` adds the rest: effort no
+  higher than the program's top, and nothing hurt; an effort or hurt left
+  unanswered makes no mark. The person's level is on the enrollment, by item
+  (`levelOf`: the first until one is saved, never past the last).
+- **The editor**: `Levels` on an exercise, `Add levels` (two to start, the
+  mark from the exercise's own fewest sets and the top of its count, which on
+  his calf raise is exactly the book's 2 × 15), a name and `Plays … to …` per
+  level, `Add a level`, `Move up after … sets of …`, `Remove levels`, and
+  their messages.
+- **The program page**: an exercise with levels says `Your level: Level 1 of
+  3`, with `Move up` and `Back a level` (`setLevelAction` → `setLevel`), the
+  line `Ready for Level 2: your last session did 2 × 15 at Level 1, effort 3,
+  nothing hurt.` when its latest go at this level made the mark
+  (`latestTries`), and its video playing the level's part (`levelClip`).
+- **Workout mode**: `sessionPlan(…, levels)` gives the item its level, the
+  demo that level's part; the start screen and the set screen say the level;
+  the coach names it after the exercise on its first set. After the exercise,
+  once effort and hurt are answered and the sets make the mark, a box offers
+  `Move up to Level 2` or `Not yet`. The choice rides in the session document
+  (`levelUp` on the exercise) and `saveSession` applies it, so it works with no
+  signal; `level_up` on the row makes that happen once. A set of reps at a
+  level starts at the set before's count, so the climb to 15 is tapped once.
+- Guides: `editor.md` (levels, how to add them, their messages),
+  `program.md` (`Your level`), `workout.md` (the level, the box, the count).
+  Guide icon: `trending-up`. The draft never reads levels (a program shows
+  them in its videos); the book's rule stays in the exercise's notes.
+
+**Driven** on a production build against dev, on his program:
+
+- The editor at 375 px: `Add levels` on the calf raise gave `Level 1` and
+  `Level 2` and the mark `2` sets of `15` reps, each side; `Add a level` a
+  third; level 1 given `0:05` to `0:30`. Saved (`Program saved`).
+- The program page, phase 3: `Your level: Level 1 of 3` with `Move up` only,
+  the video `Tap to play here · 0:05–0:30`. `Move up`: `Now on Level 2`, both
+  buttons, the whole video. `Back a level`: `Now on Level 1`, the part again.
+- A workout on phase 3: the start screen and the set said `Level 1 of 3`; the
+  first set's count started at 6 and, tapped to 15, the left side and set 2
+  started at 15. After the exercise the box stayed away until effort (3) AND
+  hurt (No) were answered, then said `2 × 15 at Level 1, effort 3, nothing
+  hurt. That's the program's mark to move on.`; `Not yet` and `Move up` each
+  said what they do. With Move up and Next, the program page read `Level 2 of
+  3` once the session was sent.
+- Back a level on the card: `Ready for Level 2: your last session did 2 × 15
+  at Level 1, effort 3, nothing hurt.`
+- Dev's calf raise had its levels removed after, through the editor; the
+  drive's phase 3 session stays.
+
+Tests: `tests/fitness-levels.test.ts` (new, pure: the ladder, the level, the
+mark and its words), `tests/fitness-session.test.ts` (a go at a level, and a
+move up kept only when there is a next), `tests/fitness-coach.test.ts` (the
+level named on the first set), `tests/fitness-core.test.ts` (the editor both
+ways and its messages), `tests/fitness-ops.test.ts` (db: levels saved and
+loaded, each level's part played, `setLevel` and its refusals, a workout's
+move up applied once however often it is sent and not again after going back
+a level — proven to bite with the guard taken out — and `latestTries`).
+
 ### 2026-09-29 — F4b, part 2: taking the tests, and one-sided workouts (`claude/fitness-f4b2`)
 
 The second half of F4b. The founder approved an interactive mockup with four
@@ -191,162 +266,7 @@ and "table top", the pictures' number and size), `tests/fitness-ops.test.ts`
 exercise not per side; `readAgain` writing nothing, keeping every id, and its
 failures' words).
 
-### 2026-09-28 — F4a: reminders (`claude/fitness-f4`)
-
-F4 starts. The founder approved a mockup of all three parts (reminders, the
-side self-assessment, the calf raise's levels) with three calls: **build them in
-the order he will need them** (reminders now; his side before phase 2 opens; the
-calf raise in phase 3), **a reminder skips a day whose sets are done**, and the
-tests, the one-sided exercises and the levels are **read from his PDF again**
-(F4b, F4c). Production had his space by then: one program, four sessions, one
-phone registered for push (a read-only count).
-
-**Migration `0430` (the table) and `0431` (its RLS)**, on dev; production on
-his word, before the merge.
-
-- **`fitness_reminders`**: a program's `morning` and `evening`, each a minute of
-  the day on the space's clock (in tens, the cron's step), on or off, and
-  `last_handled_on`, the space's day the cron last took it. One row a slot.
-- **The Reminders card** on the program page, under its rules: two times and two
-  switches, each saved as it changes (a time after 0.8 s, so typing 07:30 is one
-  save), a time between the tens kept at the nearest (7:34 is 7:30), and the
-  line `A push to the Yosher app on your phone at these times, on any day whose
-  sets are not done yet.` With no phone registered, it says so. Saving a time
-  already gone today starts it tomorrow.
-- **The cron**, `/api/cron/fitness-reminders`, every ten minutes
-  ([ADR 0116](../decisions/0116-a-workout-reminder-is-the-days-unfinished-sets-pushed-at-the-hour-the-person-chose.md)):
-  each reminder whose time has come (within an hour) is claimed once a day
-  under withTenant, the day of the last workout's phase is added up with
-  `dayProgress`, and unless it is done the phone is told `Today's workout`
-  (`Phase 1: Weeks 1-2 · 4 exercises, 6 sets`) or `The rest of today` (`3 sets
-  left · …`), through the digest's sender, without a badge. The tap opens the
-  program through the personal space's door, which gained `?next=`
-  (`doorDestination`: a plain path inside the space, or home).
-- **Push only, no digest line** (the plan said both): the digest is a morning
-  email, and a personal space's would be a second one about one thing.
-- Guide: `program.md` (the card, the notifications, when they come). Guide icon:
-  `bell`.
-
-**Driven** on a production build against the dev branch, on the founder's
-program, in a hidden pane tab (another tab was in front):
-
-- The card showed both off at 7:00 AM and 7:30 PM, the line, and `No phone is
-  set up for notifications yet…` (dev has no phone for him; production does).
-- The evening switch on: `Evening reminder at 7:30 PM`. The morning time typed
-  as 07:34 came back as 07:30. At 9:40 PM in New York (the space's clock) both
-  rows were marked taken for the day, so neither went off on the spot.
-- With the evening row made due on dev, the cron route answered `{"considered":
-  1, "taken": 1, "noPhone": 1}` (the day was not done; no phone to tell), a
-  second call straight after took nothing, and a call without the secret got
-  404.
-- `/personal/open?next=/personal/m/fitness/programs/…` landed on the program;
-  `?next=/dashboard` landed on the space's home.
-- At 375 px the card's rows fit, with no sideways scroll.
-- **One wording bug the drive found, fixed:** a time changed on a reminder that
-  was off said `Morning reminder off`; it says `Morning reminder set for 6:40
-  AM. It is off until you turn it on.` now.
-- Dev was left with both reminders off.
-
-Tests: `tests/fitness-reminders.test.ts` (new, pure: the times in tens, the
-space's clock, when a reminder goes and the grace, a time already gone, the
-words, the card's input), `tests/personal-space-core.test.ts` (the door's
-destination, and every way it refuses one), `tests/push-core.test.ts` (a message
-without a badge), `tests/fitness-ops.test.ts` (db: one row a slot, a time gone
-starting tomorrow; the run sending once with the whole day or what is left,
-skipping a done day, quiet when off or past the hour, `noPhone`; the program's
-deletion taking its reminders), `tests/isolation/fitness.test.ts` (the tenth
-table).
-
-### 2026-09-27 — F2d: a natural voice, and a bigger demo that waits for it (`claude/fitness-f2d`)
-
-The founder's report after using workout mode on his PC: "the video is really
-small. the voice starts talking and the video plays at the same time. the video
-should wait to start until the talking is done. Also, the voice sounds very
-robotic. can we get a more natural voice." He approved a mockup of the layout
-and the wait as drawn, chose Deepgram for the voice after hearing four samples,
-and chose Arcas. No migration, no seed.
-
-- **The demo is bigger.** A set with a demo spreads out on a screen 1024 px wide
-  or more: the demo on the left, as wide as the window's height allows a 16:9
-  picture with the top bar and its buttons still on screen (never narrower
-  than 26rem), and the set in a 24rem column on the right, so Done stays in
-  view. Up to 1024 px the column is 42rem (a tablet held upright), and under
-  44rem wide the demo loses its side margins and corners and runs edge to edge
-  (a phone). The start, the three taps and the finish keep the phone's column.
-- **The demo waits for the coach.** A new exercise's demo holds while the coach
-  says what the exercise is, with `The demo starts when the coach has finished.
-  Tap play to start it now.` under it, and starts when the voice goes quiet
-  (`isVoiceBusy` and `subscribeVoiceBusy` on the queue). Play starts it at once,
-  it never waits more than 20 s, and once going it does not stop for the coach.
-  `With sound` now stops the coach, so the author is heard alone.
-- **The coach speaks in a recorded voice**
-  ([ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
-  Deepgram's Aura-2 (the tell box's vendor already; $0.030 per 1,000
-  characters): Arcas, Orion, Helena or Vesta, chosen on the start screen with
-  `Try` and remembered by the phone. `sessionLines` (core/coach.ts) walks the
-  session with the screen's own functions to list every line it can say; the
-  start screen fetches them while the feel check is answered, the first four
-  on their own so the first line is ready soonest, and the screen fetches what
-  a change made new as the session moves on. `/api/fitness/voice` records a
-  batch (40 lines of 300 characters at most, the personal space's door and the
-  Workouts gate, the words only, the vendor's model-improvement opt-out,
-  nothing kept) and answers in one binary body. The phone keeps every
-  recording in Cache Storage. The queue's rules are unchanged; its engine plays
-  the recording, waits up to 2 s for one on its way (never for a `high` line),
-  and otherwise uses the device.
-- **The device's voice is the most natural it has** (`pickVoice`, for the tell
-  box too): natural and neural voices first, then premium, enhanced, Google;
-  the person's region; a dated or joke voice only when there is nothing else. A
-  network voice that fails is passed over for the page instead of marking the
-  device silent. The old pick, the first voice in the language, was Microsoft
-  David on his PC.
-- Guide: `workout.md` (the voice row and Try, how big the demo is, the wait,
-  whose voice, working without signal; and "Not on this page" no longer says
-  progress is to come).
-
-**Driven** on a production build against the dev branch, on the founder's
-program (phase 1):
-
-- The start screen showed `Coach's voice` with Arcas chosen and fetched the
-  session's 13 lines (252 KB), all kept in the phone's store. Try played the
-  first exercise's line as a 6.3 s recording; the device's voice said nothing.
-- Start: the first exercise's line began as a recording 0.1 s after the tap.
-  The player was ready at 2.1 s and held, cued, with the waiting line; when the
-  line ended at 6.4 s it was told to play. (The pane refuses a video that starts
-  by itself, muted or not, as F2b's drive found, so it then asked for a tap. The
-  founder's own browser plays it.)
-- Exercise 3: play pressed 0.55 s into a 4.2 s line started the demo at once
-  and the coach carried on. Exercise 4: `With sound` 0.4 s into a 4.7 s line
-  stopped the recording, unmuted the demo, and read `Back to the loop`.
-- Voice switched off, reloaded mid-session: no wait.
-- Sizes: at 1906 × 907 (his window) the demo was 1271 × 715, nine times the 416
-  × 234 in his screenshot, with its buttons ending at 831 px and nothing
-  scrolling; at 1440 × 900, 992 × 558 beside a 384 px set column with Done in
-  view; at 375 px, 375 × 211 from edge to edge, square-cornered, with no
-  sideways scroll.
-- Helena chosen mid-session: 7 lines fetched and kept; a reload fetched none.
-  Vesta on the start screen: two requests side by side, the first four lines
-  back in 3.9 s and the rest in 5.9 s (one batch of 13 had taken 6.8 s; the
-  vendor took 0.8 to 3 s a line that evening, and each request pays the dev
-  database's sign-in checks from a laptop).
-- **Two bugs the drive found, fixed.** The start screen fetched nothing: a
-  child's effects run before its parent's, so it asked for its lines before the
-  workout screen had turned the recordings on. The recordings are turned on in
-  a layout effect now, which also keeps a reloaded set's line from going to
-  the device's voice. And one batch waited for its slowest line, so the first
-  four now go on their own.
-- The pane was left as it was: the voice switch on, Arcas, the demo speed his.
-  One test session on phase 1 (four exercises skipped, finished) is on the dev
-  branch.
-
-Tests: `tests/speech-voices.test.ts` (new, pure: the voices, the request's
-bounds, the binary answer and a body cut short), `tests/speech-say.test.ts`
-(`pickVoice` on the lists a Windows PC, Edge and an iPhone give, offline, a
-voice that failed, the region, another language), `tests/fitness-coach.test.ts`
-(`sessionLines`: the whole walk in order, every line the screen then says, the
-middle of a session, a split day, One more set, a finished session).
-
-Older entries (F3, F2c, F2b, F2a, F1 and the plan) are in [fitness-build-log.md](fitness-build-log.md).
+Older entries (F4a, F2d, F3, F2c, F2b, F2a, F1 and the plan) are in [fitness-build-log.md](fitness-build-log.md).
 
 ## What his program demands of the model
 
@@ -364,7 +284,7 @@ the PDF and the part of the model that keeps it.
 | Every exercise has "How to know you're doing it right" (three or four cues) | `cues` on the exercise, shown during the set and ticked after it |
 | A video link on every exercise, a playlist per phase | A video on the exercise, played inline |
 | A five-test self-assessment says which side you are "lateralized" to, and changes four exercises in phases 2–4 to one side | The assessment on the program (each test with `leftMeans`, the side it points to when the left went further), the person's side on the enrolment, and a side rule on the item (`both`, `toward`, `away`, and what the side is: the side, the side lain on, the leg on top). Until the assessment is done, both sides, which is the program's own default |
-| Calf raise progression: "move on once you can do 2 sets of 15 perfect reps" | A progression ladder on the item with an advance rule, and a nudge when the log meets it |
+| Calf raise progression: "move on once you can do 2 sets of 15 perfect reps" | Levels on the item, each with the part of the video that shows it, and the mark for moving up (F4c; the book shows the levels only in its video, so the person names them), and a suggestion when the log meets it when the log meets it |
 | An optional exercise ("if you have extra time"), and alternatives ("I like this one more, but most people don't have the equipment") | `optional` on an item, and an alternative that can be swapped in |
 | Sessions 3–4 a week ("3 is good, 4 is great, 5 is even better") | A weekly target on the program |
 
@@ -556,13 +476,18 @@ ADR 0117) into the program he already has with "Read the PDF again". The
 second takes the tests on the program's page and runs one-sided workouts.
 Where it moved from the list below: each test is answered with which side went
 further, and the app applies the table (`leftMeans`); a session never goes
-back to both sides (his call). **F4c, the calf raise's levels, is next.**
+back to both sides (his call).
+
+**F4c is built**: an exercise's levels, named by the person from the video,
+with a suggestion to move up after the first session that makes the mark,
+right after the exercise and on the program page. **F4 is complete.**
 
 - **The self-assessment**: the five tests as a short flow with the author's
   video, the answer (left, right or none) saved on the enrolment, and the four
   affected exercises switched to one side, each saying why.
-- **Progressions**: the calf raise shows which level you are on and says "you
-  did 2 × 15 twice, try level 2" when the log says so. You decide.
+- **Progressions**: the calf raise shows which level you are on and suggests
+  the next when the log says so. You decide. (Built as F4c: after the first
+  session that makes the mark, not the second.)
 - **Reminders**: a chosen time for the morning and the evening half, as a
   push on the phone (Android push is proven; [mobile-app.md](mobile-app.md))
   and a line in the daily digest ([notifications.md](notifications.md)), where
@@ -629,7 +554,8 @@ Every table carries `tenant_id` with FORCE RLS (the two ordinary policies,
 `0427`) and composite FKs `(tenant_id, x)`, all `on delete cascade`. The
 first five are F1's (migration `0426`), the next four F2a's (`0428`),
 `fitness_reminders` F4a's (`0430`, RLS `0431`), and F4b's columns and two
-enums `0432`; `fitness_progressions` is planned. F2a's three keys from a log to the program it logged are the
+enums `0432`, and F4c's four columns `0433` (levels are jsonb on the item,
+not the `fitness_progressions` table first planned). F2a's three keys from a log to the program it logged are the
 column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 
 | Table | Purpose | Notes |
@@ -637,14 +563,13 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 | `fitness_programs` | A program: name, author, source (`imported` / `own`), notes (its rules in words), sessions a week and effort as ranges, the breathing pace (`breath_out_s`, `breath_in_s`, 1–30; F2a), `assessment` (jsonb, the side self-assessment: video, `least`, tests with `leftMeans`, notes; F4b), `archived_at`, `version` | `version` guards an edit from a second tab. One active at a time will be the UI's rule, not the table's |
 | `fitness_phases` | Ordered phases (`position`) with `min_done_days` (1–365, or none) and notes | |
 | `fitness_exercises` | name, purpose, cues (jsonb list), unit (`reps` / `breaths` / `rolls` / `seconds`), videos (jsonb list), notes | **`program_id` NOT NULL for now**: an exercise belongs to the program that made it. A library shared between programs is F5, and relaxing this column is where it starts |
-| `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). `side_rule` (`both` / `toward` / `away`) and `side_means` (`side` / `lying` / `top_leg`), F4b: a CHECK allows a rule only on a per-side item. Alternative-of is F4 |
+| `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). `side_rule` (`both` / `toward` / `away`) and `side_means` (`side` / `lying` / `top_leg`), F4b: a CHECK allows a rule only on a per-side item. `progression` (jsonb: levels with their part of the video, and the mark), F4c. Alternative-of is F4 |
 | `fitness_imports` | A PDF on its way to being a program: file name, pages, links, status (`drafting` / `draft` / `failed` / `saved` / `discarded`), the draft, the error, the program it became | Holds the draft json and the counts, never the book's text; the draft is dropped once saved |
-| `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `side_answers` (jsonb: each test by name and which side went further, F4b) and `side_assessed_at`, `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
+| `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `side_answers` (jsonb: each test by name and which side went further, F4b) and `side_assessed_at`, `levels` (jsonb: item id to 0-based level, F4c), `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
 | `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several: a split day is two or more (F2c). No morning-or-evening slot is stored; a session's part of the day is its `started_at` on the space's clock |
-| `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished | F2a. The three taps after an exercise live here, per exercise, not per set |
+| `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished, `level` (0–19) and `level_up` (F4c) | F2a. The three taps after an exercise live here, per exercise, not per set. `level_up` is set once and never unset, and the enrollment's level moves when it first arrives |
 | `fitness_sets` | A set: its number, side, `target` (the least asked) and `count` (what was done), `done_at` | F2a. The id is the phone's, so there is no separate idempotency key. Load (weight) is F5 |
 | `fitness_reminders` | A program's `morning` and `evening` reminder: `at_minute` (0–1430, in tens, on the space's clock), `enabled`, `last_handled_on` (the space's day the cron last took it) | F4a (`0430`, RLS `0431`). One row a slot (a unique index); the cron claims one by moving `last_handled_on`, so overlapping runs send it once |
-| `fitness_progressions` | A ladder of exercises on an item with its advance rule | F4c |
 
 ## Key files & seams
 
@@ -658,6 +583,11 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - `src/modules/fitness/core/side.ts` — a person's side (F4b): `testPoints`,
   `assessedSide`, `savedCounts`, `sideFor`, `onlySideOf`, `sideWords`,
   `oneSideLine`, `ruleWords`, `phasesWords`, and `sideAnswersSchema`.
+- `src/modules/fitness/core/levels.ts` — an exercise's levels (F4c):
+  `progressionSchema`, `levelOf`, `markMade`, and their words.
+  `src/modules/fitness/level-ops.ts` has `loadLevels`, `setLevel` and
+  `latestTries`; `components/level-control.tsx` is the card's control;
+  `levelClip` and the level on a plan item are in `program-ops.ts`.
 - `src/modules/fitness/side-ops.ts` — `loadSide` and `saveSide`, on the
   program's open enrollment (F4b part 2). The screens:
   `components/side-tests.tsx` (the route `fitness/programs/[id]/side`) and
@@ -898,6 +828,23 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - **An exercise keeps the sides it was started with.** One begun on both sides
   before the side was saved finishes on both, in the screen's and the coach's
   words, because a set half on each side is no set at all.
+- **The person names an exercise's levels** (F4c, his call). A program shows
+  them in its video, which no draft can watch, and the video's page answered
+  the app with a bot check, which nothing works around. The mark is read from
+  nothing either: new levels take it from the exercise's own prescription,
+  which on his calf raise is the book's rule exactly.
+- **A move up chosen in a workout travels in the session document** (F4c),
+  like everything a workout does (ADR 0113), so it works with no signal.
+  `saveSession` applies it the first time `level_up` arrives true on the row,
+  when the person is still at that level; a resend, a later revision, or a
+  level gone back to since never moves it again.
+- **The mark needs every answer.** Effort and hurt are part of it, so a
+  suggestion never shows before both are answered, and an unanswered one
+  never makes a mark (an app cannot tell an easy set from a question skipped).
+- **A level's set of reps starts where the set before got to.** The confirm
+  starts at the target for everything else (F2's call); at a level the count
+  climbs toward the mark, and tapping from 6 to 15 on every set and side
+  would be the very tapping the confirm exists to spare.
 - **A side rule is on the item, per phase.** The same exercise in two phases is
   two items, and a program may do it on one side in one phase only, so reading
   again asks for an entry per phase. A CHECK keeps a rule off an item not done
@@ -941,6 +888,8 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   so a long line may be cut off by the next one. The build that adds VIBRATE
   and CAMERA can have the native voice report its end (`onDone`), and
   `speakLine` would use it where it is there.
+- **His production calf raise has no levels yet.** He names them in the
+  editor from the video, after `0433` is on production and this is merged.
 - **His production program has no self-assessment yet**, unless he has read
   the PDF again there since part 1 merged. Then `Your side` offers the tests.
 - **A one-sided workout on a phone is unwatched.** The drive saw the set line

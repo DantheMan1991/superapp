@@ -7,6 +7,161 @@
 > which is still the file to read first.
 > Status: `archive` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
+### 2026-09-28 — F4a: reminders (`claude/fitness-f4`)
+
+F4 starts. The founder approved a mockup of all three parts (reminders, the
+side self-assessment, the calf raise's levels) with three calls: **build them in
+the order he will need them** (reminders now; his side before phase 2 opens; the
+calf raise in phase 3), **a reminder skips a day whose sets are done**, and the
+tests, the one-sided exercises and the levels are **read from his PDF again**
+(F4b, F4c). Production had his space by then: one program, four sessions, one
+phone registered for push (a read-only count).
+
+**Migration `0430` (the table) and `0431` (its RLS)**, on dev; production on
+his word, before the merge.
+
+- **`fitness_reminders`**: a program's `morning` and `evening`, each a minute of
+  the day on the space's clock (in tens, the cron's step), on or off, and
+  `last_handled_on`, the space's day the cron last took it. One row a slot.
+- **The Reminders card** on the program page, under its rules: two times and two
+  switches, each saved as it changes (a time after 0.8 s, so typing 07:30 is one
+  save), a time between the tens kept at the nearest (7:34 is 7:30), and the
+  line `A push to the Yosher app on your phone at these times, on any day whose
+  sets are not done yet.` With no phone registered, it says so. Saving a time
+  already gone today starts it tomorrow.
+- **The cron**, `/api/cron/fitness-reminders`, every ten minutes
+  ([ADR 0116](../decisions/0116-a-workout-reminder-is-the-days-unfinished-sets-pushed-at-the-hour-the-person-chose.md)):
+  each reminder whose time has come (within an hour) is claimed once a day
+  under withTenant, the day of the last workout's phase is added up with
+  `dayProgress`, and unless it is done the phone is told `Today's workout`
+  (`Phase 1: Weeks 1-2 · 4 exercises, 6 sets`) or `The rest of today` (`3 sets
+  left · …`), through the digest's sender, without a badge. The tap opens the
+  program through the personal space's door, which gained `?next=`
+  (`doorDestination`: a plain path inside the space, or home).
+- **Push only, no digest line** (the plan said both): the digest is a morning
+  email, and a personal space's would be a second one about one thing.
+- Guide: `program.md` (the card, the notifications, when they come). Guide icon:
+  `bell`.
+
+**Driven** on a production build against the dev branch, on the founder's
+program, in a hidden pane tab (another tab was in front):
+
+- The card showed both off at 7:00 AM and 7:30 PM, the line, and `No phone is
+  set up for notifications yet…` (dev has no phone for him; production does).
+- The evening switch on: `Evening reminder at 7:30 PM`. The morning time typed
+  as 07:34 came back as 07:30. At 9:40 PM in New York (the space's clock) both
+  rows were marked taken for the day, so neither went off on the spot.
+- With the evening row made due on dev, the cron route answered `{"considered":
+  1, "taken": 1, "noPhone": 1}` (the day was not done; no phone to tell), a
+  second call straight after took nothing, and a call without the secret got
+  404.
+- `/personal/open?next=/personal/m/fitness/programs/…` landed on the program;
+  `?next=/dashboard` landed on the space's home.
+- At 375 px the card's rows fit, with no sideways scroll.
+- **One wording bug the drive found, fixed:** a time changed on a reminder that
+  was off said `Morning reminder off`; it says `Morning reminder set for 6:40
+  AM. It is off until you turn it on.` now.
+- Dev was left with both reminders off.
+
+Tests: `tests/fitness-reminders.test.ts` (new, pure: the times in tens, the
+space's clock, when a reminder goes and the grace, a time already gone, the
+words, the card's input), `tests/personal-space-core.test.ts` (the door's
+destination, and every way it refuses one), `tests/push-core.test.ts` (a message
+without a badge), `tests/fitness-ops.test.ts` (db: one row a slot, a time gone
+starting tomorrow; the run sending once with the whole day or what is left,
+skipping a done day, quiet when off or past the hour, `noPhone`; the program's
+deletion taking its reminders), `tests/isolation/fitness.test.ts` (the tenth
+table).
+
+### 2026-09-27 — F2d: a natural voice, and a bigger demo that waits for it (`claude/fitness-f2d`)
+
+The founder's report after using workout mode on his PC: "the video is really
+small. the voice starts talking and the video plays at the same time. the video
+should wait to start until the talking is done. Also, the voice sounds very
+robotic. can we get a more natural voice." He approved a mockup of the layout
+and the wait as drawn, chose Deepgram for the voice after hearing four samples,
+and chose Arcas. No migration, no seed.
+
+- **The demo is bigger.** A set with a demo spreads out on a screen 1024 px wide
+  or more: the demo on the left, as wide as the window's height allows a 16:9
+  picture with the top bar and its buttons still on screen (never narrower
+  than 26rem), and the set in a 24rem column on the right, so Done stays in
+  view. Up to 1024 px the column is 42rem (a tablet held upright), and under
+  44rem wide the demo loses its side margins and corners and runs edge to edge
+  (a phone). The start, the three taps and the finish keep the phone's column.
+- **The demo waits for the coach.** A new exercise's demo holds while the coach
+  says what the exercise is, with `The demo starts when the coach has finished.
+  Tap play to start it now.` under it, and starts when the voice goes quiet
+  (`isVoiceBusy` and `subscribeVoiceBusy` on the queue). Play starts it at once,
+  it never waits more than 20 s, and once going it does not stop for the coach.
+  `With sound` now stops the coach, so the author is heard alone.
+- **The coach speaks in a recorded voice**
+  ([ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
+  Deepgram's Aura-2 (the tell box's vendor already; $0.030 per 1,000
+  characters): Arcas, Orion, Helena or Vesta, chosen on the start screen with
+  `Try` and remembered by the phone. `sessionLines` (core/coach.ts) walks the
+  session with the screen's own functions to list every line it can say; the
+  start screen fetches them while the feel check is answered, the first four
+  on their own so the first line is ready soonest, and the screen fetches what
+  a change made new as the session moves on. `/api/fitness/voice` records a
+  batch (40 lines of 300 characters at most, the personal space's door and the
+  Workouts gate, the words only, the vendor's model-improvement opt-out,
+  nothing kept) and answers in one binary body. The phone keeps every
+  recording in Cache Storage. The queue's rules are unchanged; its engine plays
+  the recording, waits up to 2 s for one on its way (never for a `high` line),
+  and otherwise uses the device.
+- **The device's voice is the most natural it has** (`pickVoice`, for the tell
+  box too): natural and neural voices first, then premium, enhanced, Google;
+  the person's region; a dated or joke voice only when there is nothing else. A
+  network voice that fails is passed over for the page instead of marking the
+  device silent. The old pick, the first voice in the language, was Microsoft
+  David on his PC.
+- Guide: `workout.md` (the voice row and Try, how big the demo is, the wait,
+  whose voice, working without signal; and "Not on this page" no longer says
+  progress is to come).
+
+**Driven** on a production build against the dev branch, on the founder's
+program (phase 1):
+
+- The start screen showed `Coach's voice` with Arcas chosen and fetched the
+  session's 13 lines (252 KB), all kept in the phone's store. Try played the
+  first exercise's line as a 6.3 s recording; the device's voice said nothing.
+- Start: the first exercise's line began as a recording 0.1 s after the tap.
+  The player was ready at 2.1 s and held, cued, with the waiting line; when the
+  line ended at 6.4 s it was told to play. (The pane refuses a video that starts
+  by itself, muted or not, as F2b's drive found, so it then asked for a tap. The
+  founder's own browser plays it.)
+- Exercise 3: play pressed 0.55 s into a 4.2 s line started the demo at once
+  and the coach carried on. Exercise 4: `With sound` 0.4 s into a 4.7 s line
+  stopped the recording, unmuted the demo, and read `Back to the loop`.
+- Voice switched off, reloaded mid-session: no wait.
+- Sizes: at 1906 × 907 (his window) the demo was 1271 × 715, nine times the 416
+  × 234 in his screenshot, with its buttons ending at 831 px and nothing
+  scrolling; at 1440 × 900, 992 × 558 beside a 384 px set column with Done in
+  view; at 375 px, 375 × 211 from edge to edge, square-cornered, with no
+  sideways scroll.
+- Helena chosen mid-session: 7 lines fetched and kept; a reload fetched none.
+  Vesta on the start screen: two requests side by side, the first four lines
+  back in 3.9 s and the rest in 5.9 s (one batch of 13 had taken 6.8 s; the
+  vendor took 0.8 to 3 s a line that evening, and each request pays the dev
+  database's sign-in checks from a laptop).
+- **Two bugs the drive found, fixed.** The start screen fetched nothing: a
+  child's effects run before its parent's, so it asked for its lines before the
+  workout screen had turned the recordings on. The recordings are turned on in
+  a layout effect now, which also keeps a reloaded set's line from going to
+  the device's voice. And one batch waited for its slowest line, so the first
+  four now go on their own.
+- The pane was left as it was: the voice switch on, Arcas, the demo speed his.
+  One test session on phase 1 (four exercises skipped, finished) is on the dev
+  branch.
+
+Tests: `tests/speech-voices.test.ts` (new, pure: the voices, the request's
+bounds, the binary answer and a body cut short), `tests/speech-say.test.ts`
+(`pickVoice` on the lists a Windows PC, Edge and an iPhone give, offline, a
+voice that failed, the region, another language), `tests/fitness-coach.test.ts`
+(`sessionLines`: the whole walk in order, every line the screen then says, the
+middle of a session, a split day, One more set, a finished session).
+
 ### 2026-09-27 — F3: progress and the gate (`claude/fitness-f3`)
 
 No migration and no seed. The founder approved the screens from a mockup

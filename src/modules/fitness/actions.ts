@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { localDayIn } from "./core/day";
 import { draftRequestSchema } from "./core/draft";
 import { FitnessError, fitnessMessage } from "./core/errors";
+import { levelMoveSchema } from "./core/levels";
 import { programInputSchema, programProblems, type ProgramInput } from "./core/program";
 import { READ_AGAIN_WORDS, type AdditionsFound } from "./core/read-again";
 import { minuteIn, minuteOfTime, reminderInputSchema, timeOfMinute } from "./core/reminders";
@@ -17,6 +18,7 @@ import { markVideos } from "./embeds";
 import { saveReminder } from "./reminder-ops";
 import { saveSession } from "./session-ops";
 import { saveSide } from "./side-ops";
+import { setLevel } from "./level-ops";
 import { discardImport, draftProgram, markImportSaved, readAgain } from "./import-ops";
 import { deleteProgram, saveProgram } from "./program-ops";
 
@@ -225,6 +227,24 @@ export async function saveSideAction(input: unknown): Promise<Outcome<{ side: "l
   }
   revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
   return { ok: true, side };
+}
+
+/**
+ * Put the person on a level of an exercise (F4c): the program page's Move up
+ * and Back a level. A move up chosen in a workout travels with the session.
+ */
+export async function setLevelAction(input: unknown): Promise<Outcome<{ level: number }>> {
+  const ctx = await gate();
+  const parsed = levelMoveSchema.safeParse(input);
+  if (!parsed.success) return { error: "That level could not be read. Reload the page and try again." };
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  try {
+    await withTenant(ctx.tenant.id, (tx) => setLevel(tx, ctx.tenant.id, parsed.data, today), { role: ctx.role });
+  } catch (err) {
+    return failure(err, "Your level could not be saved. Try again.");
+  }
+  revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
+  return { ok: true, level: parsed.data.level };
 }
 
 const programIdSchema = z.object({ programId: z.string().uuid() });

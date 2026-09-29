@@ -124,6 +124,21 @@ export interface FitnessAssessment {
   notes: string;
 }
 
+/**
+ * AN EXERCISE THAT GETS HARDER IN STEPS (F4c): its levels in order, and the
+ * mark for moving up one. The founder's program starts its calf raise at the
+ * first level and moves on once a number of good sets comes without much
+ * fatigue; the levels themselves are only shown in the exercise's video, so
+ * the person names them, each with the part of the video that shows it.
+ * `sets` × `target` is the mark, on each side for an exercise done per side;
+ * the program's effort and nothing hurting complete it (core/levels.ts).
+ */
+export interface FitnessProgression {
+  levels: { name: string; startS: number | null; endS: number | null }[];
+  sets: number;
+  target: number;
+}
+
 export const fitnessPrograms = pgTable(
   "fitness_programs",
   {
@@ -288,6 +303,8 @@ export const fitnessPhaseItems = pgTable(
     sideRule: fitnessSideRule("side_rule").notNull().default("both"),
     /** What that side is, for the words: the side itself, the side lain on, or the leg on top. */
     sideMeans: fitnessSideMeans("side_means").notNull().default("side"),
+    /** Its levels and the mark for moving up (F4c); null without levels. Checked in the app, like `videos`. */
+    progression: jsonb("progression").$type<FitnessProgression>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -410,6 +427,11 @@ export const fitnessEnrollments = pgTable(
      */
     sideAnswers: jsonb("side_answers").$type<{ name: string; further: "left" | "right" | "same" }[]>(),
     sideAssessedAt: timestamp("side_assessed_at", { withTimezone: true }),
+    /**
+     * The level the person is on for each exercise with levels (F4c): the
+     * item's id to a 0-based level. An item not in it, or null, is at its first.
+     */
+    levels: jsonb("levels").$type<Record<string, number>>(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -496,6 +518,14 @@ export const fitnessSessionExercises = pgTable(
     name: text("name").notNull(),
     unit: fitnessUnit("unit").notNull(),
     perSide: boolean("per_side").notNull().default(false),
+    /** The level it was done at, 0-based (F4c); null for an exercise without levels. */
+    level: integer("level"),
+    /**
+     * "Move up" was chosen after it (F4c). The enrollment's level moves when
+     * this first arrives true, and never again for the same exercise, however
+     * often the session is sent, or after the person goes back a level.
+     */
+    levelUp: boolean("level_up").notNull().default(false),
     /** 1–10; the program's own zone is on the program. */
     effort: integer("effort"),
     /** The cues ticked as felt, in the exercise's own words. */
@@ -531,6 +561,7 @@ export const fitnessSessionExercises = pgTable(
     check("fitness_session_exercises_position_nonnegative", sql`${t.position} >= 0`),
     check("fitness_session_exercises_effort_range", sql`${t.effort} is null or ${t.effort} between 1 and 10`),
     check("fitness_session_exercises_cues_array", sql`jsonb_typeof(${t.cuesFelt}) = 'array'`),
+    check("fitness_session_exercises_level_range", sql`${t.level} is null or ${t.level} between 0 and 19`),
   ],
 );
 

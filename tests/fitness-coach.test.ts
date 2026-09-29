@@ -365,3 +365,23 @@ describe("one side only, for a person whose side is known (F4b)", () => {
     expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Now the left side.");
   });
 });
+
+describe("an exercise with levels (F4c)", () => {
+  it("names the level with the exercise on its first set, and not after", () => {
+    const base = plan();
+    const p: SessionPlan = {
+      ...base,
+      items: [
+        base.items[0],
+        { ...base.items[1], level: { index: 1, count: 3, name: "Step 2", next: "Step 3", mark: { sets: 1, target: 15 } } },
+        base.items[2],
+      ],
+    };
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    for (let k = 0; k < 4; k++) doc = done(p, doc, 0, 8);
+    doc = finish(p, doc, 0);
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe(
+      "Foam roll, calves. Step 2. 1 set of 15 rolls. Slow, about an inch a second.",
+    );
+  });
+});

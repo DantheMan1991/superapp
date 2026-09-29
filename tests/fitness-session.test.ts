@@ -245,3 +245,59 @@ describe("one side only, for a person whose side is known (F4b)", () => {
     expect(sessionDocSchema.safeParse({ ...doc, exercises: [{ ...doc.exercises[0], onlySide: "middle" }] }).success).toBe(false);
   });
 });
+
+describe("an exercise with levels (F4c)", () => {
+  /** The rep drill as `sessionPlan` gives it to someone on its first of three levels. */
+  function leveled(index = 0): SessionPlan {
+    const p = plan();
+    const names = ["Step 1", "Step 2", "Step 3"];
+    return {
+      ...p,
+      items: [
+        p.items[0],
+        {
+          ...p.items[1],
+          optional: false,
+          level: { index, count: 3, name: names[index], next: names[index + 1] ?? null, mark: { sets: 1, target: 10 } },
+        },
+      ],
+    };
+  }
+
+  function throughWallStack(p: SessionPlan, levelUp: boolean) {
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    doc = skipExercise(p, doc, { itemIndex: 0, exerciseId: id(), now: at(1) });
+    doc = set(p, doc, 1, 12, 2);
+    return finishExercise(p, doc, {
+      itemIndex: 1,
+      effort: 4,
+      cuesFelt: [],
+      hurt: "none",
+      hurtNote: "",
+      now: at(3),
+      levelUp,
+    });
+  }
+
+  it("logs the level it was done at, and a move up chosen after it", () => {
+    const doc = throughWallStack(leveled(), true);
+    const logged = doc.exercises.find((e) => e.name === "Wall stack");
+    expect(logged).toMatchObject({ level: 0, levelUp: true });
+    expect(sessionDocSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("keeps no move up when none was chosen, or on the last level", () => {
+    expect(throughWallStack(leveled(), false).exercises.find((e) => e.name === "Wall stack")).not.toHaveProperty("levelUp");
+    const last = throughWallStack(leveled(2), true).exercises.find((e) => e.name === "Wall stack");
+    expect(last).toMatchObject({ level: 2 });
+    expect(last).not.toHaveProperty("levelUp");
+  });
+
+  it("leaves an exercise without levels exactly as it was", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    doc = set(p, doc, 0, 8, 1);
+    expect(doc.exercises[0]).not.toHaveProperty("level");
+    expect(sessionDocSchema.safeParse({ ...doc, exercises: [{ ...doc.exercises[0], level: 20 }] }).success).toBe(false);
+  });
+});

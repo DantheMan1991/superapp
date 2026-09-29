@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { FitnessAssessment, FitnessVideo } from "@/db/schema";
+import type { FitnessAssessment, FitnessProgression, FitnessVideo } from "@/db/schema";
 import { FitnessError } from "./core/errors";
 import {
   breathPace,
@@ -13,6 +13,7 @@ import {
   type VideoInput,
 } from "./core/program";
 import type { DayItem } from "./core/day";
+import { levelOf } from "./core/levels";
 import type { SessionPlan, Side } from "./core/session";
 import { onlySideOf } from "./core/side";
 
@@ -111,6 +112,7 @@ export async function saveProgram(
         notes: item.notes,
         sideRule: item.sideRule,
         sideMeans: item.sideMeans,
+        progression: item.progression,
       };
       if (item.itemId !== null) {
         if (!existing.items.has(item.itemId)) throw new FitnessError("STALE");
@@ -310,6 +312,8 @@ export interface LoadedItem {
   notes: string;
   sideRule: SideRule;
   sideMeans: SideMeans;
+  /** Its levels and the mark for moving up (F4c); null without. */
+  progression: FitnessProgression | null;
   exercise: {
     id: string;
     name: string;
@@ -420,6 +424,7 @@ export async function loadProgram(
           notes: item.notes,
           sideRule: item.sideRule,
           sideMeans: item.sideMeans,
+          progression: item.progression ?? null,
           exercise: {
             id: exercise.id,
             name: exercise.name,
@@ -489,6 +494,7 @@ export function programToInput(program: LoadedProgram): ProgramInput {
         notes: item.notes,
         sideRule: item.sideRule,
         sideMeans: item.sideMeans,
+        progression: item.progression,
       })),
     })),
   };
@@ -502,8 +508,16 @@ export function programToInput(program: LoadedProgram): ProgramInput {
  * With the person's side (F4b, `lean`), an exercise the program does on one
  * side for someone who leans is that side only: not `perSide`, with its
  * `onlySide`. Without it, every exercise is as the program writes it.
+ *
+ * With the person's levels (F4c), an exercise with levels is done at theirs,
+ * and its demo plays that level's part of the video when the level has one.
  */
-export function sessionPlan(program: LoadedProgram, phaseIndex: number, lean: Side | null = null): SessionPlan {
+export function sessionPlan(
+  program: LoadedProgram,
+  phaseIndex: number,
+  lean: Side | null = null,
+  levels: Record<string, number> | null = null,
+): SessionPlan {
   const phase = program.phases[phaseIndex];
   return {
     programId: program.id,
@@ -520,6 +534,10 @@ export function sessionPlan(program: LoadedProgram, phaseIndex: number, lean: Si
     items: phase.items.map((item) => {
       const video = item.exercise.videos[0];
       const onlySide = onlySideOf(item, lean);
+      const progression = item.progression;
+      const at = progression ? levelOf(levels, item.id, progression.levels.length) : 0;
+      const level = progression?.levels[at] ?? null;
+      const clip = levelClip(level, video);
       return {
         itemId: item.id,
         exerciseId: item.exercise.id,
@@ -529,16 +547,37 @@ export function sessionPlan(program: LoadedProgram, phaseIndex: number, lean: Si
         unit: item.exercise.unit,
         perSide: onlySide ? false : item.perSide,
         ...(onlySide ? { onlySide, sideMeans: item.sideMeans } : {}),
+        ...(progression && level
+          ? {
+              level: {
+                index: at,
+                count: progression.levels.length,
+                name: level.name,
+                next: progression.levels[at + 1]?.name ?? null,
+                mark: { sets: progression.sets, target: progression.target },
+              },
+            }
+          : {}),
         optional: item.optional,
         setsMin: item.setsMin,
         setsMax: item.setsMax,
         targetMin: item.targetMin,
         targetMax: item.targetMax,
         notes: item.notes,
-        video: video
-          ? { id: video.id, startS: video.startS, endS: video.endS, embeddable: video.embeddable }
-          : null,
+        video: video ? { id: video.id, ...clip, embeddable: video.embeddable } : null,
       };
     }),
   };
+}
+
+/**
+ * The part of an exercise's video to play: its level's part when the level
+ * names one (F4c), else the video's own.
+ */
+export function levelClip(
+  level: { startS: number | null; endS: number | null } | null,
+  video: { startS: number | null; endS: number | null } | undefined,
+): { startS: number | null; endS: number | null } {
+  if (level && (level.startS != null || level.endS != null)) return { startS: level.startS, endS: level.endS };
+  return { startS: video?.startS ?? null, endS: video?.endS ?? null };
 }

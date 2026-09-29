@@ -20,6 +20,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { saveProgramAction } from "../actions";
 import {
+  emptyEditorLevel,
+  emptyEditorProgression,
   emptyEditorTest,
   emptyEditorVideo,
   fromEditor,
@@ -30,11 +32,14 @@ import {
   toEditorPhase,
   type EditorAssessment,
   type EditorItem,
+  type EditorLevel,
   type EditorPhase,
   type EditorProgram,
+  type EditorProgression,
   type EditorTest,
   type EditorVideo,
 } from "../core/editor";
+import { LEVELS_LIMIT } from "../core/levels";
 import {
   DEFAULT_TEST_QUESTION,
   FITNESS_UNITS,
@@ -570,6 +575,8 @@ function ItemRow({
 
           {item.perSide && <SideFields id={id} item={item} onPatch={onPatch} />}
 
+          <LevelsFields item={item} onPatch={onPatch} />
+
           <div className="space-y-1.5">
             <Label htmlFor={`${id}-cues`}>How to know you are doing it right</Label>
             <Textarea
@@ -608,6 +615,117 @@ function ItemRow({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * LEVELS (F4c): an exercise that gets harder in steps, each step with the
+ * part of the exercise's video that shows it, and the mark for moving up.
+ * A program shows its levels in its videos, so the person names them here.
+ */
+function LevelsFields({ item, onPatch }: { item: EditorItem; onPatch: (next: Partial<EditorItem>) => void }) {
+  const progression = item.progression;
+  if (!progression) {
+    return (
+      <div className="space-y-1.5">
+        <Label>Levels</Label>
+        <p className="text-sm text-muted-foreground">
+          For an exercise that gets harder in steps. Name each step, and you are told when you have made the mark
+          to move up.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => onPatch({ progression: emptyEditorProgression(item) })}>
+          <Plus aria-hidden /> Add levels
+        </Button>
+      </div>
+    );
+  }
+  const patch = (next: Partial<EditorProgression>) => onPatch({ progression: { ...progression, ...next } });
+  const patchLevel = (key: string, next: Partial<EditorLevel>) =>
+    patch({ levels: progression.levels.map((level) => (level.key === key ? { ...level, ...next } : level)) });
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label>Levels</Label>
+        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onPatch({ progression: null })}>
+          <Trash2 aria-hidden /> Remove levels
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Easiest first. Each can play its own part of the video, written as minutes and seconds like 0:42.
+      </p>
+      <ol className="space-y-2">
+        {progression.levels.map((level, l) => (
+          <li key={level.key} className="space-y-1.5 rounded-lg border border-border p-2">
+            <div className="flex items-center gap-2">
+              <span className="w-4 shrink-0 text-sm text-muted-foreground tabular-nums">{l + 1}</span>
+              <Input
+                className="min-w-0 flex-1"
+                value={level.name}
+                onChange={(e) => patchLevel(level.key, { name: e.target.value })}
+                aria-label={`Level ${l + 1} name`}
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={`Remove level ${l + 1}`}
+                onClick={() => patch({ levels: progression.levels.filter((x) => x.key !== level.key) })}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pl-6 text-sm">
+              <span className="text-muted-foreground">Plays</span>
+              <Input
+                className="w-20"
+                value={level.start}
+                onChange={(e) => patchLevel(level.key, { start: e.target.value })}
+                placeholder="0:00"
+                aria-label={`Level ${l + 1} start`}
+              />
+              <span className="text-muted-foreground">to</span>
+              <Input
+                className="w-20"
+                value={level.end}
+                onChange={(e) => patchLevel(level.key, { end: e.target.value })}
+                placeholder="the end"
+                aria-label={`Level ${l + 1} end`}
+              />
+            </div>
+          </li>
+        ))}
+      </ol>
+      {progression.levels.length < LEVELS_LIMIT && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => patch({ levels: [...progression.levels, emptyEditorLevel(progression.levels.length + 1)] })}
+        >
+          <Plus aria-hidden /> Add a level
+        </Button>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span>Move up after</span>
+        <Input
+          className="w-16"
+          inputMode="numeric"
+          value={progression.sets}
+          onChange={(e) => patch({ sets: e.target.value })}
+          aria-label="Sets to move up"
+        />
+        <span>sets of</span>
+        <Input
+          className="w-16"
+          inputMode="numeric"
+          value={progression.target}
+          onChange={(e) => patch({ target: e.target.value })}
+          aria-label="Count to move up"
+        />
+        <span>{`${UNIT_WORDS[item.unit].many}${item.perSide ? ", each side" : ""}`}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        And with the effort no higher than the program&apos;s, and nothing hurt.
+      </p>
+    </div>
   );
 }
 

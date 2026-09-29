@@ -12,14 +12,21 @@ import { UNIT_WORDS, type FitnessUnitValue } from "../../core/program";
  */
 export function ConfirmCount({
   target,
+  start = target,
   unit,
   onFinish,
 }: {
   target: number;
+  /**
+   * Where the count starts: the target, or for an exercise with levels (F4c)
+   * the set before's count, since a level's reps climb toward its mark and
+   * nobody should tap up to it on every set.
+   */
+  start?: number;
   unit: FitnessUnitValue;
   onFinish: (count: number) => void;
 }) {
-  const [value, setValue] = useState(target);
+  const [value, setValue] = useState(start);
   const words = UNIT_WORDS[unit][value === 1 ? "one" : "many"];
 
   return (

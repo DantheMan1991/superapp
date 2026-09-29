@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { shiftDay, type DaySession } from "../core/day";
+import { levelOf, madeWords, markMade } from "../core/levels";
 import { breathPace, countOf, prescription } from "../core/program";
 import {
   calendarWeeks,
@@ -17,9 +18,11 @@ import {
 } from "../core/progress";
 import type { ReminderView } from "../core/reminders";
 import { oneSideLine, onlySideOf, ruleWords, type Lean } from "../core/side";
-import { dayItemsOf, type LoadedItem, type LoadedProgram } from "../program-ops";
+import { dayItemsOf, levelClip, type LoadedItem, type LoadedProgram } from "../program-ops";
+import type { LevelTry } from "../level-ops";
 import type { LastSession } from "../session-ops";
 import type { SavedSide } from "../side-ops";
+import { LevelControl } from "./level-control";
 import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
 import { ReminderCard } from "./reminder-card";
 import { SideCard } from "./side-card";
@@ -48,6 +51,10 @@ import { VideoPlayer } from "./video-player";
  * YOUR SIDE (F4b): the self-assessment's card under them, each one-sided
  * exercise saying its side once it is known, and the next phase's gate box
  * pointing to the tests while they are untaken.
+ *
+ * YOUR LEVEL (F4c): an exercise with levels says the person's, with Move up
+ * and Back a level, a "Ready for" line when its last go made the mark, and
+ * its video playing that level's part.
  */
 export function ProgramView({
   program,
@@ -59,6 +66,8 @@ export function ProgramView({
   reminders,
   hasPhone,
   side,
+  levels,
+  tries,
 }: {
   program: LoadedProgram;
   phaseIndex: number;
@@ -74,8 +83,31 @@ export function ProgramView({
   hasPhone: boolean;
   /** What the program's tests found (F4b); null until they are taken. */
   side: SavedSide | null;
+  /** The person's level of each exercise with levels (F4c), by item id. */
+  levels: Record<string, number>;
+  /** Each exercise with levels' latest go (F4c), by item id. */
+  tries: Map<string, LevelTry>;
 }) {
   const lean = side?.side ?? null;
+  const effortTop = program.effortMin != null ? (program.effortMax ?? program.effortMin) : null;
+  /** An exercise's level, as its card shows it (F4c); null without levels. */
+  const levelOn = (item: LoadedItem) => {
+    const progression = item.progression;
+    if (!progression) return null;
+    const on = levelOf(levels, item.id, progression.levels.length);
+    const last = tries.get(item.id);
+    const next = progression.levels[on + 1];
+    const ready =
+      next && last && last.level === on && markMade(progression, last, effortTop)
+        ? `Ready for ${next.name}: your last session did ${madeWords(progression, progression.levels[on].name, last.effort)}`
+        : null;
+    return {
+      names: progression.levels.map((level) => level.name),
+      on,
+      ready,
+      clip: levelClip(progression.levels[on], item.exercise.videos[0]),
+    };
+  };
   // The tests, while they are untaken, for a program that has them.
   const testsHref =
     program.assessment && program.assessment.tests.length > 0 && !side
@@ -233,7 +265,14 @@ export function ProgramView({
           )}
           <ol className="space-y-4">
             {phase.items.map((item, i) => (
-              <ExerciseCard key={item.id} item={item} index={i} lean={lean} />
+              <ExerciseCard
+                key={item.id}
+                programId={program.id}
+                item={item}
+                index={i}
+                lean={lean}
+                level={levelOn(item)}
+              />
             ))}
           </ol>
         </section>
@@ -244,17 +283,36 @@ export function ProgramView({
   );
 }
 
-function ExerciseCard({ item, index, lean }: { item: LoadedItem; index: number; lean: Lean | null }) {
+function ExerciseCard({
+  programId,
+  item,
+  index,
+  lean,
+  level,
+}: {
+  programId: string;
+  item: LoadedItem;
+  index: number;
+  lean: Lean | null;
+  /** The person's level of it, for an exercise with levels (F4c). */
+  level: {
+    names: string[];
+    on: number;
+    ready: string | null;
+    clip: { startS: number | null; endS: number | null };
+  } | null;
+}) {
   const [main, ...others] = item.exercise.videos;
   // Once the side is known (F4b): this exercise's own side, and its sets are one side each.
   const only = lean ? onlySideOf(item, lean) : null;
   return (
     <li className="overflow-hidden rounded-2xl bg-card shadow-elevation-1">
       {main && (
+        // At the person's level (F4c), the part of the video that shows it.
         <VideoPlayer
           videoId={main.id}
-          startS={main.startS}
-          endS={main.endS}
+          startS={level ? level.clip.startS : main.startS}
+          endS={level ? level.clip.endS : main.endS}
           embeddable={main.embeddable}
           title={item.exercise.name}
         />
@@ -274,6 +332,15 @@ function ExerciseCard({ item, index, lean }: { item: LoadedItem; index: number; 
             {prescription({ ...item, unit: item.exercise.unit, perSide: only ? false : item.perSide })}
           </Badge>
         </div>
+        {level && (
+          <LevelControl
+            programId={programId}
+            itemId={item.id}
+            names={level.names}
+            level={level.on}
+            ready={level.ready}
+          />
+        )}
         {item.exercise.purpose && <p className="text-sm text-muted-foreground">{item.exercise.purpose}</p>}
         {item.exercise.cues.length > 0 && (
           <div>

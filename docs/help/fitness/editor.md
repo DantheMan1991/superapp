@@ -42,7 +42,7 @@ You reach this screen three ways. After an import, it opens on the draft, titled
   - **`Sets`.** How many sets, as one number or a range: `2` to `3`.
   - **`Count`.** How many reps, breaths, rolls or seconds in each set, as one number or a range.
   - **`Per side`.** Tick it when the count is for each side.
-  - **`Side, once yours is known`**, when `Per side` is ticked. What the program says to do once you know which side you lean to: `Both sides`, the default, `Only the side you lean toward` or `Only the side you lean away from`. Untick `Per side` and the exercise goes back to both sides.
+  - **`Side, once yours is known`**, when `Per side` is ticked. What the program says to do once you know which side you lean to: `Both sides`, the default, `Only the side you lean toward` or `Only the side you lean away from`. Untick `Per side` and the exercise goes back to both sides. Your side comes from the program's tests, under `Your side` on the program's page. See [Finding your side](side.md).
   - **`That side is`**, when the exercise is done on one side. How the side is named, for an exercise done lying down: `The side`, `The side you lie on` or `The leg on top`. Under it, the words for someone who leans left, for example `Leaning left, a workout says: Lying on your left side.`
   - **`Optional`.** Tick it when the program says the exercise is extra.
   - **`How to know you are doing it right`.** The program's checks, one per line. They show under the exercise while you follow the program.
@@ -133,7 +133,6 @@ For a program imported from a PDF, the PDF can fill this in for you. See [Readin
 - **Moving an exercise to another phase.** Not built. Remove it from one phase and add it to the other.
 - **Using one exercise in two programs.** Each program keeps its own exercises for now.
 - **Uploading your own video.** Only YouTube links for now.
-- **Taking the side self-assessment.** Not built yet. Until it is, a session has you do every exercise on both sides.
 
 ## Who can do what
 

@@ -13,7 +13,8 @@ import {
   type VideoInput,
 } from "./core/program";
 import type { DayItem } from "./core/day";
-import type { SessionPlan } from "./core/session";
+import type { SessionPlan, Side } from "./core/session";
+import { onlySideOf } from "./core/side";
 
 /**
  * A PROGRAM: saving one from the editor, reading one back, deleting one. Every
@@ -497,8 +498,12 @@ export function programToInput(program: LoadedProgram): ProgramInput {
  * A phase of a loaded program as workout mode runs it (core/session.ts): the
  * items in order with what each asks, the program's breathing pace and effort
  * zone, and each exercise's first video, which is THE video.
+ *
+ * With the person's side (F4b, `lean`), an exercise the program does on one
+ * side for someone who leans is that side only: not `perSide`, with its
+ * `onlySide`. Without it, every exercise is as the program writes it.
  */
-export function sessionPlan(program: LoadedProgram, phaseIndex: number): SessionPlan {
+export function sessionPlan(program: LoadedProgram, phaseIndex: number, lean: Side | null = null): SessionPlan {
   const phase = program.phases[phaseIndex];
   return {
     programId: program.id,
@@ -511,8 +516,10 @@ export function sessionPlan(program: LoadedProgram, phaseIndex: number): Session
     breath: breathPace(program),
     effort:
       program.effortMin != null ? { min: program.effortMin, max: program.effortMax ?? program.effortMin } : null,
+    lean,
     items: phase.items.map((item) => {
       const video = item.exercise.videos[0];
+      const onlySide = onlySideOf(item, lean);
       return {
         itemId: item.id,
         exerciseId: item.exercise.id,
@@ -520,7 +527,8 @@ export function sessionPlan(program: LoadedProgram, phaseIndex: number): Session
         purpose: item.exercise.purpose,
         cues: item.exercise.cues,
         unit: item.exercise.unit,
-        perSide: item.perSide,
+        perSide: onlySide ? false : item.perSide,
+        ...(onlySide ? { onlySide, sideMeans: item.sideMeans } : {}),
         optional: item.optional,
         setsMin: item.setsMin,
         setsMax: item.setsMax,

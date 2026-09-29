@@ -48,6 +48,7 @@ import {
   sessionCount,
 } from "../src/modules/fitness/session-ops";
 import { loadReminders, runWorkoutReminders, saveReminder } from "../src/modules/fitness/reminder-ops";
+import { loadSide, saveSide } from "../src/modules/fitness/side-ops";
 
 /**
  * Workouts against a real database (docs/modules/fitness.md, F1): a program
@@ -991,6 +992,98 @@ d("workouts: programs and imports", () => {
         detail: READ_AGAIN_WORDS.NO_TEXT,
       });
       expect(asked).toHaveLength(1);
+    });
+
+    it("takes the tests: the side worked out from the program's own tests, kept by name, following the program from then (part 2)", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...sidedProgram("Sided, taken"), assessment }, { programId: null, source: "own" }),
+      );
+      const programId = saved.programId;
+      const enrollments = () =>
+        inTenant((tx) =>
+          tx
+            .select({ startedOn: schema.fitnessEnrollments.startedOn })
+            .from(schema.fitnessEnrollments)
+            .where(eq(schema.fitnessEnrollments.programId, programId)),
+        );
+      expect(await inTenant((tx) => loadSide(tx, tenant.id, programId))).toBeNull();
+
+      // Left on the straight test and right on the reversed one both point left: two of two.
+      const first = new Date("2026-09-29T14:00:00Z");
+      expect(
+        await inTenant((tx) => saveSide(tx, tenant.id, { programId, answers: ["left", "right"] }, "2026-09-29", first)),
+      ).toEqual({ side: "left", left: 2, right: 0 });
+      expect(await inTenant((tx) => loadSide(tx, tenant.id, programId))).toEqual({
+        side: "left",
+        answers: [
+          { name: "Trunk turn", further: "left" },
+          { name: "Arm sweep", further: "right" },
+        ],
+        assessedAt: first,
+      });
+      // No workout yet: the tests started following the program, today.
+      expect(await enrollments()).toEqual([{ startedOn: "2026-09-29" }]);
+
+      // Taken again with nothing clear: no side, on the same enrollment.
+      const again = new Date("2026-10-06T14:00:00Z");
+      await inTenant((tx) => saveSide(tx, tenant.id, { programId, answers: ["same", "left"] }, "2026-10-06", again));
+      expect(await inTenant((tx) => loadSide(tx, tenant.id, programId))).toMatchObject({ side: null, assessedAt: again });
+      expect(await enrollments()).toEqual([{ startedOn: "2026-09-29" }]);
+
+      // Refused: answers that are not one per test, a program without tests, a program not here.
+      await expect(
+        inTenant((tx) => saveSide(tx, tenant.id, { programId, answers: ["left"] }, "2026-10-06")),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      const bare = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, sidedProgram("Sided, no tests"), { programId: null, source: "own" }),
+      );
+      await expect(
+        inTenant((tx) => saveSide(tx, tenant.id, { programId: bare.programId, answers: ["left"] }, "2026-10-06")),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      await expect(
+        inTenant((tx) => saveSide(tx, tenant.id, { programId: randomUUID(), answers: ["left", "left"] }, "2026-10-06")),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await inTenant((tx) => deleteProgram(tx, tenant.id, programId));
+      await inTenant((tx) => deleteProgram(tx, tenant.id, bare.programId));
+    });
+
+    it("runs a one-sided exercise on the person's side only, and counts its sets toward the day (part 2)", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...sidedProgram("Sided, done"), assessment }, { programId: null, source: "own" }),
+      );
+      const program = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      // Until the side is known, as the program writes it.
+      expect(sessionPlan(program, 0).items[0]).toMatchObject({ name: "Side reach", perSide: true });
+      expect(sessionPlan(program, 0).items[0]).not.toHaveProperty("onlySide");
+      const p = sessionPlan(program, 0, "left");
+      expect(p.lean).toBe("left");
+      expect(p.items[0]).toMatchObject({ name: "Side reach", perSide: false, onlySide: "left", sideMeans: "lying" });
+      expect(p.items[1]).toMatchObject({ name: "Hip lift", perSide: false });
+      expect(p.items[1]).not.toHaveProperty("onlySide");
+
+      let doc = beginSession(p, { id: randomUUID(), now: new Date("2026-09-29T14:00:00Z"), feelBefore: null });
+      for (let k = 0; k < 2; k++) {
+        doc = recordSet(p, doc, {
+          itemIndex: 0,
+          count: 5,
+          setId: randomUUID(),
+          exerciseId: randomUUID(),
+          now: new Date("2026-09-29T14:05:00Z"),
+        });
+      }
+      await inTenant((tx) => saveSession(tx, tenant.id, doc));
+      const setIds = doc.exercises[0].sets.map((s) => s.id);
+      const sides = await inTenant((tx) =>
+        Promise.all(
+          setIds.map((setId) =>
+            tx.select({ side: schema.fitnessSets.side }).from(schema.fitnessSets).where(eq(schema.fitnessSets.id, setId)),
+          ),
+        ),
+      );
+      expect(sides.flat()).toEqual([{ side: "left" }, { side: "left" }]);
+      // Two sets, each on its one side, are two sets.
+      expect((await inTenant((tx) => lastSession(tx, tenant.id, program.id)))?.sets).toBe(2);
+      await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
     });
   });
 });

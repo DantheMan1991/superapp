@@ -49,6 +49,7 @@ import {
   type SplitChoice,
 } from "../../core/day";
 import { countOf, prescription } from "../../core/program";
+import { sideWords as oneSideWords } from "../../core/side";
 import {
   beginSession,
   canAddSet,
@@ -539,6 +540,12 @@ function BeforeView({
                 <span>
                   {`${i + 1}. ${item.name}`}
                   {item.optional ? " (optional)" : ""}
+                  {item.onlySide && (
+                    // One side only (F4b): which, before the session starts.
+                    <span className="block text-xs text-module-accent">
+                      {oneSideWords(item.sideMeans ?? "side", item.onlySide)}
+                    </span>
+                  )}
                 </span>
               </span>
               <span className={cn("shrink-0", !doneToday && "text-foreground")}>
@@ -573,7 +580,10 @@ function SetView({
   const logged = loggedFor(doc, item);
   const planned = logged?.plannedSets ?? plannedFor(doc, item).sets;
   const done = logged?.sets.length ?? 0;
-  const side = sideWords(step.side);
+  // One side only (F4b), as the exercise was started: one begun on both sides
+  // before the side was saved finishes on both.
+  const only = logged ? (logged.onlySide ?? null) : (item.onlySide ?? null);
+  const side = only ? oneSideWords(item.sideMeans ?? "side", only) : sideWords(step.side);
   const cue = cueFor(item, done);
   const key = `${step.itemIndex}-${step.number}-${step.side ?? "both"}`;
   const max = item.targetMax ?? item.targetMin;
@@ -629,8 +639,11 @@ function SetView({
               </>
             )}
             {" · "}
-            {prescription(item)}
+            {prescription({ ...item, perSide: logged?.perSide ?? item.perSide })}
           </p>
+          {only && plan.lean && (
+            <p className="text-sm text-muted-foreground">{`One side only: you lean ${plan.lean}.`}</p>
+          )}
         </div>
 
         {item.unit === "breaths" ? (

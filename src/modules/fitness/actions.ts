@@ -12,9 +12,11 @@ import { programInputSchema, programProblems, type ProgramInput } from "./core/p
 import { READ_AGAIN_WORDS, type AdditionsFound } from "./core/read-again";
 import { minuteIn, minuteOfTime, reminderInputSchema, timeOfMinute } from "./core/reminders";
 import { sessionDocSchema } from "./core/session";
+import { sideAnswersSchema } from "./core/side";
 import { markVideos } from "./embeds";
 import { saveReminder } from "./reminder-ops";
 import { saveSession } from "./session-ops";
+import { saveSide } from "./side-ops";
 import { discardImport, draftProgram, markImportSaved, readAgain } from "./import-ops";
 import { deleteProgram, saveProgram } from "./program-ops";
 
@@ -201,6 +203,28 @@ export async function saveReminderAction(input: unknown): Promise<Outcome<{ time
   }
   revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
   return { ok: true, time: timeOfMinute(atMinute), enabled: parsed.data.enabled };
+}
+
+/**
+ * Save the side the program's tests found (F4b part 2): the answers only;
+ * `saveSide` works the side out from the program's own tests. Retaking the
+ * tests is the one way to change it (the founder's call).
+ */
+export async function saveSideAction(input: unknown): Promise<Outcome<{ side: "left" | "right" | null }>> {
+  const ctx = await gate();
+  const parsed = sideAnswersSchema.safeParse(input);
+  if (!parsed.success) return { error: "Your answers could not be read. Take the tests again." };
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  let side: "left" | "right" | null;
+  try {
+    ({ side } = await withTenant(ctx.tenant.id, (tx) => saveSide(tx, ctx.tenant.id, parsed.data, today), {
+      role: ctx.role,
+    }));
+  } catch (err) {
+    return failure(err, "Your side could not be saved. Try again.");
+  }
+  revalidatePath(`${HOME}/programs/${parsed.data.programId}`);
+  return { ok: true, side };
 }
 
 const programIdSchema = z.object({ programId: z.string().uuid() });

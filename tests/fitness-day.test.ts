@@ -229,6 +229,23 @@ describe("a split day, from a morning half to an evening that picks up", () => {
     expect(sessionDocSchema.safeParse(old).success).toBe(true);
     expect(nextStep(p, old)).toEqual({ kind: "set", itemIndex: 0, number: 1, side: null });
   });
+
+  it("counts a one-sided exercise's sets once each, so its day can be done (F4b)", () => {
+    const base = plan();
+    // The pullback, for someone who leans left: lying on the left only.
+    const p: SessionPlan = {
+      ...base,
+      lean: "left",
+      items: base.items.map((item, i) => (i === 1 ? { ...item, perSide: false, onlySide: "left", sideMeans: "lying" } : item)),
+    };
+    const dayItems = p.items.map(toDayItem);
+    const whole = doAll(p, beginSession(p, { id: id(), now: at(8), feelBefore: null }), 8);
+    const pullback = whole.exercises.find((e) => e.name === "Side-lying pullback");
+    expect(pullback?.sets.map((s) => s.side)).toEqual(["left", "left"]);
+    expect(dayProgress(dayItems, [daySessionOf(whole)]).complete).toBe(true);
+    // The same two sets on both sides would be one full set, and the day not done.
+    expect(fullSets(true, ["left", "left"])).toBe(0);
+  });
 });
 
 describe("adding a day up from the server and the phone", () => {

@@ -59,7 +59,7 @@ To leave the program as it was, click {button:Cancel|ghost} instead. Nothing was
 ## Not on this page
 
 - **Reading anything else again.** Only the self-assessment and the exercises done on one side are read. To change sets, counts or videos, click {button:Edit program|outline|pencil} on the program.
-- **Taking the self-assessment.** Not built yet. Until it is, a session has you do every exercise on both sides.
+- **Taking the self-assessment.** That is on the program's page, under `Your side`. See [Finding your side](side.md).
 - **Keeping the PDF.** The file is never uploaded or stored. Keep your own copy.
 
 ## Who can do what

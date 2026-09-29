@@ -6,6 +6,7 @@ import { isSynthesisConfigured } from "@/lib/speech/synthesis";
 import { localDayIn, shiftDay } from "@/modules/fitness/core/day";
 import { loadProgram, sessionPlan } from "@/modules/fitness/program-ops";
 import { recentSessions } from "@/modules/fitness/session-ops";
+import { loadSide } from "@/modules/fitness/side-ops";
 import { WorkoutScreen } from "@/modules/fitness/components/workout/workout-screen";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * It is given the program's sessions from the day before today to the day
  * after (F2c): a session later in the day picks up what the morning left, and
  * the phone adds the day up from these and its own (core/day.ts).
+ *
+ * And the person's side, once the program's tests have found one (F4b): an
+ * exercise the program does on one side is that side only.
  */
 export default async function WorkoutPage({
   params,
@@ -34,12 +38,13 @@ export default async function WorkoutPage({
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
   const today = localDayIn(ctx.tenant.timezone, new Date());
-  const [program, recent] = await withTenant(
+  const [program, recent, side] = await withTenant(
     ctx.tenant.id,
     (tx) =>
       Promise.all([
         loadProgram(tx, ctx.tenant.id, id),
         recentSessions(tx, ctx.tenant.id, id, shiftDay(today, -1), shiftDay(today, 1)),
+        loadSide(tx, ctx.tenant.id, id),
       ]),
     { role: ctx.role },
   );
@@ -52,7 +57,7 @@ export default async function WorkoutPage({
   if (!phase || phase.items.length === 0) notFound();
   return (
     <WorkoutScreen
-      plan={sessionPlan(program, phaseIndex)}
+      plan={sessionPlan(program, phaseIndex, side?.side ?? null)}
       programHref={`/personal/m/fitness/programs/${program.id}?phase=${phaseIndex + 1}`}
       recent={recent}
       today={today}

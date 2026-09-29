@@ -16,11 +16,13 @@ import {
   weeksOnTarget,
 } from "../core/progress";
 import type { ReminderView } from "../core/reminders";
-import { ruleWords } from "../core/side";
+import { oneSideLine, onlySideOf, ruleWords, type Lean } from "../core/side";
 import { dayItemsOf, type LoadedItem, type LoadedProgram } from "../program-ops";
 import type { LastSession } from "../session-ops";
+import type { SavedSide } from "../side-ops";
 import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
 import { ReminderCard } from "./reminder-card";
+import { SideCard } from "./side-card";
 import { StartSessionButton } from "./start-session-button";
 import { VideoPlayer } from "./video-player";
 
@@ -42,6 +44,10 @@ import { VideoPlayer } from "./video-player";
  * says so above its Start, which still works (the founder's call).
  *
  * REMINDERS (F4a): the program's morning and evening times, under its rules.
+ *
+ * YOUR SIDE (F4b): the self-assessment's card under them, each one-sided
+ * exercise saying its side once it is known, and the next phase's gate box
+ * pointing to the tests while they are untaken.
  */
 export function ProgramView({
   program,
@@ -52,6 +58,7 @@ export function ProgramView({
   timeZone,
   reminders,
   hasPhone,
+  side,
 }: {
   program: LoadedProgram;
   phaseIndex: number;
@@ -65,7 +72,15 @@ export function ProgramView({
   reminders: ReminderView[];
   /** The person has a phone registered for notifications. */
   hasPhone: boolean;
+  /** What the program's tests found (F4b); null until they are taken. */
+  side: SavedSide | null;
 }) {
+  const lean = side?.side ?? null;
+  // The tests, while they are untaken, for a program that has them.
+  const testsHref =
+    program.assessment && program.assessment.tests.length > 0 && !side
+      ? `/personal/m/fitness/programs/${program.id}/side`
+      : null;
   const base = `/personal/m/fitness/programs/${program.id}`;
   const at = program.phases[phaseIndex] ? phaseIndex : 0;
   const phase = program.phases[at];
@@ -132,6 +147,8 @@ export function ProgramView({
 
       <ReminderCard programId={program.id} reminders={reminders} hasPhone={hasPhone} />
 
+      <SideCard program={program} saved={side} timeZone={timeZone} />
+
       {program.phases.length > 1 && (
         <nav aria-label="Phases" className="flex flex-wrap gap-2">
           {program.phases.map((p, i) => (
@@ -169,6 +186,8 @@ export function ProgramView({
               href={`${base}?phase=${at + 2}`}
               exerciseCount={next.items.length}
               {...newIn(phase.items, next.items)}
+              oneSided={next.items.filter((item) => item.perSide && item.sideRule !== "both").length}
+              testsHref={testsHref}
             />
           )}
           {gate && sessions.length > 0 && (
@@ -214,7 +233,7 @@ export function ProgramView({
           )}
           <ol className="space-y-4">
             {phase.items.map((item, i) => (
-              <ExerciseCard key={item.id} item={item} index={i} />
+              <ExerciseCard key={item.id} item={item} index={i} lean={lean} />
             ))}
           </ol>
         </section>
@@ -225,8 +244,10 @@ export function ProgramView({
   );
 }
 
-function ExerciseCard({ item, index }: { item: LoadedItem; index: number }) {
+function ExerciseCard({ item, index, lean }: { item: LoadedItem; index: number; lean: Lean | null }) {
   const [main, ...others] = item.exercise.videos;
+  // Once the side is known (F4b): this exercise's own side, and its sets are one side each.
+  const only = lean ? onlySideOf(item, lean) : null;
   return (
     <li className="overflow-hidden rounded-2xl bg-card shadow-elevation-1">
       {main && (
@@ -249,7 +270,9 @@ function ExerciseCard({ item, index }: { item: LoadedItem; index: number }) {
               </Badge>
             )}
           </h3>
-          <Badge variant="secondary">{prescription({ ...item, unit: item.exercise.unit })}</Badge>
+          <Badge variant="secondary">
+            {prescription({ ...item, unit: item.exercise.unit, perSide: only ? false : item.perSide })}
+          </Badge>
         </div>
         {item.exercise.purpose && <p className="text-sm text-muted-foreground">{item.exercise.purpose}</p>}
         {item.exercise.cues.length > 0 && (
@@ -262,12 +285,20 @@ function ExerciseCard({ item, index }: { item: LoadedItem; index: number }) {
             </ul>
           </div>
         )}
-        {ruleWords(item.sideRule, item.sideMeans) && (
-          // The program's one-sided rule (F4b), before anybody's side is known.
+        {only && lean ? (
+          // Its side, once the person's is known (F4b).
           <p className="flex items-start gap-2 text-sm">
             <ArrowLeftRight className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
-            {`For someone who leans to a side: ${ruleWords(item.sideRule, item.sideMeans)?.toLowerCase()}. Otherwise both sides.`}
+            {oneSideLine(item.sideMeans, only, lean)}
           </p>
+        ) : (
+          ruleWords(item.sideRule, item.sideMeans) && (
+            // The program's one-sided rule (F4b), before the person's side is known.
+            <p className="flex items-start gap-2 text-sm">
+              <ArrowLeftRight className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+              {`For someone who leans to a side: ${ruleWords(item.sideRule, item.sideMeans)?.toLowerCase()}. Otherwise both sides.`}
+            </p>
+          )
         )}
         {item.notes && <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{item.notes}</p>}
         {others.map((video, v) => (

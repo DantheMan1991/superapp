@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Check, TriangleAlert } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Check, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { countOf } from "../core/program";
@@ -183,7 +183,8 @@ function FeelChart({ feel }: { feel: FeelSummary }) {
 /**
  * THE GATE, OPEN: the next phase, what is new in it with the first new
  * exercise's video, and the button to move on. The app never moves the
- * person on by itself.
+ * person on by itself. When the next phase does exercises on one side and the
+ * program's tests are untaken (F4b), it says so and points to them first.
  */
 export function NextPhaseOpen({
   name,
@@ -191,17 +192,34 @@ export function NextPhaseOpen({
   exerciseCount,
   newNames,
   video,
+  oneSided = 0,
+  testsHref = null,
 }: {
   name: string;
   href: string;
   exerciseCount: number;
   newNames: string[];
   video: { id: string; startS: number | null; endS: number | null; embeddable: boolean | null; title: string } | null;
+  /** How many of the next phase's exercises the program does on one side. */
+  oneSided?: number;
+  /** The program's tests, while they are untaken; null once they are, or when it has none. */
+  testsHref?: string | null;
 }) {
   return (
     <div className="space-y-3 rounded-2xl border border-module-accent/50 bg-card p-4">
       <p className="font-medium">{`${name} is open`}</p>
       <p className="text-sm text-muted-foreground">{newExercisesWords(exerciseCount, newNames)}</p>
+      {oneSided > 0 && testsHref && (
+        <div className="space-y-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
+          <p className="flex items-start gap-2">
+            <ArrowLeftRight className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+            {`${name} has ${countOf(oneSided, "exercise", "exercises")} done on one side. Take the tests first, to find yours.`}
+          </p>
+          <Button asChild variant="outline" size="sm">
+            <Link href={testsHref}>Take the tests</Link>
+          </Button>
+        </div>
+      )}
       {video && (
         <div className="overflow-hidden rounded-xl">
           <VideoPlayer

@@ -13,6 +13,90 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-29 — F4b, part 2: taking the tests, and one-sided workouts (`claude/fitness-f4b2`)
+
+The second half of F4b. The founder approved an interactive mockup with four
+calls: **the flow as drawn** (a `Your side` card on the program page, the
+author's video, one test at a time, the result with what each answer points
+to, Save, and redo any time), answers **`Left`, `About the same`, `Right`**
+(the same points nowhere), the nudge in **the card and the phase 2 gate box**,
+and **no per-session override** (retaking the tests is the way to change it).
+
+**No migration.** Part 1's `0432` made the columns this writes
+(`fitness_enrollments.side`, `side_answers`, `side_assessed_at`), and a
+one-sided set needs nothing new (below).
+
+- **Taking the tests**, `/personal/m/fitness/programs/[id]/side`
+  (`components/side-tests.tsx`): the video (`VideoPlayer`), then one test at a
+  time with a bar, `Back` (the earlier answer highlighted) and `Watch the video
+  again` (answers kept; `Back to the tests` resumes at the first unanswered),
+  then the result: `You lean left` or `No clear side`, how the tests add up,
+  each answer with where it points (`Right went further → Left` on a reversed
+  test), `What changes`, and `Save my side` or `Save the result`.
+- **`saveSideAction` → `saveSide`** (`side-ops.ts`): the answers only; the side
+  is worked out on the server from the program's own tests, and kept with the
+  answers by test name. Taking the tests before any workout starts following
+  the program (the enrollment, from that day), as a first session would.
+- **The `Your side` card** (`components/side-card.tsx`) under Reminders: before,
+  what the tests are for and `Take the tests`; after, `Your side: Left` with
+  how many tests point that way (`savedCounts`; only the date, once the
+  program's tests have changed since) and each one-sided exercise's side, or
+  `Your side: none clear`; `Redo the tests`.
+- **The gate box** (`NextPhaseOpen`) says the next phase's one-sided exercises
+  and links the tests while they are untaken.
+- **One-sided workouts.** `sessionPlan(program, phase, lean)` makes an
+  exercise the program does on one side for someone who leans NOT `perSide`,
+  with its `onlySide` and `sideMeans`; everything downstream then counts and
+  words it as it should: a set is one set, "per side" and "each side" drop
+  away. `nextStep` gives each set that side (`sidesOf`), and the phone's
+  document keeps it on the exercise (`onlySide`, optional, like
+  `plannedSets`). The set line says `Lying on your left side` and `One side
+  only: you lean left.`; the coach says the side every set and never "Now the
+  left side"; the start screen names the side under the exercise; the program
+  page's exercise card says `Lying on your left side only, because you lean
+  left.`. An exercise begun on both sides before the side was saved finishes on
+  both.
+- Guides: `side.md` (new), `program.md` (the card, the gate box's line, the
+  exercise line), `workout.md` (a one-sided set, what the coach says, the start
+  screen; and its example exercise, one of his book's, is an invented one
+  now), `editor.md`, `read-again.md`.
+
+**Driven** on a production build against dev, on his program, in a pane tab
+never in front:
+
+- The card before the tests: `This program has 5 quick tests…` and `4
+  exercises in phases 2 to 4 change once your side is known.`
+- The tests at 375 px as drawn. Left, right, left, left, right: `You lean
+  left`, `5 point left, 0 point right`, the two reversed tests showing `Right
+  went further → Left`, and the four exercises' sides. `Back` highlighted the
+  earlier answer; the video step offered `Back to the tests` and resumed at
+  test 3. Saved: the card read `Your side: Left` and `5 of 5 tests point left.
+  Taken Sep 29.`
+- Phases 2–4 of the program page: each one-sided exercise's line with its
+  reason, and its prescription without "per side".
+- Workout mode on phase 2: the start screen listed the pullback as `2 × 5
+  breaths`; skipping the first exercise, its set read `Set 1 of 2 · Lying on
+  your left side · 2 × 5 breaths` and `One side only: you lean left.`. The
+  start screen's side line, added after, showed `Left leg on top` on phase 3.
+- All `About the same`: `No clear side`, `Save the result`, the toast `Saved.
+  No side is clear, so every exercise stays on both sides.`, and the card
+  `Your side: none clear`. The intro had said `Taken Sep 29: you lean left.`
+- The gate box's nudge, with phase 1's days set to 1 and the side cleared on
+  dev for the check (both put back): `Phase 2: Weeks 3-4 has 2 exercises done
+  on one side. Take the tests first, to find yours.` and `Take the tests`.
+- Dev was left with his side saved as left, and one unfinished phase 2 session
+  from the drive (one exercise skipped).
+
+Tests: `tests/fitness-side.test.ts` (the answers, `savedCounts`, `onlySideOf`,
+`oneSideLine`, `phasesWords`), `tests/fitness-session.test.ts` (a one-sided
+exercise walked: every set on its side, counted once, kept through a reload;
+one begun on both sides finishing on both), `tests/fitness-coach.test.ts` (its
+words each set, fetched ahead, and none of the two-sided ones),
+`tests/fitness-day.test.ts` (its sets make the day), `tests/fitness-ops.test.ts`
+(db: the side worked out and saved by name, the enrollment it starts, a second
+result replacing the first, the refusals; `sessionPlan` with a side, and a
+one-sided session saved and counted).
+
 ### 2026-09-29 — F4b, part 1: the side self-assessment and one-sided exercises, in the program (`claude/fitness-f4b`)
 
 F4b ships as two PRs, as the founder was told before the build: this one puts
@@ -466,14 +550,13 @@ push only, not a line in the daily digest; a reminder skips a day that is done
 and nothing more (he was offered "quiet for the week once its sessions are
 done" and declined).
 
-**F4b's first half is built**: the self-assessment and the one-sided exercises
-are in the program, read from the PDF (the table's picture too, ADR 0117) into
-the program he already has with "Read the PDF again", and editable. Where it
-moved from the list below: each test is answered with which side went further,
-and the app applies the table (`leftMeans`). **The second half is next**:
-taking it (the flow with the author's video, the answers and the side saved on
-the enrolment, redoing it) and one-sided workouts (the plan, the coach and the
-set saying the side, and why).
+**F4b is built**, in two halves. The first put the self-assessment and the
+one-sided exercises in the program, read from the PDF (the table's picture too,
+ADR 0117) into the program he already has with "Read the PDF again". The
+second takes the tests on the program's page and runs one-sided workouts.
+Where it moved from the list below: each test is answered with which side went
+further, and the app applies the table (`leftMeans`); a session never goes
+back to both sides (his call). **F4c, the calf raise's levels, is next.**
 
 - **The self-assessment**: the five tests as a short flow with the author's
   video, the answer (left, right or none) saved on the enrolment, and the four
@@ -573,7 +656,12 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   `normalizeDraft`, and which pages go as pictures: `pointsToPicture`,
   `pictureFits`), `editor.ts` (the editor's form, both ways), `errors.ts`.
 - `src/modules/fitness/core/side.ts` — a person's side (F4b): `testPoints`,
-  `assessedSide`, `sideFor`, `sideWords`, `ruleWords`.
+  `assessedSide`, `savedCounts`, `sideFor`, `onlySideOf`, `sideWords`,
+  `oneSideLine`, `ruleWords`, `phasesWords`, and `sideAnswersSchema`.
+- `src/modules/fitness/side-ops.ts` — `loadSide` and `saveSide`, on the
+  program's open enrollment (F4b part 2). The screens:
+  `components/side-tests.tsx` (the route `fitness/programs/[id]/side`) and
+  `components/side-card.tsx` (the program page's `Your side`).
 - `src/modules/fitness/core/read-again.ts` — reading a saved program's PDF
   again (F4b): `record_additions`, its prompt, `mergeAdditions`,
   `READ_AGAIN_WORDS`. `readAgain` is in `import-ops.ts`, `callAdditionsModel`
@@ -585,7 +673,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - `src/modules/fitness/import-ops.ts` — `draftProgram` and the import's life.
 - `src/modules/fitness/program-ops.ts` — `saveProgram` (by id, under
   `version`), `loadProgram`, `listPrograms`, `deleteProgram`.
-- `src/modules/fitness/actions.ts` — the five server actions, each behind
+- `src/modules/fitness/actions.ts` — the server actions, each behind
   `requirePersonalSpace` and the module gate.
 - `src/modules/fitness/core/session.ts` — workout mode's pure half (F2a): the
   session document's schema, `nextStep` (where the session is, from what it
@@ -642,6 +730,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   `fitness/import`, `fitness/import/[id]`, `fitness/new`,
   `fitness/programs/[id]`, `fitness/programs/[id]/edit`,
   `fitness/programs/[id]/read` (reading the PDF again),
+  `fitness/programs/[id]/side` (taking the tests),
   `fitness/programs/[id]/session` (workout mode).
 - `src/lib/pdf/browser.ts` — `loadPdfjs`, shared with Documents.
 - `tests/fitness-core.test.ts`, `tests/fitness-session.test.ts`,
@@ -650,7 +739,8 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   `tests/fitness-side.test.ts`, `tests/fitness-read-again.test.ts`,
   `tests/fitness-ops.test.ts`, `tests/isolation/fitness.test.ts`.
 - `docs/help/fitness/` — `overview.md` (`**Route:** /personal/m/fitness/**`),
-  `import.md`, `editor.md`, `program.md`, `read-again.md`, `workout.md`.
+  `import.md`, `editor.md`, `program.md`, `read-again.md`, `side.md`,
+  `workout.md`.
 
 ## Decisions & gotchas
 
@@ -795,6 +885,19 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   further, and `leftMeans` turns it into a side, so a reversed test needs no
   thought mid-assessment. A side needs the program's number of tests to agree
   and more than the other side; otherwise both sides.
+- **A one-sided exercise is logged as not per side, each set with its side**
+  (F4b part 2). `sessionPlan` gives it `perSide: false` and its `onlySide`, so
+  a set counts once everywhere a set is counted (`fullSets`, the day, the
+  summary, the server's `lastSession`) and "per side" drops from its words
+  with no change to them; each set row keeps its side. No column was needed:
+  the only side rides on the phone's document for `nextStep`, and the server's
+  rows already say it.
+- **The side is worked out on the server** from the program's own tests and
+  the answers, kept by test name; the phone's result is only shown. Taking the
+  tests before the first workout starts following the program.
+- **An exercise keeps the sides it was started with.** One begun on both sides
+  before the side was saved finishes on both, in the screen's and the coach's
+  words, because a set half on each side is no set at all.
 - **A side rule is on the item, per phase.** The same exercise in two phases is
   two items, and a program may do it on one side in one phase only, so reading
   again asks for an entry per phase. A CHECK keeps a rule off an item not done
@@ -838,12 +941,12 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   so a long line may be cut off by the next one. The build that adds VIBRATE
   and CAMERA can have the native voice report its end (`onDone`), and
   `speakLine` would use it where it is there.
-- **F4b's second half: taking the assessment, and one-sided workouts.** The
-  program holds the tests and the rules; nothing sets a person's side yet, so
-  every session still does both sides. `side_answers` and `side_assessed_at`
-  wait for it.
-- **His production program has no self-assessment yet.** It gets one when the
-  PDF is read again there, after `0432` is on production and this is merged.
+- **His production program has no self-assessment yet**, unless he has read
+  the PDF again there since part 1 merged. Then `Your side` offers the tests.
+- **A one-sided workout on a phone is unwatched.** The drive saw the set line
+  and the start screen in a desktop pane; no one-sided set has been done
+  through to its end with the pacer, and the coach's words were checked in the
+  tests, not heard.
 - **Reading a PDF on a phone is unwatched.** The drives read it in a desktop
   browser; a phone's pdf.js and a 1,100 px canvas for the picture are
   assumptions.

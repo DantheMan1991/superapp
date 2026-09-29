@@ -324,3 +324,44 @@ describe("every line a session can say, fetched ahead", () => {
     expect(sessionLines(p, doc)).toEqual(["Last one.", "Ten seconds left.", "Exercise done."]);
   });
 });
+
+describe("one side only, for a person whose side is known (F4b)", () => {
+  /** The pullback as `sessionPlan` gives it to someone who leans left: lying on the left, not per side. */
+  function oneSided(means: "side" | "lying" | "top_leg" = "lying"): SessionPlan {
+    const p = plan();
+    const [pullback, ...rest] = p.items;
+    return { ...p, lean: "left", items: [{ ...pullback, perSide: false, onlySide: "left", sideMeans: means }, ...rest] };
+  }
+
+  it("says the side the way the program names it, every set, and never the other side", () => {
+    const p = oneSided();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe(
+      "Side-lying pullback. 2 to 3 sets of 5 to 8 breaths. Lying on your left side.",
+    );
+    doc = done(p, doc, 0, 8);
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Set 2 of 2. Lying on your left side.");
+    doc = done(p, doc, 0, 8);
+    doc = oneMoreSet(p, doc, 0);
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Set 3 of 3. Lying on your left side.");
+
+    const leg = oneSided("top_leg");
+    const fresh = beginSession(leg, { id: id(), now: at(0), feelBefore: null });
+    expect(setIntro(leg, fresh, setStep(leg, fresh)).text).toContain("Left leg on top.");
+  });
+
+  it("fetches the one-sided lines ahead, and none of the two-sided ones", () => {
+    const p = oneSided();
+    const lines = sessionLines(p, beginSession(p, { id: id(), now: at(0), feelBefore: null }));
+    expect(lines).toContain("Side-lying pullback. 2 to 3 sets of 5 to 8 breaths. Lying on your left side.");
+    expect(lines).toContain("Set 2 of 2. Lying on your left side.");
+    expect(lines.some((line) => /Right side|Now the left side|each side/.test(line))).toBe(false);
+  });
+
+  it("finishes an exercise begun on both sides in the words of both, when the side is saved mid-session", () => {
+    let doc = beginSession(plan(), { id: id(), now: at(0), feelBefore: null });
+    doc = done(plan(), doc, 0, 8);
+    const p = oneSided();
+    expect(setIntro(p, doc, setStep(p, doc)).text).toBe("Now the left side.");
+  });
+});

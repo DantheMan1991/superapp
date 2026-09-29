@@ -13,10 +13,11 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
 - **{button:Edit program|outline|pencil}.** Opens the program to change or delete it. See [Building and editing a program](editor.md).
 - **The program's rules**, when it has them: badges like {badge:3–4 sessions a week|secondary}, {badge:effort 3–5 of 10|secondary} and {badge:breathe 5 s out, 5 s in|secondary}, and a few sentences on how the program works.
 - **{icon:bell} `Reminders`.** A time for the morning and one for the evening, each with a switch. See [Reminders](#reminders).
+- **{icon:arrow-left-right} `Your side`**, on a program with a side self-assessment: whether you have taken its tests, and what they found. See [Your side](#your-side).
 - **The phases**, as a row of buttons, when there is more than one. The phase you are looking at is highlighted. Click another to open it. The page opens on the phase of your last workout, or the first phase before your first.
 - **The phase's name**, with how many exercises it has, `in this order`, and how many days to do it before moving on, for example `14 days before moving on`.
 - **When the phase before this one has not reached its days**, a line with {icon:triangle-alert} says so, for example `Opens after 14 done days of Phase 1: Weeks 1-2 (6 so far). The program says not to skip a phase.` You can still start this phase. It is your call.
-- **When this phase has reached its days**, a box says the next phase is open, for example `Phase 2: Weeks 3-4 is open`, with how many exercises it has and which are new, the first new exercise's video, and {button:Move on to Phase 2: Weeks 3-4|primary|arrow-right}, which opens that phase. Under it: `Or keep going here. It never moves you on by itself.` Nothing changes until you start a session on the next phase.
+- **When this phase has reached its days**, a box says the next phase is open, for example `Phase 2: Weeks 3-4 is open`, with how many exercises it has and which are new, the first new exercise's video, and {button:Move on to Phase 2: Weeks 3-4|primary|arrow-right}, which opens that phase. Under it: `Or keep going here. It never moves you on by itself.` Nothing changes until you start a session on the next phase. When the next phase does exercises on one side and you have not taken the program's tests, the box also says so, for example `Phase 2: Weeks 3-4 has 2 exercises done on one side. Take the tests first, to find yours.`, with {button:Take the tests|outline}.
 - **The phase's progress**, once you have done a workout on this program. See [Your progress](#your-progress).
 - **{button:Start today's session|primary|play}.** Starts a session for this phase. See [Doing a session](workout.md).
   - When a session is still open on this phone, the button reads {button:Resume today's session|primary|play}, with a line like `Open for Phase 1: Weeks 1-2. It picks up at the set you were on.` It takes you back to that phase and that set.
@@ -30,7 +31,7 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
   - **What to do**, for example {badge:2 × 8 breaths per side|secondary}.
   - **What it is for**, in a sentence or two.
   - **`Doing it right`.** The program's checks, as a short list.
-  - **{icon:arrow-left-right} The side**, on an exercise the program does on one side for someone who leans to a side, for example `For someone who leans to a side: lying on the side you lean toward. Otherwise both sides.` Until you know your side, do both sides.
+  - **{icon:arrow-left-right} The side**, on an exercise the program does on one side for someone who leans to a side, for example `For someone who leans to a side: lying on the side you lean toward. Otherwise both sides.` Until you know your side, do both sides. Once your tests have found it, the line says your side instead, for example `Lying on your left side only, because you lean left.`, and What to do loses `per side`, since each set is on that one side.
   - **Notes**, in a grey box, when the program says something about this exercise: which side, when to move on, equipment.
   - **More videos**, when the exercise has more than one, each in its own box under its name, for example `Inner Foot Roll` or `Alternative`, or `Another video` when it has no name. Click the name to open the box, then tap the video to play it here.
 - **With no phases**, the page reads `This program has no phases yet. Edit it to add one.`
@@ -76,6 +77,18 @@ Tap the notification and the app opens this program. It follows the phase of you
 - A workout done with no signal counts once it is sent, so until then the evening reminder may say more sets are left than there are.
 - Reminders come to the Yosher app on Android. The iPhone app cannot get notifications yet.
 
+## Your side
+
+A card under Reminders, on a program with a side self-assessment: a few tests that find which side you lean to. The program does a few exercises on one side only for someone who leans, and the card is where you find yours.
+
+- **Before you take the tests**, it reads `This program has 5 quick tests that find which side you lean to. Until you take them, you do every exercise on both sides.` It adds how many exercises change, for example `4 exercises in phases 2 to 4 change once your side is known.`
+- **{button:Take the tests|outline}** opens the tests. See [Finding your side](side.md).
+- **Once you have taken them**, it says what they found:
+  - `Your side: Left`, with how many tests point that way and when you took them, for example `4 of 5 tests point left. Taken Sep 29.` Under it, each exercise done on one side, with its phase and your side for it, for example `Phase 2 · Knee sway` and `Lying on your left side`.
+  - `Your side: none clear` when no side reached the program's number of tests, for example `No side reached 3 of the 5 tests, so you do every exercise on both sides. Taken Sep 29.`
+  - When the program's tests have changed since you took them, it says only when you took them.
+- **{button:Redo the tests|outline}** takes them again. Your new answers replace the old ones. This is the only way to change your side.
+
 ## How to move on to the next phase
 
 1. Open the program on the phase you are doing. When its done days are reached, the box `Phase 2: Weeks 3-4 is open` shows under the phase's name.
@@ -93,7 +106,7 @@ To read the program without starting, go down the exercises on this page. Tap a 
 
 ## Not on this page
 
-- **Taking the side self-assessment.** A program can hold one now, read from its PDF or added in the editor, but you cannot take it yet. Until you can, a session has you do every exercise on both sides.
+- **Doing a one-sided exercise on both sides for one session.** Your side holds for every session until you take the tests again.
 - **Progressions**, such as moving to the next level of a calf raise when the log says you are ready. Not built yet.
 - **Reminders by email.** Reminders come only as a notification on your phone.
 

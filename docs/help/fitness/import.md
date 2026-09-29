@@ -4,7 +4,7 @@
 > **Route:** /personal/m/fitness/import
 > **Order:** 10
 
-Open **Workouts** and click {button:Import a program|primary|upload}. Choose the program's PDF. The page reads it, sends its words and links to be drafted, and opens the draft for you to check. Drafting takes about a minute.
+Open **Workouts** and click {button:Import a program|primary|upload}. Choose the program's PDF. The page reads it, sends its words and links to be drafted (with a picture of any page whose table is an image), and opens the draft for you to check. Drafting takes about a minute.
 
 ## What you see
 
@@ -12,10 +12,10 @@ Open **Workouts** and click {button:Import a program|primary|upload}. Choose the
 - **`Choose the program PDF`.** Click it to pick the file from your device. Reading starts as soon as you choose one.
 - **The file.** Once chosen, its name and size, and how many pages it has once it has been read.
 - **`Reading page 12 of 59…`.** The page is reading the PDF on your device.
-- **`Read 59 pages and 33 links`.** Reading is done. The links are the exercise videos and anything else the PDF links to.
+- **`Read 59 pages and 33 links`.** Reading is done. The links are the exercise videos and anything else the PDF links to. When a page shows a table as an image, for example the table of a self-assessment's tests, the line ends `, and 1 page as a picture`: that page is sent as a picture too, so the table can be read. At most four pages go this way.
 - **`Drafting your program… about a minute (24s)`.** Claude is reading the words and links and putting the program together. The seconds count up so you can see it is working.
 - **`You can leave this page. The draft will wait under Drafts on the Workouts page.`** Closing the page does not lose the draft.
-- **The lock line**: `The file stays on your device. Only its words and links are sent, to draft the program.`
+- **The lock line**: `The file stays on your device. Only its words and links are sent, to draft the program, with a picture of any page that shows a table as an image.` Only a page whose words mention a table or chart, and that has an image on it, is sent as a picture. Nothing of the file is kept.
 - **{button:Choose another file|outline}.** Starts again with a different PDF.
 - **{button:Or build one by hand|ghost}.** Skips the import and opens an empty program instead.
 
@@ -24,6 +24,7 @@ Open **Workouts** and click {button:Import a program|primary|upload}. Choose the
 1. Click `Choose the program PDF` and pick the file.
 2. Wait while it reads, then while it drafts. You see `Drafting your program… about a minute`.
 3. The draft opens. Check it against the book, fix anything that is wrong, and click {button:Save program|primary}. See [Building and editing a program](editor.md).
+4. If the program has a self-assessment that finds which side you lean to, the draft has it under **Side self-assessment**, with each test and how many must agree, and any exercise the program does on one side has its side set under **Side, once yours is known**. Check these against the book too, the test table above all.
 
 ## Messages
 
@@ -46,7 +47,8 @@ Open **Workouts** and click {button:Import a program|primary|upload}. Choose the
 ## Not on this page
 
 - **Keeping the PDF.** The file is never uploaded or stored. Keep your own copy.
-- **Scanned PDFs.** A PDF made of pictures of pages cannot be read yet. Ask us if you need it.
+- **Scanned PDFs.** A PDF made of pictures of pages cannot be read yet. Ask us if you need it. Only a page whose words mention a table is sent as a picture, so a table that nothing on its page calls a table is not read: add its tests by hand in the editor.
+- **A program you imported before the self-assessment could be read.** Open the program and click {button:Read the PDF again|outline|file-text}. See [Your program](program.md).
 
 ## Who can do what
 

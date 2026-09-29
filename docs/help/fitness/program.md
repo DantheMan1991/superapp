@@ -9,6 +9,7 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
 ## What you see
 
 - **The program's name**, with who wrote it and where it came from: `Imported from a PDF` or `Built by hand`.
+- **{button:Read the PDF again|outline|file-text}**, on a program imported from a PDF. Reads the program's PDF again for what the first read left out: the side self-assessment, and the exercises done on one side. You check what it finds before anything is saved, and your workouts stay with the program. See [Reading the PDF again](read-again.md).
 - **{button:Edit program|outline|pencil}.** Opens the program to change or delete it. See [Building and editing a program](editor.md).
 - **The program's rules**, when it has them: badges like {badge:3–4 sessions a week|secondary}, {badge:effort 3–5 of 10|secondary} and {badge:breathe 5 s out, 5 s in|secondary}, and a few sentences on how the program works.
 - **{icon:bell} `Reminders`.** A time for the morning and one for the evening, each with a switch. See [Reminders](#reminders).
@@ -29,6 +30,7 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
   - **What to do**, for example {badge:2 × 8 breaths per side|secondary}.
   - **What it is for**, in a sentence or two.
   - **`Doing it right`.** The program's checks, as a short list.
+  - **{icon:arrow-left-right} The side**, on an exercise the program does on one side for someone who leans to a side, for example `For someone who leans to a side: lying on the side you lean toward. Otherwise both sides.` Until you know your side, do both sides.
   - **Notes**, in a grey box, when the program says something about this exercise: which side, when to move on, equipment.
   - **More videos**, when the exercise has more than one, each in its own box under its name, for example `Inner Foot Roll` or `Alternative`, or `Another video` when it has no name. Click the name to open the box, then tap the video to play it here.
 - **With no phases**, the page reads `This program has no phases yet. Edit it to add one.`
@@ -91,7 +93,7 @@ To read the program without starting, go down the exercises on this page. Tap a 
 
 ## Not on this page
 
-- **Which side to favor.** The program's left-or-right self-assessment is not built yet.
+- **Taking the side self-assessment.** A program can hold one now, read from its PDF or added in the editor, but you cannot take it yet. Until you can, a session has you do every exercise on both sides.
 - **Progressions**, such as moving to the next level of a calf raise when the log says you are ready. Not built yet.
 - **Reminders by email.** Reminders come only as a notification on your phone.
 

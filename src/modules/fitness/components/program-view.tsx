@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { ArrowLeftRight, FileText, Pencil } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   weeksOnTarget,
 } from "../core/progress";
 import type { ReminderView } from "../core/reminders";
+import { ruleWords } from "../core/side";
 import { dayItemsOf, type LoadedItem, type LoadedProgram } from "../program-ops";
 import type { LastSession } from "../session-ops";
 import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
@@ -96,11 +97,21 @@ export function ProgramView({
           .filter(Boolean)
           .join(" · ")}
         actions={
-          <Button asChild variant="outline" size="sm">
-            <Link href={`${base}/edit`}>
-              <Pencil aria-hidden /> Edit program
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {program.source === "imported" && (
+              // What the first read left out (F4b): the side self-assessment and the one-sided exercises.
+              <Button asChild variant="outline" size="sm">
+                <Link href={`${base}/read`}>
+                  <FileText aria-hidden /> Read the PDF again
+                </Link>
+              </Button>
+            )}
+            <Button asChild variant="outline" size="sm">
+              <Link href={`${base}/edit`}>
+                <Pencil aria-hidden /> Edit program
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -250,6 +261,13 @@ function ExerciseCard({ item, index }: { item: LoadedItem; index: number }) {
               ))}
             </ul>
           </div>
+        )}
+        {ruleWords(item.sideRule, item.sideMeans) && (
+          // The program's one-sided rule (F4b), before anybody's side is known.
+          <p className="flex items-start gap-2 text-sm">
+            <ArrowLeftRight className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+            {`For someone who leans to a side: ${ruleWords(item.sideRule, item.sideMeans)?.toLowerCase()}. Otherwise both sides.`}
+          </p>
         )}
         {item.notes && <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{item.notes}</p>}
         {others.map((video, v) => (

@@ -14,8 +14,13 @@ import {
 import {
   DraftError,
   buildDraftPrompt,
+  draftRequestSchema,
   draftTextProblem,
   normalizeDraft,
+  PICTURE_BASE64_LIMIT,
+  PICTURES_BASE64_LIMIT,
+  pictureFits,
+  pointsToPicture,
   recordProgramTool,
 } from "../src/modules/fitness/core/draft";
 import {
@@ -218,7 +223,12 @@ describe("normalizing Claude's draft", () => {
   });
 
   it("refuses a scan and a book by their words, the one question the device and the server both ask", () => {
-    const pdf = (text: string) => ({ fileName: "program.pdf", pageCount: 1, pages: [{ n: 1, text, links: [] }] });
+    const pdf = (text: string) => ({
+      fileName: "program.pdf",
+      pageCount: 1,
+      pages: [{ n: 1, text, links: [] }],
+      pictures: [],
+    });
     expect(draftTextProblem(pdf("   "))).toBe("NO_TEXT");
     expect(draftTextProblem(pdf("x".repeat(300_001)))).toBe("TOO_LONG");
     expect(draftTextProblem(pdf("x".repeat(5_000)))).toBeNull();
@@ -266,6 +276,7 @@ describe("normalizing Claude's draft", () => {
         { n: 1, text: "Hello", links: [] },
         { n: 2, text: "Hip lift", links: ["https://youtu.be/fBViIToMhKA"] },
       ],
+      pictures: [],
     });
     expect(prompt).toContain('<page number="2">');
     expect(prompt).toContain("Links on this page:\n- https://youtu.be/fBViIToMhKA");
@@ -429,5 +440,211 @@ describe("asking YouTube about a video", () => {
     // A long title is cut to what a label holds, and the save accepts it.
     expect(long.label).toBe("Adductor Magnus Roll - Distal to Proximal Emphasis xxxxxxxxx");
     expect(programInputSchema.safeParse(marked).success).toBe(true);
+  });
+});
+
+/**
+ * THE SIDE SELF-ASSESSMENT AND ONE-SIDED EXERCISES (F4b): drafted from the
+ * pages (a table given as a picture included), held to the save's rules, and
+ * carried through the editor. Invented tests, as every fitness test uses.
+ */
+const invented = {
+  videoUrl: "https://youtu.be/fBViIToMhKA?t=12",
+  least: 9,
+  tests: [
+    { name: " Trunk turn ", question: "", leftMeans: "left" },
+    { name: "Arm sweep", question: "Which arm went higher?", leftMeans: "right" },
+    // No name, and no direction: both dropped, never guessed.
+    { name: "", question: "", leftMeans: "left" },
+    { name: "Hip swing", question: "", leftMeans: "sideways" },
+  ],
+  notes: "Use it for the one-sided drills.",
+};
+
+describe("the side self-assessment, drafted (F4b)", () => {
+  it("keeps the tests with a name and a direction, the video, and a number that can agree", () => {
+    const draft = normalizeDraft(modelAnswer({ assessment: invented }));
+    expect(draft.assessment).toEqual({
+      video: { id: "fBViIToMhKA", startS: 12, endS: null, label: null, embeddable: null },
+      // Nine of two cannot agree: more than half, instead.
+      least: 2,
+      tests: [
+        { name: "Trunk turn", question: "Which side went further?", leftMeans: "left" },
+        { name: "Arm sweep", question: "Which arm went higher?", leftMeans: "right" },
+      ],
+      notes: "Use it for the one-sided drills.",
+    });
+  });
+
+  it("has none when the answer has none, or none a person could take", () => {
+    expect(normalizeDraft(modelAnswer()).assessment).toBeNull();
+    expect(normalizeDraft(modelAnswer({ assessment: null })).assessment).toBeNull();
+    expect(
+      normalizeDraft(modelAnswer({ assessment: { videoUrl: null, least: 3, tests: [], notes: "" } })).assessment,
+    ).toBeNull();
+  });
+
+  it("keeps a one-sided rule only on an exercise done per side", () => {
+    const answer = modelAnswer();
+    const [lift, hinge] = answer.phases[0].items;
+    const draft = normalizeDraft({
+      ...answer,
+      phases: [
+        {
+          ...answer.phases[0],
+          items: [
+            { ...lift, sideRule: "toward", sideMeans: "lying" },
+            { ...hinge, sideRule: "away", sideMeans: "top_leg" },
+          ],
+        },
+      ],
+    });
+    expect(draft.phases[0].items.map((item) => [item.sideRule, item.sideMeans])).toEqual([
+      ["both", "side"],
+      ["away", "top_leg"],
+    ]);
+    const odd = normalizeDraft({
+      ...answer,
+      phases: [{ ...answer.phases[0], items: [{ ...hinge, sideRule: "up", sideMeans: 7 }] }],
+    });
+    expect(odd.phases[0].items[0]).toMatchObject({ sideRule: "both", sideMeans: "side" });
+  });
+
+  it("opens a draft stored before F4b, with no assessment and both sides", () => {
+    const stored = JSON.parse(JSON.stringify(normalizeDraft(modelAnswer())));
+    delete stored.assessment;
+    for (const phase of stored.phases) {
+      for (const item of phase.items) {
+        delete item.sideRule;
+        delete item.sideMeans;
+      }
+    }
+    const parsed = programInputSchema.parse(stored);
+    expect(parsed.assessment).toBeNull();
+    expect(parsed.phases[0].items[1]).toMatchObject({ sideRule: "both", sideMeans: "side" });
+  });
+
+  it("asks for the assessment and each exercise's side, and says where pictures of pages come from", () => {
+    expect(recordProgramTool.input_schema.required).toContain("assessment");
+    const itemRequired = recordProgramTool.input_schema.properties.phases.items.properties.items.items.required;
+    expect(itemRequired).toEqual(expect.arrayContaining(["sideRule", "sideMeans"]));
+    const pages = [{ n: 1, text: "Hello", links: [] }];
+    const pictured = buildDraftPrompt({
+      fileName: "p.pdf",
+      pageCount: 3,
+      pages,
+      pictures: [
+        { n: 2, jpeg: "AAAA" },
+        { n: 3, jpeg: "BBBB" },
+      ],
+    });
+    expect(pictured).toContain("Pictures of pages 2, 3 follow");
+    expect(buildDraftPrompt({ fileName: "p.pdf", pageCount: 1, pages, pictures: [] })).not.toContain("Pictures");
+  });
+
+  it("sends a page as a picture only when its words point to a table or chart", () => {
+    expect(pointsToPicture("Score each test with the table below:")).toBe(true);
+    expect(pointsToPicture("See the charts below.")).toBe(true);
+    expect(pointsToPicture("The tables on the next page")).toBe(true);
+    expect(pointsToPicture("Lie on a comfortable surface.")).toBe(false);
+    expect(pointsToPicture("A stable, tablet-sized block")).toBe(false);
+    // The position on hands and knees, on page after page of photographs.
+    expect(pointsToPicture("Start in table top, knees under hips.")).toBe(false);
+    expect(pointsToPicture("From a tabletop position")).toBe(false);
+    expect(pointsToPicture("Return to table-top")).toBe(false);
+    expect(pointsToPicture("From table top, read the table below.")).toBe(true);
+  });
+
+  it("takes up to four pictures of pages from the browser, as base64, and none from an older one", () => {
+    const base = { fileName: "p.pdf", pageCount: 1, pages: [{ n: 1, text: "x", links: [] }] };
+    expect(draftRequestSchema.parse(base).pictures).toEqual([]);
+    expect(draftRequestSchema.safeParse({ ...base, pictures: [{ n: 1, jpeg: "AAAA" }] }).success).toBe(true);
+    expect(draftRequestSchema.safeParse({ ...base, pictures: [{ n: 1, jpeg: "not base64!" }] }).success).toBe(false);
+    const five = Array.from({ length: 5 }, (_, i) => ({ n: i + 1, jpeg: "AAAA" }));
+    expect(draftRequestSchema.safeParse({ ...base, pictures: five }).success).toBe(false);
+  });
+
+  it("sends no more pictures than a server action can carry, and leaves a large one on the device", () => {
+    const of = (length: number) => "A".repeat(length);
+    // Each under its own limit; together over what the request can carry.
+    const two = [
+      { n: 1, jpeg: of(1_200_000) },
+      { n: 2, jpeg: of(1_200_000) },
+    ];
+    const base = { fileName: "p.pdf", pageCount: 3, pages: [{ n: 1, text: "x", links: [] }] };
+    expect(draftRequestSchema.safeParse({ ...base, pictures: two }).success).toBe(true);
+    expect(
+      draftRequestSchema.safeParse({ ...base, pictures: [...two, { n: 3, jpeg: of(4) }] }).success,
+    ).toBe(false);
+    // The device asks the same before keeping one.
+    expect(pictureFits([], of(PICTURE_BASE64_LIMIT))).toBe(true);
+    expect(pictureFits([], of(PICTURE_BASE64_LIMIT + 4))).toBe(false);
+    expect(pictureFits(two, of(4))).toBe(false);
+    expect(pictureFits(two.slice(0, 1), of(PICTURES_BASE64_LIMIT - 1_200_000))).toBe(true);
+    const four = Array.from({ length: 4 }, (_, i) => ({ n: i + 1, jpeg: of(4) }));
+    expect(pictureFits(four, of(4))).toBe(false);
+  });
+});
+
+describe("the side, in the save's rules and the editor (F4b)", () => {
+  function sided(): ProgramInput {
+    const program = normalizeDraft(modelAnswer({ assessment: invented }));
+    program.phases[0].items[1] = { ...program.phases[0].items[1], sideRule: "away", sideMeans: "lying" };
+    return program;
+  }
+
+  it("stops a save on a rule without per side, a test without a name, and more to agree than tests", () => {
+    const program = emptyProgram();
+    program.phases[0].items[0] = { ...program.phases[0].items[0], name: "Reach", sideRule: "toward" };
+    program.assessment = {
+      video: null,
+      least: 3,
+      tests: [
+        { name: "Trunk turn", question: "Which side went further?", leftMeans: "left" },
+        { name: " ", question: "Which side went further?", leftMeans: "right" },
+      ],
+      notes: "",
+    };
+    expect(programProblems(program)).toEqual(
+      expect.arrayContaining([
+        "Phase 1, exercise 1: only an exercise done per side can be done on one side.",
+        "Self-assessment, test 2 needs a name.",
+        "The self-assessment asks for 3 tests to agree but has 2 tests.",
+      ]),
+    );
+    expect(programProblems(sided())).toEqual([]);
+  });
+
+  it("round-trips the self-assessment and the side through the form unchanged", () => {
+    const program = sided();
+    expect(fromEditor(toEditor(program))).toEqual({ program, problems: [] });
+  });
+
+  it("drops a side rule once per side is unticked, and says what is wrong with the assessment", () => {
+    const editor = toEditor(sided());
+    editor.phases[0].items[1].perSide = false;
+    const unticked = fromEditor(editor);
+    expect(unticked.program?.phases[0].items[1]).toMatchObject({ perSide: false, sideRule: "both", sideMeans: "side" });
+
+    editor.assessment = { ...editor.assessment!, least: "x" };
+    editor.assessment.video = { ...editor.assessment.video, url: "not a link" };
+    expect(fromEditor(editor).problems).toEqual(
+      expect.arrayContaining([
+        "Self-assessment: That is not a link to one YouTube video.",
+        "Self-assessment: tests that must agree must be a whole number.",
+      ]),
+    );
+    // Removed from the form: no assessment at all.
+    expect(fromEditor({ ...toEditor(sided()), assessment: null }).program?.assessment).toBeNull();
+  });
+
+  it("asks YouTube about the self-assessment's video too", async () => {
+    const asked: string[] = [];
+    const marked = await markVideos(sided(), async (id) => {
+      asked.push(id);
+      return { embeddable: id === "fBViIToMhKA", title: "A title" };
+    });
+    expect(asked).toContain("fBViIToMhKA");
+    expect(marked.assessment?.video).toMatchObject({ id: "fBViIToMhKA", embeddable: true, label: null });
   });
 });

@@ -14,7 +14,11 @@ export type FitnessErrorCode =
 export class FitnessError extends Error {
   constructor(
     readonly code: FitnessErrorCode,
-    /** For DRAFT_FAILED and INVALID: the specific sentence, already written. */
+    /**
+     * For DRAFT_FAILED and INVALID: the specific sentence, already written.
+     * For NO_TEXT and TOO_LONG: other words than the import's, where its
+     * advice ("build the program by hand") does not fit (a program read again).
+     */
     readonly detail?: string,
   ) {
     super(detail ?? code);
@@ -33,9 +37,15 @@ export function fitnessMessage(error: FitnessError): string {
     case "BUSY":
       return "A program is already being drafted. Give it a minute, then look under Drafts on the Workouts page.";
     case "NO_TEXT":
-      return "This PDF has no words to read. It may be pictures of pages, which cannot be read yet. Build the program by hand instead.";
+      return (
+        error.detail ??
+        "This PDF has no words to read. It may be pictures of pages, which cannot be read yet. Build the program by hand instead."
+      );
     case "TOO_LONG":
-      return "This PDF is too long to draft in one go. It reads like a book rather than a program. Build the program by hand, or import a shorter file.";
+      return (
+        error.detail ??
+        "This PDF is too long to draft in one go. It reads like a book rather than a program. Build the program by hand, or import a shorter file."
+      );
     case "DRAFT_FAILED":
       return error.detail ?? "The program could not be drafted. Try again in a minute.";
   }

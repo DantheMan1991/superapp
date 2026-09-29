@@ -7,6 +7,7 @@ import type { TenantContext } from "../src/lib/auth";
 import { FitnessError } from "../src/modules/fitness/core/errors";
 import { normalizeDraft } from "../src/modules/fitness/core/draft";
 import type { ProgramInput } from "../src/modules/fitness/core/program";
+import { READ_AGAIN_WORDS } from "../src/modules/fitness/core/read-again";
 import {
   deleteProgram,
   listPrograms,
@@ -24,6 +25,7 @@ import {
   importDraft,
   listOpenImports,
   markImportSaved,
+  readAgain,
   startImport,
 } from "../src/modules/fitness/import-ops";
 import { DraftModelError } from "../src/modules/fitness/draft-model";
@@ -73,6 +75,7 @@ function aProgram(): ProgramInput {
     effortMax: 5,
     breathOutS: 5,
     breathInS: 4,
+    assessment: null,
     phases: [
       {
         phaseId: null,
@@ -111,6 +114,8 @@ function item(name: string, unit: "reps" | "breaths", sets: number, target: numb
     perSide: false,
     optional: false,
     notes: "",
+    sideRule: "both" as const,
+    sideMeans: "side" as const,
   };
 }
 
@@ -284,7 +289,7 @@ d("workouts: programs and imports", () => {
     it("drafts: the import goes drafting → draft, holding the normalized draft, with YouTube's answer", async () => {
       const { importId } = await draftProgram(
         ctx,
-        { fileName: "program.pdf", pageCount: 2, pages },
+        { fileName: "program.pdf", pageCount: 2, pages, pictures: [] },
         { model, videos },
       );
       const row = await inTenant((tx) => getImport(tx, tenant.id, importId));
@@ -319,7 +324,7 @@ d("workouts: programs and imports", () => {
       await expect(
         draftProgram(
           ctx,
-          { fileName: "refused.pdf", pageCount: 2, pages },
+          { fileName: "refused.pdf", pageCount: 2, pages, pictures: [] },
           {
             model: async () => {
               throw new DraftModelError("REFUSED");
@@ -340,11 +345,11 @@ d("workouts: programs and imports", () => {
     it("refuses a PDF with no words, and one too long to be a program, before any row is made", async () => {
       const before = (await inTenant((tx) => listOpenImports(tx, tenant.id))).length;
       await expect(
-        draftProgram(ctx, { fileName: "scan.pdf", pageCount: 1, pages: [{ n: 1, text: "   ", links: [] }] }, { model, videos }),
+        draftProgram(ctx, { fileName: "scan.pdf", pageCount: 1, pages: [{ n: 1, text: "   ", links: [] }], pictures: [] }, { model, videos }),
       ).rejects.toMatchObject({ code: "NO_TEXT" });
       const long = Array.from({ length: 10 }, (_, i) => ({ n: i + 1, text: "x".repeat(35_000), links: [] }));
       await expect(
-        draftProgram(ctx, { fileName: "book.pdf", pageCount: 10, pages: long }, { model, videos }),
+        draftProgram(ctx, { fileName: "book.pdf", pageCount: 10, pages: long, pictures: [] }, { model, videos }),
       ).rejects.toMatchObject({ code: "TOO_LONG" });
       expect((await inTenant((tx) => listOpenImports(tx, tenant.id))).length).toBe(before);
     });
@@ -355,7 +360,7 @@ d("workouts: programs and imports", () => {
         new Promise<unknown>((resolve) => {
           release = () => resolve(answer);
         });
-      const first = draftProgram(ctx, { fileName: "first.pdf", pageCount: 2, pages }, { model: slow, videos });
+      const first = draftProgram(ctx, { fileName: "first.pdf", pageCount: 2, pages, pictures: [] }, { model: slow, videos });
       // Wait until the first import's row exists.
       for (let i = 0; i < 50; i++) {
         const open = await inTenant((tx) => listOpenImports(tx, tenant.id));
@@ -363,7 +368,7 @@ d("workouts: programs and imports", () => {
         await new Promise((r) => setTimeout(r, 100));
       }
       await expect(
-        draftProgram(ctx, { fileName: "second.pdf", pageCount: 2, pages }, { model, videos }),
+        draftProgram(ctx, { fileName: "second.pdf", pageCount: 2, pages, pictures: [] }, { model, videos }),
       ).rejects.toMatchObject({ code: "BUSY" });
       release();
       await first;
@@ -846,6 +851,146 @@ d("workouts: programs and imports", () => {
       expect(await run("2026-08-02T07:10:00Z")).toMatchObject({ taken: 1, sent: 0, noPhone: 1 });
       expect(sent).toHaveLength(1);
       await inTenant((tx) => deleteProgram(tx, tenant.id, program.id));
+    });
+  });
+
+  describe("the side self-assessment and one-sided exercises (F4b)", () => {
+    /** Invented, as every fitness test is: two tests, one reversed, two to agree. */
+    const assessment = {
+      video: { id: "fBViIToMhKA", startS: 30, endS: 90, label: null, embeddable: true },
+      least: 2,
+      tests: [
+        { name: "Trunk turn", question: "Which side went further?", leftMeans: "left" as const },
+        { name: "Arm sweep", question: "Which side went further?", leftMeans: "right" as const },
+      ],
+      notes: "Do the one-sided drills on the side the tests point to.",
+    };
+
+    function sidedProgram(name: string): ProgramInput {
+      const base = aProgram();
+      return {
+        ...base,
+        name,
+        phases: [
+          {
+            ...base.phases[0],
+            items: [
+              { ...item("Side reach", "breaths", 2, 5), perSide: true, sideRule: "toward", sideMeans: "lying" },
+              item("Hip lift", "breaths", 2, 8),
+            ],
+          },
+          base.phases[1],
+        ],
+      };
+    }
+
+    it("keeps a program's self-assessment and its exercises' sides, and gives them back to the editor", async () => {
+      const input = { ...sidedProgram("Sided, saved"), assessment };
+      const saved = await inTenant((tx) => saveProgram(tx, tenant.id, input, { programId: null, source: "own" }));
+      const loaded = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      expect(loaded.assessment).toEqual({ ...assessment, video: { provider: "youtube", ...assessment.video } });
+      expect(loaded.phases[0].items.map((i) => [i.sideRule, i.sideMeans])).toEqual([
+        ["toward", "lying"],
+        ["both", "side"],
+      ]);
+      const back = programToInput(loaded);
+      expect(back.assessment).toEqual(assessment);
+      expect(back.phases[0].items[0]).toMatchObject({ sideRule: "toward", sideMeans: "lying" });
+
+      // Removed in the editor: gone from the program.
+      await inTenant((tx) =>
+        saveProgram(tx, tenant.id, { ...back, assessment: null }, { programId: loaded.id, version: loaded.version }),
+      );
+      expect((await inTenant((tx) => loadProgram(tx, tenant.id, loaded.id)))!.assessment).toBeNull();
+    });
+
+    it("refuses one side for an exercise not done per side, in the database too", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(tx, tenant.id, sidedProgram("Sided, refused"), { programId: null, source: "own" }),
+      );
+      const loaded = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      const lift = loaded.phases[0].items[1];
+      await expect(
+        inTenant((tx) =>
+          tx
+            .update(schema.fitnessPhaseItems)
+            .set({ sideRule: "away" })
+            .where(eq(schema.fitnessPhaseItems.id, lift.id)),
+        ),
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: expect.stringContaining("fitness_phase_items_side_rule_per_side") }) });
+    });
+
+    it("reads a program again: what it adds is merged into the program for the editor, and nothing is written", async () => {
+      const saved = await inTenant((tx) =>
+        saveProgram(
+          tx,
+          tenant.id,
+          // Both sides to start with, as a program imported before F4b is.
+          {
+            ...sidedProgram("Read again"),
+            phases: sidedProgram("Read again").phases.map((phase) => ({
+              ...phase,
+              items: phase.items.map((i) => ({ ...i, sideRule: "both" as const, sideMeans: "side" as const })),
+            })),
+          },
+          { programId: null, source: "imported" },
+        ),
+      );
+      const asked: { lists: string[]; pictures: number }[] = [];
+      const model = async (request: { pictures: unknown[] }, program: ProgramInput) => {
+        asked.push({ lists: program.phases.flatMap((p) => p.items.map((i) => i.name)), pictures: request.pictures.length });
+        return {
+          assessment: {
+            videoUrl: "https://youtu.be/fBViIToMhKA",
+            least: 2,
+            tests: assessment.tests,
+            notes: assessment.notes,
+          },
+          sideRules: [{ phase: "Weeks 1–2", exercise: "Side reach", sideRule: "away", sideMeans: "top_leg" }],
+        };
+      };
+      const videos = async () => ({ embeddable: true, title: null });
+      const request = {
+        fileName: "starter.pdf",
+        pageCount: 1,
+        pages: [{ n: 1, text: "x".repeat(500), links: [] }],
+        pictures: [{ n: 1, jpeg: "AAAA" }],
+      };
+      const read = await readAgain(ctx, saved.programId, request, { model, videos });
+      expect(asked).toEqual([{ lists: ["Side reach", "Hip lift", "Wall stack"], pictures: 1 }]);
+      expect(read.version).toBe(saved.version);
+      expect(read.found).toEqual({ tests: 2, sideRules: 1, unmatched: [] });
+      expect(read.program.assessment?.video).toMatchObject({ id: "fBViIToMhKA", embeddable: true });
+      expect(read.program.phases[0].items[0]).toMatchObject({ name: "Side reach", sideRule: "away", sideMeans: "top_leg" });
+      // Every row keeps its id, so saving it updates the same rows.
+      const loaded = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      expect(read.program.phases[0].items[0].itemId).toBe(loaded.phases[0].items[0].id);
+      // Nothing was written.
+      expect(loaded.assessment).toBeNull();
+      expect(loaded.phases[0].items[0].sideRule).toBe("both");
+      // Saving it is an ordinary edit.
+      await inTenant((tx) =>
+        saveProgram(tx, tenant.id, read.program, { programId: saved.programId, version: read.version }),
+      );
+      const after = (await inTenant((tx) => loadProgram(tx, tenant.id, saved.programId)))!;
+      expect(after.assessment?.tests).toHaveLength(2);
+      expect(after.phases[0].items[0]).toMatchObject({ id: loaded.phases[0].items[0].id, sideRule: "away" });
+
+      await expect(readAgain(ctx, randomUUID(), request, { model, videos })).rejects.toMatchObject({ code: "NOT_FOUND" });
+      const failing = async () => {
+        throw new DraftModelError("REFUSED");
+      };
+      await expect(readAgain(ctx, saved.programId, request, { model: failing, videos })).rejects.toMatchObject({
+        code: "DRAFT_FAILED",
+        detail: READ_AGAIN_WORDS.REFUSED,
+      });
+      // A scan is refused before Claude is asked, in words for a program that already exists.
+      const scan = { ...request, pages: [{ n: 1, text: "   ", links: [] }] };
+      await expect(readAgain(ctx, saved.programId, scan, { model, videos })).rejects.toMatchObject({
+        code: "NO_TEXT",
+        detail: READ_AGAIN_WORDS.NO_TEXT,
+      });
+      expect(asked).toHaveLength(1);
     });
   });
 });

@@ -1,7 +1,7 @@
 # 0112 — A program PDF is read on the device, and only its words and links are sent
 
 - **Date:** 2026-09-27
-- **Status:** Accepted
+- **Status:** Accepted, amended by [0117](0117-a-page-whose-table-is-a-picture-is-sent-as-a-picture.md) — a page whose words point to a table and that draws an image is sent too, as a picture, so the words and links below are no longer all that leaves the device. Everything else here stands.
 - **Affects:** The fitness import ([modules/fitness.md](../modules/fitness.md),
   F1): `read-program-pdf.ts`, `draftProgramAction`, `fitness_imports`. The
   pdfjs loader it shares with Documents (`src/lib/pdf/browser.ts`).

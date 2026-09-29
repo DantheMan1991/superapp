@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
+  DEFAULT_TEST_QUESTION,
   FITNESS_UNITS,
   programInputSchema,
+  SIDE_MEANS,
+  SIDE_RULES,
+  type AssessmentInput,
   type ItemInput,
   type PhaseInput,
   type ProgramInput,
@@ -37,6 +41,36 @@ export interface ReadPage {
 /** The most pages drafted from: a program, not a book. */
 export const DRAFT_PAGE_LIMIT = 150;
 
+/**
+ * A PAGE AS A PICTURE (F4b, ADR 0117): the few pages whose words point to a
+ * table or chart and that hold an image, where the table IS the image. The
+ * founder's program gives its self-assessment's tests only that way.
+ * Rendered in the browser, as JPEG, and never stored.
+ */
+export const DRAFT_PICTURE_LIMIT = 4;
+/** About 1.1 MB of JPEG, as base64: a page at 1,100 px wide is a fifth of that. */
+export const PICTURE_BASE64_LIMIT = 1_500_000;
+/**
+ * All the pictures together. With 300,000 characters of words, the request
+ * stays under the 4 MB a server action takes (`serverActions.bodySizeLimit`),
+ * so a large picture is left behind on the device rather than the whole
+ * request failing on the way.
+ */
+export const PICTURES_BASE64_LIMIT = 2_400_000;
+
+export const pagePictureSchema = z.object({
+  n: z.number().int().min(1),
+  /** Base64 JPEG, no `data:` prefix. */
+  jpeg: z.string().max(PICTURE_BASE64_LIMIT).regex(/^[A-Za-z0-9+/]+=*$/),
+});
+export type PagePicture = z.infer<typeof pagePictureSchema>;
+
+/** Whether one more picture may go with the ones already kept: the device asks, the schema holds it. */
+export function pictureFits(kept: PagePicture[], jpeg: string): boolean {
+  const used = kept.reduce((sum, picture) => sum + picture.jpeg.length, 0);
+  return kept.length < DRAFT_PICTURE_LIMIT && jpeg.length <= PICTURE_BASE64_LIMIT && used + jpeg.length <= PICTURES_BASE64_LIMIT;
+}
+
 /** What the browser sends: the pages, and the file's name for the record. */
 export const draftRequestSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
@@ -51,8 +85,26 @@ export const draftRequestSchema = z.object({
     )
     .min(1)
     .max(DRAFT_PAGE_LIMIT),
+  /** `default([])`: a browser from before F4b sends none. */
+  pictures: z
+    .array(pagePictureSchema)
+    .max(DRAFT_PICTURE_LIMIT)
+    .refine((pictures) => pictures.reduce((sum, picture) => sum + picture.jpeg.length, 0) <= PICTURES_BASE64_LIMIT)
+    .default([]),
 });
 export type DraftRequest = z.infer<typeof draftRequestSchema>;
+
+/**
+ * Whether a page's words point to a table or chart it shows as a picture: the
+ * browser renders such a page (when it also draws an image) and sends it.
+ * Words only: "the table below", "see the chart". Not "table top", the
+ * position on hands and knees, which a mobility program says on page after
+ * page of photographs and would spend the four pictures on. Pure, so the rule
+ * that decides what leaves the device is tested.
+ */
+export function pointsToPicture(text: string): boolean {
+  return /\b(?:tables?(?![\s-]*tops?\b)|charts?)\b/i.test(text);
+}
 
 /**
  * The most text drafted from in one go: about 75,000 tokens. The founder's
@@ -67,6 +119,71 @@ export const DRAFT_TEXT_FLOOR = 200;
 export const RECORD_PROGRAM_TOOL = "record_program";
 
 const nullableInt = { type: ["integer", "null"] };
+
+/**
+ * THE SELF-ASSESSMENT, as a tool field (F4b): shared by `record_program` (a
+ * new import) and `record_additions` (a program read again).
+ */
+export const assessmentToolField = {
+  type: ["object", "null"],
+  description:
+    "The program's side self-assessment, when it has one: tests that say which side (left or right) a person leans to, or is shifted or lateralized to. null when it has none.",
+  additionalProperties: false,
+  properties: {
+    videoUrl: {
+      type: ["string", "null"],
+      description: "The link to the video that shows how to do the tests, copied exactly from the page's links; null if there is none.",
+    },
+    least: {
+      ...nullableInt,
+      description: "How many tests must point to one side for it to count (\"4 of the 6 tests\" is 4); null if the program does not say.",
+    },
+    tests: {
+      type: "array",
+      description: "Every test, in the program's order.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", description: "The test's name as the program gives it, in normal capitalization." },
+          question: {
+            type: "string",
+            description:
+              "What the person compares, as a short question whose answers are left and right: \"Which side went further?\" for a range of movement.",
+          },
+          leftMeans: {
+            type: "string",
+            enum: ["left", "right"],
+            description:
+              "Which side the person leans to when the LEFT side went further (or wins the comparison). A program's table usually says what each test shows for someone who leans one way: a test where the side they lean to goes further is \"left\"; a test where the other side goes further is \"right\".",
+          },
+        },
+        required: ["name", "question", "leftMeans"],
+      },
+    },
+    notes: {
+      type: "string",
+      description: "What the program says to do with the result, in one or two short sentences of your own words.",
+    },
+  },
+  required: ["videoUrl", "least", "tests", "notes"],
+};
+
+/** An exercise's side rule, as tool fields (F4b). */
+export const sideRuleToolFields = {
+  sideRule: {
+    type: "string",
+    enum: ["both", "toward", "away"],
+    description:
+      "\"toward\" when the program says a person who leans to one side does this exercise only on the side they lean toward; \"away\" for only the side they lean away from; \"both\" otherwise.",
+  },
+  sideMeans: {
+    type: "string",
+    enum: ["side", "lying", "top_leg"],
+    description:
+      "For a one-sided exercise, what that side is: \"lying\" when the program names the side lain on (\"lie on your right side\"), \"top_leg\" when it names the leg on top, \"side\" otherwise.",
+  },
+};
 
 /**
  * The tool Claude answers through. Every field required, `null` or `""` where
@@ -165,6 +282,7 @@ export const recordProgramTool = {
                     description:
                       "What the book says about THIS use of it that a person needs while doing it: which side to do it on, when to move to the next progression, an equipment note. Empty if nothing.",
                   },
+                  ...sideRuleToolFields,
                 },
                 required: [
                   "name",
@@ -179,6 +297,8 @@ export const recordProgramTool = {
                   "perSide",
                   "optional",
                   "notes",
+                  "sideRule",
+                  "sideMeans",
                 ],
               },
             },
@@ -186,6 +306,7 @@ export const recordProgramTool = {
           required: ["name", "minDoneDays", "notes", "items"],
         },
       },
+      assessment: assessmentToolField,
     },
     required: [
       "name",
@@ -198,9 +319,22 @@ export const recordProgramTool = {
       "breathOutSeconds",
       "breathInSeconds",
       "phases",
+      "assessment",
     ],
   },
 };
+
+/**
+ * What both prompts say about a self-assessment and a side rule (F4b). Written
+ * for the shape of the founder's program (tests given only in a table drawn as
+ * a picture, a number of them that must agree, and a few exercises done on one
+ * side, some named by the side lain on and some by the leg on top), in words
+ * that fit any program's and quote none of it.
+ */
+export const ASSESSMENT_INSTRUCTIONS = [
+  "Some programs include a self-assessment that decides which side a person leans to (is shifted or lateralized to), and change a few exercises for someone who leans. Record the assessment when there is one: the video that shows the tests, how many tests must agree, and every test with its name, a short question comparing left and right, and which side it points to when the LEFT side went further. The tests are often only in a table given as a picture of a page: read the picture. Such a table usually says what each test shows for someone who leans one way: where the side they lean to goes further, the test points left when the left went further; where the other side goes further, the test is reversed and points right when the left went further.",
+  "Where the program does an exercise on one side for someone who leans to a side, set that item's sideRule (\"toward\" or \"away\" the side they lean) and sideMeans (\"lying\" when it names the side lain on, \"top_leg\" when it names the leg on top). Keep the program's own words for it in the item's notes too.",
+].join("\n\n");
 
 /**
  * THE SYSTEM PROMPT. Frozen text: nothing per request goes in it.
@@ -219,13 +353,19 @@ export const DRAFT_SYSTEM = [
   "Videos: copy links exactly from the \"Links on this page\" lists, and give each exercise the video linked from its own page. Never use a playlist link, a store link, a discount link or a link to another program.",
   "If the program sets a rule for how long to stay on each phase, put that number of days on every phase it applies to.",
   "If the program changes an exercise for some people (one side only, a progression to move on to), say so in that item's notes, briefly, in your own words.",
+  ASSESSMENT_INSTRUCTIONS,
   "Leave a field null or empty when the program does not say. Never invent a number, a cue or a video.",
   "Skip the marketing: no testimonials, offers, discount codes or other products in any field.",
 ].join("\n\n");
 
 /** The pages as the user message: each page's words, and its links listed under it. */
 export function buildDraftPrompt(request: DraftRequest): string {
-  const pages = request.pages
+  return `This workout program was read from "${request.fileName}", ${request.pageCount} pages. Record it with ${RECORD_PROGRAM_TOOL}.\n\n${pagesText(request)}${picturesNote(request)}`;
+}
+
+/** Every page's words, and its links listed under it. */
+export function pagesText(request: DraftRequest): string {
+  return request.pages
     .map((page) => {
       const links = page.links.length
         ? `\nLinks on this page:\n${page.links.map((l) => `- ${l}`).join("\n")}`
@@ -233,7 +373,13 @@ export function buildDraftPrompt(request: DraftRequest): string {
       return `<page number="${page.n}">\n${page.text.trim()}${links}\n</page>`;
     })
     .join("\n\n");
-  return `This workout program was read from "${request.fileName}", ${request.pageCount} pages. Record it with ${RECORD_PROGRAM_TOOL}.\n\n${pages}`;
+}
+
+/** Where the pictures of pages that follow the words come from. */
+export function picturesNote(request: DraftRequest): string {
+  if (request.pictures.length === 0) return "";
+  const pages = request.pictures.map((picture) => picture.n).join(", ");
+  return `\n\nPictures of ${request.pictures.length === 1 ? "page" : "pages"} ${pages} follow, because ${request.pictures.length === 1 ? "its" : "their"} words point to a table or chart shown as an image. Read ${request.pictures.length === 1 ? "it" : "them"} with the words.`;
 }
 
 /** How much text the request carries, for the size check. */
@@ -277,7 +423,33 @@ const modelItemSchema = z.object({
   perSide: z.boolean().catch(false),
   optional: z.boolean().catch(false),
   notes: looseText,
+  sideRule: z.enum(SIDE_RULES).catch("both"),
+  sideMeans: z.enum(SIDE_MEANS).catch("side"),
 });
+
+/**
+ * A self-assessment as Claude answered it. A test with no clear `leftMeans`
+ * is dropped rather than defaulted: guessing which way a test counts would
+ * turn a person's answer into the wrong side without a word.
+ */
+const modelAssessmentSchema = z
+  .object({
+    videoUrl: z.string().nullable().catch(null),
+    least: looseInt,
+    tests: z
+      .array(
+        z.object({
+          name: looseText,
+          question: looseText,
+          leftMeans: z.enum(["left", "right"]).nullable().catch(null),
+        }),
+      )
+      .catch([]),
+    notes: looseText,
+  })
+  .nullable()
+  .catch(null);
+
 const modelDraftSchema = z.object({
   name: looseText,
   author: looseText,
@@ -296,7 +468,39 @@ const modelDraftSchema = z.object({
       items: z.array(modelItemSchema).catch([]),
     }),
   ),
+  assessment: modelAssessmentSchema.optional().catch(null),
 });
+
+/**
+ * Claude's self-assessment → the program's, or null when nothing a person
+ * could take is left: no test with a name and a direction. `least` falls back
+ * to more than half the tests, and never asks for more tests than there are.
+ */
+export function normalizeAssessment(raw: unknown): AssessmentInput | null {
+  const parsed = modelAssessmentSchema.safeParse(raw);
+  if (!parsed.success || !parsed.data) return null;
+  const draft = parsed.data;
+  const tests = draft.tests
+    .map((test) => ({
+      name: clip(test.name, 80),
+      question: clip(test.question, 160) || DEFAULT_TEST_QUESTION,
+      leftMeans: test.leftMeans,
+    }))
+    .filter((test): test is { name: string; question: string; leftMeans: "left" | "right" } =>
+      test.name !== "" && test.leftMeans !== null,
+    )
+    .slice(0, 20);
+  if (tests.length === 0) return null;
+  const majority = Math.floor(tests.length / 2) + 1;
+  const least = draft.least != null && draft.least >= 1 && draft.least <= tests.length ? draft.least : majority;
+  const ref = draft.videoUrl ? parseYouTubeUrl(draft.videoUrl) : null;
+  return {
+    video: ref ? { id: ref.id, startS: ref.startS, endS: null, label: null, embeddable: null } : null,
+    least,
+    tests,
+    notes: clip(draft.notes, 1000),
+  };
+}
 
 /** Why a draft could not be made from what came back. */
 export class DraftError extends Error {
@@ -346,6 +550,9 @@ export function normalizeDraft(raw: unknown): ProgramInput {
         perSide: item.perSide,
         optional: item.optional,
         notes: clip(item.notes, 1000),
+        // One side only is only for an exercise done per side.
+        sideRule: item.perSide ? item.sideRule : "both",
+        sideMeans: item.perSide && item.sideRule !== "both" ? item.sideMeans : "side",
       });
     }
     if (items.length === 0) continue;
@@ -375,6 +582,7 @@ export function normalizeDraft(raw: unknown): ProgramInput {
     // person to fill rather than kept.
     breathOutS: seconds(draft.breathOutSeconds),
     breathInS: seconds(draft.breathInSeconds),
+    assessment: normalizeAssessment(draft.assessment ?? null),
     phases: phases.slice(0, 24),
   };
   // The last word: the same schema the save action holds the editor to.

@@ -8,13 +8,14 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { localDayIn } from "./core/day";
 import { draftRequestSchema } from "./core/draft";
 import { FitnessError, fitnessMessage } from "./core/errors";
-import { programInputSchema, programProblems } from "./core/program";
+import { programInputSchema, programProblems, type ProgramInput } from "./core/program";
+import { READ_AGAIN_WORDS, type AdditionsFound } from "./core/read-again";
 import { minuteIn, minuteOfTime, reminderInputSchema, timeOfMinute } from "./core/reminders";
 import { sessionDocSchema } from "./core/session";
 import { markVideos } from "./embeds";
 import { saveReminder } from "./reminder-ops";
 import { saveSession } from "./session-ops";
-import { discardImport, draftProgram, markImportSaved } from "./import-ops";
+import { discardImport, draftProgram, markImportSaved, readAgain } from "./import-ops";
 import { deleteProgram, saveProgram } from "./program-ops";
 
 /**
@@ -45,7 +46,7 @@ function failure(err: unknown, fallback: string): { error: string } {
  * page that calls this sets `maxDuration` for it.
  */
 export async function draftProgramAction(
-  input: z.infer<typeof draftRequestSchema>,
+  input: z.input<typeof draftRequestSchema>,
 ): Promise<Outcome<{ importId: string }>> {
   const ctx = await gate();
   const parsed = draftRequestSchema.safeParse(input);
@@ -56,6 +57,28 @@ export async function draftProgramAction(
     return { ok: true, importId };
   } catch (err) {
     return failure(err, "The program could not be drafted. Try again in a minute.");
+  }
+}
+
+const readAgainSchema = z.object({ programId: z.string().uuid(), request: draftRequestSchema });
+
+/**
+ * Read a program's PDF again (F4b): its self-assessment and one-sided
+ * exercises, merged into the program for the editor. Writes nothing; takes
+ * about a minute, so the page that calls it sets `maxDuration`.
+ */
+export async function readAgainAction(input: {
+  programId: string;
+  request: z.input<typeof draftRequestSchema>;
+}): Promise<Outcome<{ program: ProgramInput; version: number; found: AdditionsFound }>> {
+  const ctx = await gate();
+  const parsed = readAgainSchema.safeParse(input);
+  if (!parsed.success) return { error: "That file could not be read. Try choosing it again." };
+  try {
+    const read = await readAgain(ctx, parsed.data.programId, parsed.data.request);
+    return { ok: true, ...read };
+  } catch (err) {
+    return failure(err, READ_AGAIN_WORDS.FAILED);
   }
 }
 

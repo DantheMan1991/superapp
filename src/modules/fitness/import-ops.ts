@@ -6,8 +6,10 @@ import type { TenantContext } from "@/lib/auth";
 import { DraftError, draftTextProblem, normalizeDraft, type DraftRequest } from "./core/draft";
 import { FitnessError } from "./core/errors";
 import { programInputSchema, type ProgramInput } from "./core/program";
-import { callDraftModel, DraftModelError, type DraftModel } from "./draft-model";
+import { mergeAdditions, READ_AGAIN_WORDS, type AdditionsFound } from "./core/read-again";
+import { callAdditionsModel, callDraftModel, DraftModelError, type AdditionsModel, type DraftModel } from "./draft-model";
 import { checkVideo, markVideos, type VideoCheck } from "./embeds";
+import { loadProgram, programToInput } from "./program-ops";
 
 /**
  * AN IMPORT: a PDF on its way to being a program (src/db/schema/fitness.ts).
@@ -94,6 +96,52 @@ export async function draftProgram(
     role: ctx.role,
   });
   return { importId };
+}
+
+interface ReadAgainDeps {
+  model: AdditionsModel;
+  videos: VideoCheck;
+}
+
+const LIVE_READ_AGAIN: ReadAgainDeps = { model: callAdditionsModel, videos: checkVideo };
+
+/**
+ * READ A PROGRAM'S PDF AGAIN (F4b, core/read-again.ts): what the program in
+ * the app does not have yet (its side self-assessment, and the exercises done
+ * on one side), merged into it for the editor to open, with the version it
+ * was read against so the save still refuses a second tab's change.
+ *
+ * Nothing is written: the editor's Save is the only way any of it lands, the
+ * rule the import lives by (ADR 0054). No import row either, because a
+ * program read again is still the same program, its workouts and all.
+ */
+export async function readAgain(
+  ctx: TenantContext,
+  programId: string,
+  request: DraftRequest,
+  deps: ReadAgainDeps = LIVE_READ_AGAIN,
+): Promise<{ program: ProgramInput; version: number; found: AdditionsFound }> {
+  const problem = draftTextProblem(request);
+  if (problem) throw new FitnessError(problem, READ_AGAIN_WORDS[problem]);
+  const loaded = await withTenant(ctx.tenant.id, (tx) => loadProgram(tx, ctx.tenant.id, programId), {
+    role: ctx.role,
+  });
+  if (!loaded) throw new FitnessError("NOT_FOUND");
+  const current = programToInput(loaded);
+  let merged: { program: ProgramInput; found: AdditionsFound };
+  try {
+    merged = mergeAdditions(current, await deps.model(request, current));
+  } catch (err) {
+    throw new FitnessError("DRAFT_FAILED", readAgainFailure(err));
+  }
+  return { program: await markVideos(merged.program, deps.videos), version: loaded.version, found: merged.found };
+}
+
+/** Why reading again failed: the program is untouched, so never the import's "build it by hand". */
+function readAgainFailure(err: unknown): string {
+  if (err instanceof DraftModelError) return READ_AGAIN_WORDS[err.code];
+  console.error("fitness: reading a program again failed", err);
+  return READ_AGAIN_WORDS.FAILED;
 }
 
 /** Why a draft failed, in words the person can act on — never an exception's text. */

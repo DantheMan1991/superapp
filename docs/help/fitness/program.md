@@ -11,6 +11,7 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
 - **The program's name**, with who wrote it and where it came from: `Imported from a PDF` or `Built by hand`.
 - **{button:Edit program|outline|pencil}.** Opens the program to change or delete it. See [Building and editing a program](editor.md).
 - **The program's rules**, when it has them: badges like {badge:3–4 sessions a week|secondary}, {badge:effort 3–5 of 10|secondary} and {badge:breathe 5 s out, 5 s in|secondary}, and a few sentences on how the program works.
+- **{icon:bell} `Reminders`.** A time for the morning and one for the evening, each with a switch. See [Reminders](#reminders).
 - **The phases**, as a row of buttons, when there is more than one. The phase you are looking at is highlighted. Click another to open it. The page opens on the phase of your last workout, or the first phase before your first.
 - **The phase's name**, with how many exercises it has, `in this order`, and how many days to do it before moving on, for example `14 days before moving on`.
 - **When the phase before this one has not reached its days**, a line with {icon:triangle-alert} says so, for example `Opens after 14 done days of Phase 1: Weeks 1-2 (6 so far). The program says not to skip a phase.` You can still start this phase. It is your call.
@@ -48,6 +49,31 @@ A box under the phase's name, worked out from the workouts you have done. Nothin
 - **The effort warning**, with {icon:triangle-alert}, when you rated exercises this week above the program's effort, for example `2 exercises at 6/10 this week. The program says stay at 3–5.` Effort is what you choose after each exercise.
 - **`How you felt`**, once you have answered how your body felt before and after a workout on this phase: the averages, for example `4.2 before → 6.8 after, on average`, how many workouts that is, and a line for each over your last workouts, gray for before and colored for after, out of 10.
 
+## Reminders
+
+A reminder is a notification on your phone, from the Yosher app, at a time you choose. It says what today still needs, and it only comes on a day whose sets are not done yet.
+
+- **`Morning` and `Evening`**, each with a time and a switch. Both start off, at 7:00 AM and 7:30 PM. The program lets you split a day's sets between the two, and each can remind you of its half.
+- **The time.** Choose a time in steps of ten minutes. A time between them is kept at the nearest ten, for example 7:34 becomes 7:30. It saves by itself, and you see `Morning reminder at 7:30 AM`. When that reminder is switched off, you see `Morning reminder set for 7:30 AM. It is off until you turn it on.`
+- **The switch.** Turns that reminder on or off. You see `Evening reminder at 7:30 PM` or `Evening reminder off`.
+- **The line under them**: `A push to the Yosher app on your phone at these times, on any day whose sets are not done yet.`
+- **When no phone is set up** for notifications, a line with {icon:triangle-alert} says `No phone is set up for notifications yet. Open the Yosher app on your phone and allow notifications.` Until then a reminder has nowhere to go.
+
+What the notification says:
+
+| Notification | When |
+| --- | --- |
+| `Today's workout`, with the phase, for example `Phase 1: Weeks 1-2 · 4 exercises, 6 sets` | Nothing has been done yet today. |
+| `The rest of today`, with what is left, for example `3 sets left · Phase 1: Weeks 1-2` | Some of today's sets are done. |
+| Nothing | Today's sets are done. |
+
+Tap the notification and the app opens this program. It follows the phase of your last workout.
+
+- A reminder comes once a day, within ten minutes of its time. If it cannot go within the hour, for example with the phone off, it waits for tomorrow rather than coming late.
+- Set a time that has already gone today and it starts tomorrow.
+- A workout done with no signal counts once it is sent, so until then the evening reminder may say more sets are left than there are.
+- Reminders come to the Yosher app on Android. The iPhone app cannot get notifications yet.
+
 ## How to move on to the next phase
 
 1. Open the program on the phase you are doing. When its done days are reached, the box `Phase 2: Weeks 3-4 is open` shows under the phase's name.
@@ -67,6 +93,7 @@ To read the program without starting, go down the exercises on this page. Tap a 
 
 - **Which side to favor.** The program's left-or-right self-assessment is not built yet.
 - **Progressions**, such as moving to the next level of a calf raise when the log says you are ready. Not built yet.
+- **Reminders by email.** Reminders come only as a notification on your phone.
 
 ## Who can do what
 

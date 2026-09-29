@@ -167,7 +167,7 @@ async function sendFcm(
 
 let warnedUnconfigured = false;
 
-async function disableDevice(id: string, reason: string, clerkUserId: string) {
+async function disableDevice(id: string, reason: string, clerkUserId: string, sender: string) {
   await withSystem((tx) =>
     tx
       .update(schema.pushDevices)
@@ -176,16 +176,39 @@ async function disableDevice(id: string, reason: string, clerkUserId: string) {
   );
   await logAudit({
     action: "push.device_disabled",
-    actorLabel: "digest",
+    actorLabel: sender,
     targetType: "push_device",
     targetId: id,
     meta: { clerkUserId, reason },
   });
 }
 
+/**
+ * Whether a person has a phone that can be told anything. The workout
+ * reminders' card says so when there is none, rather than letting a reminder
+ * be set that nothing will ever hear (F4a).
+ *
+ * withSystem, justified (S2): the person's OWN rows, matched on the Clerk id
+ * the caller takes from their session, never from input — the same class of
+ * read as `deniedFor`. A device row belongs to a person, not a tenant, so no
+ * tenant context would find it.
+ */
+export async function hasPushDevice(clerkUserId: string): Promise<boolean> {
+  const [row] = await withSystem((tx) =>
+    tx
+      .select({ id: schema.pushDevices.id })
+      .from(schema.pushDevices)
+      .where(and(eq(schema.pushDevices.clerkUserId, clerkUserId), isNull(schema.pushDevices.disabledAt)))
+      .limit(1),
+  );
+  return row !== undefined;
+}
+
 export async function sendPushToPerson(
   clerkUserId: string,
   message: PushMessage,
+  /** Who is sending, for the audit line when a phone is found gone. */
+  sender: "digest" | "workout-reminder" = "digest",
 ): Promise<PushSendResult> {
   const devices = await withSystem((tx) =>
     tx
@@ -231,7 +254,7 @@ export async function sendPushToPerson(
         break;
       case "unregistered":
         result.disabled += 1;
-        await disableDevice(device.id, sent.detail, clerkUserId);
+        await disableDevice(device.id, sent.detail, clerkUserId, sender);
         break;
       case "unauthorized":
         result.failed += 1;

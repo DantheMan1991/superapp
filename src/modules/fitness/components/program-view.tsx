@@ -15,9 +15,11 @@ import {
   weekCount,
   weeksOnTarget,
 } from "../core/progress";
+import type { ReminderView } from "../core/reminders";
 import { dayItemsOf, type LoadedItem, type LoadedProgram } from "../program-ops";
 import type { LastSession } from "../session-ops";
 import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
+import { ReminderCard } from "./reminder-card";
 import { StartSessionButton } from "./start-session-button";
 import { VideoPlayer } from "./video-player";
 
@@ -37,6 +39,8 @@ import { VideoPlayer } from "./video-player";
  * session of the program (core/progress.ts). When the gate opens, the next
  * phase is offered with what is new in it; a phase whose gate has not opened
  * says so above its Start, which still works (the founder's call).
+ *
+ * REMINDERS (F4a): the program's morning and evening times, under its rules.
  */
 export function ProgramView({
   program,
@@ -45,6 +49,8 @@ export function ProgramView({
   today,
   sessions,
   timeZone,
+  reminders,
+  hasPhone,
 }: {
   program: LoadedProgram;
   phaseIndex: number;
@@ -55,6 +61,9 @@ export function ProgramView({
   sessions: DaySession[];
   /** The personal space's timezone. */
   timeZone: string;
+  reminders: ReminderView[];
+  /** The person has a phone registered for notifications. */
+  hasPhone: boolean;
 }) {
   const base = `/personal/m/fitness/programs/${program.id}`;
   const at = program.phases[phaseIndex] ? phaseIndex : 0;
@@ -109,6 +118,8 @@ export function ProgramView({
           {program.notes && <p className="text-sm leading-relaxed">{program.notes}</p>}
         </section>
       )}
+
+      <ReminderCard programId={program.id} reminders={reminders} hasPhone={hasPhone} />
 
       {program.phases.length > 1 && (
         <nav aria-label="Phases" className="flex flex-wrap gap-2">

@@ -18,7 +18,14 @@ import { createPersonalSpaceAction } from "./actions";
  * would be a question with one answer. Somebody who has none is asked first,
  * because making one creates something.
  */
-export function OpenPersonalSpace({ existingOrgId }: { existingOrgId: string | null }) {
+export function OpenPersonalSpace({
+  existingOrgId,
+  destination = PERSONAL_HOME,
+}: {
+  existingOrgId: string | null;
+  /** Where to go once in: home, or the page a reminder's tap asked for (`doorDestination`). */
+  destination?: string;
+}) {
   const router = useRouter();
   const { isLoaded, setActive } = useOrganizationList();
   const [pending, startTransition] = useTransition();
@@ -29,9 +36,9 @@ export function OpenPersonalSpace({ existingOrgId }: { existingOrgId: string | n
     if (!existingOrgId || !isLoaded || !setActive || switched.current) return;
     switched.current = true;
     setActive({ organization: existingOrgId })
-      .then(() => router.replace(PERSONAL_HOME))
+      .then(() => router.replace(destination))
       .catch(() => setError("Your personal space could not be opened. Try again."));
-  }, [existingOrgId, isLoaded, setActive, router]);
+  }, [existingOrgId, isLoaded, setActive, router, destination]);
 
   const create = () =>
     startTransition(async () => {
@@ -66,7 +73,7 @@ export function OpenPersonalSpace({ existingOrgId }: { existingOrgId: string | n
               switched.current = false;
               setError(null);
               setActive?.({ organization: existingOrgId })
-                .then(() => router.replace(PERSONAL_HOME))
+                .then(() => router.replace(destination))
                 .catch(() => setError("Your personal space could not be opened. Try again."));
             }}
           >

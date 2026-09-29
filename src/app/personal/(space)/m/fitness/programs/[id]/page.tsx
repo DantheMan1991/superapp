@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { hasPushDevice } from "@/lib/notifications/push";
 import { localDayIn } from "@/modules/fitness/core/day";
 import { loadProgram } from "@/modules/fitness/program-ops";
+import { loadReminders } from "@/modules/fitness/reminder-ops";
 import { lastSession, programSessions } from "@/modules/fitness/session-ops";
 import { ProgramView } from "@/modules/fitness/components/program-view";
 
@@ -28,20 +30,25 @@ export default async function ProgramPage({
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
   const today = localDayIn(ctx.tenant.timezone, new Date());
-  const [program, last, sessions] = await withTenant(
-    ctx.tenant.id,
-    async (tx) => {
-      const loaded = await loadProgram(tx, ctx.tenant.id, id);
-      if (!loaded) return [null, null, []] as const;
-      return [
-        loaded,
-        await lastSession(tx, ctx.tenant.id, id),
-        // Every session: the phase's progress and gate (F3), and today's split day (F2c).
-        await programSessions(tx, ctx.tenant.id, id),
-      ] as const;
-    },
-    { role: ctx.role },
-  );
+  const [[program, last, sessions, reminders], hasPhone] = await Promise.all([
+    withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const loaded = await loadProgram(tx, ctx.tenant.id, id);
+        if (!loaded) return [null, null, [], []] as const;
+        return [
+          loaded,
+          await lastSession(tx, ctx.tenant.id, id),
+          // Every session: the phase's progress and gate (F3), and today's split day (F2c).
+          await programSessions(tx, ctx.tenant.id, id),
+          // The morning and evening reminders (F4a).
+          await loadReminders(tx, ctx.tenant.id, id),
+        ] as const;
+      },
+      { role: ctx.role },
+    ),
+    hasPushDevice(ctx.userId),
+  ]);
   if (!program) notFound();
   const raw = (await searchParams).phase;
   const asked = Number.parseInt(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""), 10);
@@ -60,6 +67,8 @@ export default async function ProgramPage({
       today={today}
       sessions={sessions}
       timeZone={ctx.tenant.timezone}
+      reminders={reminders}
+      hasPhone={hasPhone}
     />
   );
 }

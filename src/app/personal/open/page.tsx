@@ -7,6 +7,7 @@ import {
   personalSpacesOpenFor,
 } from "@/lib/personal-space";
 import { reconcileTenantMemberships } from "@/lib/membership-sync";
+import { doorDestination } from "@/lib/personal-space-core";
 import { OpenPersonalSpace } from "./open-personal-space";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +24,20 @@ export const dynamic = "force-dynamic";
  * it is and asked, because the button creates a Clerk organization — and only
  * while personal spaces are open (`personalSpacesOpen`); before that the menu
  * item is not drawn, and a typed URL lands back on the dashboard.
+ *
+ * `?next=` is a page inside the space to go on to (a workout reminder's tap,
+ * F4a), checked by `doorDestination`; without it, or with anything it refuses,
+ * the space's home.
  */
-export default async function OpenPersonalSpacePage() {
+export default async function OpenPersonalSpacePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
+  const raw = (await searchParams).next;
+  const next = Array.isArray(raw) ? raw[0] : raw;
 
   const existing = await findPersonalSpace(userId);
   const admin = await isSuperAdmin();
@@ -65,7 +76,7 @@ export default async function OpenPersonalSpacePage() {
           </>
         )}
       </div>
-      <OpenPersonalSpace existingOrgId={existing?.clerkOrgId ?? null} />
+      <OpenPersonalSpace existingOrgId={existing?.clerkOrgId ?? null} destination={doorDestination(next)} />
     </div>
   );
 }

@@ -141,6 +141,27 @@ describe("requests", () => {
     });
     expect(fcmSendUrl({ projectId: "yosher-app" })).toBe("https://fcm.googleapis.com/v1/projects/yosher-app/messages:send");
   });
+
+  it("leave the icon's count alone for a message without one: a workout reminder is not a digest item (ADR 0116)", () => {
+    const reminder = {
+      title: "Today's workout",
+      body: "Weeks 1-2 · 4 exercises, 6 sets",
+      url: "/personal/open?next=%2Fpersonal%2Fm%2Ffitness",
+      collapseId: "workout:r1:2026-09-28",
+    };
+    expect(apnsRequestBody(reminder)).toEqual({
+      aps: { alert: { title: reminder.title, body: reminder.body }, sound: "default" },
+      url: reminder.url,
+    });
+    expect(fcmRequestBody("tok", reminder)).toEqual({
+      message: {
+        token: "tok",
+        notification: { title: reminder.title, body: reminder.body },
+        data: { url: reminder.url },
+        android: { collapse_key: "workout:r1:2026-09-28", priority: "HIGH" },
+      },
+    });
+  });
 });
 
 describe("what an answer means", () => {

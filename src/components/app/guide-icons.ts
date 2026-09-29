@@ -6,6 +6,7 @@ import {
   ArrowRight,
   ArrowUp,
   Banknote,
+  Bell,
   Bookmark,
   Building2,
   CalendarClock,
@@ -116,6 +117,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "arrow-right": ArrowRight,
   "arrow-up": ArrowUp,
   banknote: Banknote,
+  // Workouts' reminders on the program page (fitness.md, F4a).
+  bell: Bell,
   bookmark: Bookmark,
   building: Building2,
   // Putting a social post on the calendar (marketing, slice S1).

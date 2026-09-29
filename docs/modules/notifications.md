@@ -12,6 +12,31 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-28 — A second push sender: workout reminders (`claude/fitness-f4`)
+
+Push is no longer only the digest's. Workouts' reminders (F4a,
+[ADR 0116](../decisions/0116-a-workout-reminder-is-the-days-unfinished-sets-pushed-at-the-hour-the-person-chose.md),
+[fitness.md](fitness.md)) send through the same `sendPushToPerson`, from their
+own ten-minute cron, at the hour the person chose for a morning or an evening
+half of a workout, and only on a day whose sets are not done.
+
+It is the same kind of thing as a digest item, which is why it is allowed: what
+is still owed today, worked out when it goes, gone once the work is done, at
+most once a day per reminder. Two changes to the sender, neither changing the
+digest:
+
+- **`badge` is optional** on a `PushMessage`. Left out, the APNs body carries no
+  `badge` and the FCM body no `notification_count`, so the icon keeps the
+  digest's count. A reminder is not one of its items.
+- **`sendPushToPerson` takes a `sender`** (`digest` or `workout-reminder`) for
+  the audit line written when a phone is found gone. The digest's calls pass
+  nothing and still say `digest`.
+- `hasPushDevice(clerkUserId)`: whether a person has a phone that can be told
+  anything, read under withSystem on the caller's own Clerk id (S2, like
+  `deniedFor`), so the reminders' card can say when there is none.
+
+The rule for a third sender is in Decisions below.
+
 ### 2026-09-17 — Jobs joins the digest, fourth (`claude/jobs-attention`)
 
 The FOURTH pack source, `jobs-site` (`src/packs/jobs/attention/source.ts`),
@@ -313,6 +338,13 @@ self-clear, so it accumulates and gets muted — and a muted channel is worse th
 no channel. If you want something that can be cleared, you want a discrete
 EVENT (a document shared with you, a mention), which is a different feature with
 its own table, kept separate so it cannot rot the majority.
+
+**A push outside the digest must be a digest item at a person's hour**
+(2026-09-28, ADR 0116). Workouts' reminders are the one other sender: what is
+still owed today, derived when it goes and never stored, cleared by doing the
+work, at most once a day per thing, claimed before it is sent, and without a
+badge. A sender that cannot say all of that is the event stream the next
+paragraph rejects.
 
 **Push is a second channel for the digest, not a second product.** The
 obvious mobile feature is "notify me when X happens" — an event stream, the

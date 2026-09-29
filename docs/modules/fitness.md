@@ -13,6 +13,72 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-28 — F4a: reminders (`claude/fitness-f4`)
+
+F4 starts. The founder approved a mockup of all three parts (reminders, the
+side self-assessment, the calf raise's levels) with three calls: **build them in
+the order he will need them** (reminders now; his side before phase 2 opens; the
+calf raise in phase 3), **a reminder skips a day whose sets are done**, and the
+tests, the one-sided exercises and the levels are **read from his PDF again**
+(F4b, F4c). Production had his space by then: one program, four sessions, one
+phone registered for push (a read-only count).
+
+**Migration `0430` (the table) and `0431` (its RLS)**, on dev; production on
+his word, before the merge.
+
+- **`fitness_reminders`**: a program's `morning` and `evening`, each a minute of
+  the day on the space's clock (in tens, the cron's step), on or off, and
+  `last_handled_on`, the space's day the cron last took it. One row a slot.
+- **The Reminders card** on the program page, under its rules: two times and two
+  switches, each saved as it changes (a time after 0.8 s, so typing 07:30 is one
+  save), a time between the tens kept at the nearest (7:34 is 7:30), and the
+  line `A push to the Yosher app on your phone at these times, on any day whose
+  sets are not done yet.` With no phone registered, it says so. Saving a time
+  already gone today starts it tomorrow.
+- **The cron**, `/api/cron/fitness-reminders`, every ten minutes
+  ([ADR 0116](../decisions/0116-a-workout-reminder-is-the-days-unfinished-sets-pushed-at-the-hour-the-person-chose.md)):
+  each reminder whose time has come (within an hour) is claimed once a day
+  under withTenant, the day of the last workout's phase is added up with
+  `dayProgress`, and unless it is done the phone is told `Today's workout`
+  (`Phase 1: Weeks 1-2 · 4 exercises, 6 sets`) or `The rest of today` (`3 sets
+  left · …`), through the digest's sender, without a badge. The tap opens the
+  program through the personal space's door, which gained `?next=`
+  (`doorDestination`: a plain path inside the space, or home).
+- **Push only, no digest line** (the plan said both): the digest is a morning
+  email, and a personal space's would be a second one about one thing.
+- Guide: `program.md` (the card, the notifications, when they come). Guide icon:
+  `bell`.
+
+**Driven** on a production build against the dev branch, on the founder's
+program, in a hidden pane tab (another tab was in front):
+
+- The card showed both off at 7:00 AM and 7:30 PM, the line, and `No phone is
+  set up for notifications yet…` (dev has no phone for him; production does).
+- The evening switch on: `Evening reminder at 7:30 PM`. The morning time typed
+  as 07:34 came back as 07:30. At 9:40 PM in New York (the space's clock) both
+  rows were marked taken for the day, so neither went off on the spot.
+- With the evening row made due on dev, the cron route answered `{"considered":
+  1, "taken": 1, "noPhone": 1}` (the day was not done; no phone to tell), a
+  second call straight after took nothing, and a call without the secret got
+  404.
+- `/personal/open?next=/personal/m/fitness/programs/…` landed on the program;
+  `?next=/dashboard` landed on the space's home.
+- At 375 px the card's rows fit, with no sideways scroll.
+- **One wording bug the drive found, fixed:** a time changed on a reminder that
+  was off said `Morning reminder off`; it says `Morning reminder set for 6:40
+  AM. It is off until you turn it on.` now.
+- Dev was left with both reminders off.
+
+Tests: `tests/fitness-reminders.test.ts` (new, pure: the times in tens, the
+space's clock, when a reminder goes and the grace, a time already gone, the
+words, the card's input), `tests/personal-space-core.test.ts` (the door's
+destination, and every way it refuses one), `tests/push-core.test.ts` (a message
+without a badge), `tests/fitness-ops.test.ts` (db: one row a slot, a time gone
+starting tomorrow; the run sending once with the whole day or what is left,
+skipping a done day, quiet when off or past the hour, `noPhone`; the program's
+deletion taking its reminders), `tests/isolation/fitness.test.ts` (the tenth
+table).
+
 ### 2026-09-27 — F2d: a natural voice, and a bigger demo that waits for it (`claude/fitness-f2d`)
 
 The founder's report after using workout mode on his PC: "the video is really
@@ -620,6 +686,15 @@ warns but is not locked (the founder's calls).
 
 ### F4 — fitting it to him
 
+The founder's order (2026-09-28): **F4a reminders → F4b the side → F4c the calf
+raise**, and F4b and F4c read what they need from his PDF again, into the
+program he already has, so his logged workouts stay with it.
+
+**F4a is built** (the build log has it). Where it moved from the list below: a
+push only, not a line in the daily digest; a reminder skips a day that is done
+and nothing more (he was offered "quiet for the week once its sessions are
+done" and declined).
+
 - **The self-assessment**: the five tests as a short flow with the author's
   video, the answer (left, right or none) saved on the enrolment, and the four
   affected exercises switched to one side, each saying why.
@@ -688,9 +763,10 @@ The founder does not want to leave the app to watch a demo.
 ## Data model
 
 Every table carries `tenant_id` with FORCE RLS (the two ordinary policies,
-`0427`) and composite FKs `(tenant_id, x)`, all `on delete cascade`. The first
-first five are F1's (migration `0426`), the next four F2a's (`0428`); the
-rest are planned. F2a's three keys from a log to the program it logged are the
+`0427`) and composite FKs `(tenant_id, x)`, all `on delete cascade`. The
+first five are F1's (migration `0426`), the next four F2a's (`0428`),
+`fitness_reminders` F4a's (`0430`, RLS `0431`); `fitness_progressions` is
+planned. F2a's three keys from a log to the program it logged are the
 column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 
 | Table | Purpose | Notes |
@@ -704,7 +780,8 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 | `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several: a split day is two or more (F2c). No morning-or-evening slot is stored; a session's part of the day is its `started_at` on the space's clock |
 | `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished | F2a. The three taps after an exercise live here, per exercise, not per set |
 | `fitness_sets` | A set: its number, side, `target` (the least asked) and `count` (what was done), `done_at` | F2a. The id is the phone's, so there is no separate idempotency key. Load (weight) is F5 |
-| `fitness_progressions` | A ladder of exercises on an item with its advance rule | F4 |
+| `fitness_reminders` | A program's `morning` and `evening` reminder: `at_minute` (0–1430, in tens, on the space's clock), `enabled`, `last_handled_on` (the space's day the cron last took it) | F4a (`0430`, RLS `0431`). One row a slot (a unique index); the cron claims one by moving `last_handled_on`, so overlapping runs send it once |
+| `fitness_progressions` | A ladder of exercises on an item with its advance rule | F4c |
 
 ## Key files & seams
 
@@ -749,6 +826,12 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   IFrame Player API, loaded once). `start-session-button.tsx` is the program
   page's Start/Resume/Do the rest, and `today-card.tsx` the Workouts home's
   Today card.
+- `src/modules/fitness/core/reminders.ts` and `reminder-ops.ts` — workout
+  reminders (F4a): the times, when one goes, what it says (pure), and the
+  rows and the cron's run (`runWorkoutReminders`, behind
+  `src/app/api/cron/fitness-reminders/route.ts`). `components/reminder-card.tsx`
+  is the program page's card. `doorDestination` in
+  `src/lib/personal-space-core.ts` is where a reminder's tap goes.
 - `src/modules/fitness/core/coach.ts` — every line the coach says (F2b), and
   `sessionLines`, every line a session can say from where it is (F2d).
 - `src/lib/speech/queue-policy.ts` and `voice-queue.ts` — the one voice
@@ -900,6 +983,15 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   16/9` allows but never under the phone column's 26rem, and the set a 24rem
   column on the right. The start, the three taps and the finish keep the
   phone's column, top bar included, so nothing else changes on a wide screen.
+- **A reminder is the day's unfinished sets at the person's hour** (F4a,
+  [ADR 0116](../decisions/0116-a-workout-reminder-is-the-days-unfinished-sets-pushed-at-the-hour-the-person-chose.md)).
+  Worked out when it goes, never stored; a done day is skipped (his call); at
+  most once a slot a day, claimed before it is sent, so a crash loses one
+  rather than doubling it; within an hour of its time or not that day. It
+  never carries a badge: the icon's count is the digest's.
+- **A reminder's tap goes through the door.** The phone may be in the business
+  when it is tapped, and the space's own pages refuse a business session, so
+  the push opens `/personal/open?next=<the program>`.
 - **The demo's player is made in a node React does not own.** The API
   replaces the element it is given with its iframe, so the demo hands it a
   `div` made in the effect, inside the box React renders empty. React never
@@ -927,6 +1019,12 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   so a long line may be cut off by the next one. The build that adds VIBRATE
   and CAMERA can have the native voice report its end (`onDone`), and
   `speakLine` would use it where it is there.
+- **No reminder has reached a phone yet** (F4a). The cron and the sender
+  were driven on dev, where no phone is registered. Production has his phone
+  and FCM's credentials: the first evening after the merge is the test.
+- **A reminder counts only what has reached the server.** A morning done with
+  no signal and not yet sent makes the evening's say more is left.
+- **iPhone reminders** wait on APNs, as the digest's pushes do.
 - **The recorded voice on a phone is unheard** (F2d). It plays through Web
   Audio. Inside the app's WebView that is untried, and on an iPhone with the
   ringer switch off Web Audio may be silent where speech was not

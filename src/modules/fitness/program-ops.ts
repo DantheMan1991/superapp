@@ -1,9 +1,17 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { FitnessVideo } from "@/db/schema";
+import type { FitnessAssessment, FitnessVideo } from "@/db/schema";
 import { FitnessError } from "./core/errors";
-import { breathPace, type ItemInput, type ProgramInput, type VideoInput } from "./core/program";
+import {
+  breathPace,
+  type AssessmentInput,
+  type ItemInput,
+  type ProgramInput,
+  type SideMeans,
+  type SideRule,
+  type VideoInput,
+} from "./core/program";
 import type { DayItem } from "./core/day";
 import type { SessionPlan } from "./core/session";
 
@@ -100,6 +108,8 @@ export async function saveProgram(
         perSide: item.perSide,
         optional: item.optional,
         notes: item.notes,
+        sideRule: item.sideRule,
+        sideMeans: item.sideMeans,
       };
       if (item.itemId !== null) {
         if (!existing.items.has(item.itemId)) throw new FitnessError("STALE");
@@ -154,11 +164,23 @@ function programColumns(input: ProgramInput) {
     effortMax: input.effortMax,
     breathOutS: input.breathOutS,
     breathInS: input.breathInS,
+    assessment: storedAssessment(input.assessment),
   };
 }
 
 function storedVideos(videos: VideoInput[]): FitnessVideo[] {
   return videos.map((video) => ({ provider: "youtube", ...video }));
+}
+
+/** The self-assessment as the program keeps it (F4b): null when there is none. */
+function storedAssessment(assessment: AssessmentInput | null): FitnessAssessment | null {
+  if (!assessment) return null;
+  return {
+    video: assessment.video ? { provider: "youtube", ...assessment.video } : null,
+    least: assessment.least,
+    tests: assessment.tests.map(({ name, question, leftMeans }) => ({ name, question, leftMeans })),
+    notes: assessment.notes,
+  };
 }
 
 async function saveExercise(
@@ -285,6 +307,8 @@ export interface LoadedItem {
   perSide: boolean;
   optional: boolean;
   notes: string;
+  sideRule: SideRule;
+  sideMeans: SideMeans;
   exercise: {
     id: string;
     name: string;
@@ -327,6 +351,7 @@ export interface LoadedProgram {
   effortMax: number | null;
   breathOutS: number | null;
   breathInS: number | null;
+  assessment: FitnessAssessment | null;
   version: number;
   phases: LoadedPhase[];
 }
@@ -372,6 +397,7 @@ export async function loadProgram(
     effortMax: program.effortMax,
     breathOutS: program.breathOutS,
     breathInS: program.breathInS,
+    assessment: program.assessment ?? null,
     version: program.version,
     phases: phases.map((phase) => ({
       id: phase.id,
@@ -391,6 +417,8 @@ export async function loadProgram(
           perSide: item.perSide,
           optional: item.optional,
           notes: item.notes,
+          sideRule: item.sideRule,
+          sideMeans: item.sideMeans,
           exercise: {
             id: exercise.id,
             name: exercise.name,
@@ -416,6 +444,22 @@ export function programToInput(program: LoadedProgram): ProgramInput {
     effortMax: program.effortMax,
     breathOutS: program.breathOutS,
     breathInS: program.breathInS,
+    assessment: program.assessment
+      ? {
+          video: program.assessment.video
+            ? {
+                id: program.assessment.video.id,
+                startS: program.assessment.video.startS,
+                endS: program.assessment.video.endS,
+                label: program.assessment.video.label,
+                embeddable: program.assessment.video.embeddable,
+              }
+            : null,
+          least: program.assessment.least,
+          tests: program.assessment.tests,
+          notes: program.assessment.notes,
+        }
+      : null,
     phases: program.phases.map((phase) => ({
       phaseId: phase.id,
       name: phase.name,
@@ -442,6 +486,8 @@ export function programToInput(program: LoadedProgram): ProgramInput {
         perSide: item.perSide,
         optional: item.optional,
         notes: item.notes,
+        sideRule: item.sideRule,
+        sideMeans: item.sideMeans,
       })),
     })),
   };

@@ -12,12 +12,12 @@ Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This pa
 - **{button:Build one by hand|outline|plus}.** Opens an empty program to fill in. See [Building and editing a program](editor.md).
 - **{button:Import a program|primary|upload}.** Opens the import. See [Importing a program](import.md).
 - **`Today`**, once you have done a workout: a card for the program of your last workout, on that workout's phase.
-  - **The program and the phase**, for example `Beginner Body Restoration · Phase 1: Weeks 1-2`. Click it to open the program on that phase.
+  - **The program and the phase**, for example `Starter Mobility · Phase 1: Weeks 1-2`. Click it to open the program on that phase.
   - **Where the phase stands**, for example `6 of 14 done days · This week: 2 of 3–4 sessions`. See [Following a program](program.md) for what a done day is.
   - **When the phase has reached its days**, a box with {icon:check} says the next one is open, for example `Phase 2: Weeks 3-4 is open`, with {button:Move on|outline|arrow-right}, which opens the program on that phase.
   - **Today's sessions**, each with {icon:check} and when you started it, for example `Morning · 4 sets`. A session you left open adds `not finished`. A set of an exercise done per side counts once, for both sides.
   - **Before your first session today**, `Nothing yet today: 4 exercises, 6 sets.`
-  - **What is left**, once the day has started, for example `2 sets left: 90-90 Hip Lift with Ball Hold, Quadruped Block Squeeze.`
+  - **What is left**, once the day has started, for example `2 sets left: Hip lift, Wall stack.`
   - **{button:Start today's session|primary|play}**, or {button:Do the rest|primary|play} once the day has started, or {button:Resume|primary|play} while a session is open on this phone, with `A session is open on this phone for Phase 1: Weeks 1-2.` Each opens the session on that phase. See [Doing a session](workout.md).
   - **`Every set done today.`** once every exercise has had its sets, with no button.
   - It counts workouts on this phone that have not reached us yet, and sends them while the page is open.

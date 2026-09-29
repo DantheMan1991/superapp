@@ -76,6 +76,10 @@ export async function markVideos(
       });
     }
   }
+  // The self-assessment's video (F4b): whether it plays here. It is the only
+  // video there, so it never takes a label.
+  const assessmentVideo = program.assessment?.video ?? null;
+  if (assessmentVideo && assessmentVideo.embeddable === null) ask.add(assessmentVideo.id);
   const answers = new Map<string, VideoFacts>();
   const queue = [...ask];
   await Promise.all(
@@ -85,8 +89,16 @@ export async function markVideos(
       }
     }),
   );
+  const assessmentFacts = assessmentVideo ? answers.get(assessmentVideo.id) : undefined;
   return {
     ...program,
+    assessment:
+      program.assessment && assessmentVideo && assessmentFacts
+        ? {
+            ...program.assessment,
+            video: { ...assessmentVideo, embeddable: assessmentVideo.embeddable ?? assessmentFacts.embeddable },
+          }
+        : program.assessment,
     phases: program.phases.map((phase) => ({
       ...phase,
       items: phase.items.map((item) => ({

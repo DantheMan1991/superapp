@@ -13,6 +13,100 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-29 — F4b, part 1: the side self-assessment and one-sided exercises, in the program (`claude/fitness-f4b`)
+
+F4b ships as two PRs, as the founder was told before the build: this one puts
+the side self-assessment and the one-sided exercises IN THE PROGRAM, read from
+his PDF into the program he already follows; the next takes the assessment and
+runs one-sided workouts. His two calls: **read the tests from the PDF, the
+table's picture too** (the table is an image), and **each test is answered with
+which side went further**, the app applying the table.
+
+**Migration `0432`** (two enums, five columns, a CHECK), on dev; production on
+his word, before the merge. No new table, so no new policy and no isolation
+change; `db:verify-rls -- --dev` passed (255 tables).
+
+- **The model.** `fitness_programs.assessment` (jsonb: the video, how many
+  tests must agree, each test's name, question and `leftMeans`, notes).
+  `fitness_phase_items.side_rule` (`both` / `toward` / `away`, default `both`)
+  and `side_means` (`side` / `lying` / `top_leg`), with a CHECK that only a
+  per-side item takes a rule. `fitness_enrollments.side_answers` and
+  `side_assessed_at`, which part 2 writes.
+- **`leftMeans` is the table in one field**: the side a test points to when the
+  LEFT side went further. The person says what they saw, and `assessedSide`
+  counts it, reversed tests and all (`core/side.ts`, pure). `sideFor`,
+  `sideWords` (`Lying on your left side`, `Left leg on top`) and `ruleWords` are
+  what part 2's workouts will say.
+- **A page whose table is a picture is sent as a picture**
+  ([ADR 0117](../decisions/0117-a-page-whose-table-is-a-picture-is-sent-as-a-picture.md),
+  amending 0112): its words say "table" or "chart" (not "table top") and it
+  draws an image; rendered on the device at 1,100 px as a JPEG; at most four,
+  2.4 MB of base64 together, under the 4 MB an action takes (`pictureFits`, and
+  the schema again). His PDF sends one page of 59. Both screens' lock line
+  says so, and the import's reading line ends `, and 1 page as a picture`.
+- **The draft reads them**: `record_program` gains `assessment` and each item's
+  `sideRule` and `sideMeans`, taught by `ASSESSMENT_INSTRUCTIONS`, which
+  describe such a table in words of our own and quote nothing of his book.
+- **Read the PDF again** (`/personal/m/fitness/programs/[id]/read`, a button on
+  an imported program): the same reader, a second tool (`record_additions`: the
+  assessment, and the one-sided exercises named as the program in the app lists
+  them, once per phase), `mergeAdditions` (by phase and name, else by a name
+  only one exercise has; anything else reported, never guessed onto another),
+  and the editor opened on the result, with its version. Nothing is written
+  until Save, and the log stays with the program. Its failures have their own
+  words (`READ_AGAIN_WORDS`: `Nothing was changed.`, never the import's advice
+  to build the program by hand).
+- **The editor**: a `Side self-assessment` card between the program's fields
+  and the phases (the video, each test with which way it counts, how many must
+  agree, notes), and on a per-side exercise `Side, once yours is known` and
+  `That side is`, with what a workout will say for someone who leans left.
+  Unticking `Per side` puts the exercise back on both sides.
+- **The program page** gives each one-sided exercise its rule: `For someone who
+  leans to a side: lying on the side you lean toward. Otherwise both sides.`
+- Guides: `read-again.md` (new), `import.md`, `editor.md`, `program.md`, and
+  `overview.md`, whose examples had been his book's title and two of its
+  exercises in a tenant-facing guide since F3 (now the invented program's).
+  Guide icon: `arrow-left-right`.
+
+**Driven** on a production build against dev, on his program, in a pane tab
+that was never in front, with his PDF served from the scratchpad to that origin
+only (never in the worktree):
+
+- **The first read stopped at `Reading page 15 of 59…` for over a minute.**
+  pdf.js paces a `display` render on animation frames, which a tab in the
+  background does not get; page 16 is the table. The picture is rendered as
+  `print` now (a printout is what it is), and the next read took about a
+  second for all 59 pages and the picture, in the same hidden tab. A phone
+  switched to another app mid-read would have stalled the same way.
+- **The first read matched none of the four one-sided exercises.** The prompt
+  listed each as `Name (per side)`, and Claude named them that way. The prompt
+  marks it `[per side]` now and says to leave it out, and the merge ignores the
+  note in either bracket.
+- The second read answered 10 s after the reading: `A side self-assessment,
+  with 5 tests.` and `4 exercises done on one side, for someone who leans to a
+  side.`, with no warning. The five tests, each counted the way the table says
+  (the two reversed ones included), 3 to agree, the video `plays here`: the
+  same as the first read, wording aside. The four exercises, in phases 2–4,
+  with the book's rules: two by the side lain on (one toward, one away), two by
+  the leg on top (toward). Every other per-side exercise stayed on both sides.
+- At 375 px the card and the side fields fit, with no sideways scroll.
+- Saved on dev (`Program saved`): phases 2–4 of the program page show the four
+  rules' lines. Dev's program keeps them, for part 2.
+- A fresh import of the same PDF (the import line: `Read 59 pages and 40 links,
+  and 1 page as a picture`) drafted the same self-assessment and the same four
+  rules in about 80 s. The draft was discarded.
+
+Tests: `tests/fitness-side.test.ts` (new, pure: a test's answer, the side the
+tests agree on, a one-sided exercise's side and words),
+`tests/fitness-read-again.test.ts` (new, pure: the merge by phase, by a unique
+name, through the per-side note, and what it reports; the assessment read; the
+failure words; the prompt), `tests/fitness-core.test.ts` (the draft's
+assessment and sides, the save's rules, the editor both ways, `pointsToPicture`
+and "table top", the pictures' number and size), `tests/fitness-ops.test.ts`
+(db: an assessment and sides saved and loaded; the CHECK refusing a side on an
+exercise not per side; `readAgain` writing nothing, keeping every id, and its
+failures' words).
+
 ### 2026-09-28 — F4a: reminders (`claude/fitness-f4`)
 
 F4 starts. The founder approved a mockup of all three parts (reminders, the
@@ -168,330 +262,7 @@ voice that failed, the region, another language), `tests/fitness-coach.test.ts`
 (`sessionLines`: the whole walk in order, every line the screen then says, the
 middle of a session, a split day, One more set, a finished session).
 
-### 2026-09-27 — F3: progress and the gate (`claude/fitness-f3`)
-
-No migration and no seed. The founder approved the screens from a mockup
-(the program page's progress, the gate opening, the Today card's line) with
-two calls of his own: **the streak counts weeks on target**, and **a phase
-whose gate has not opened warns but can still be started**.
-
-- **Done days** (`core/progress.ts`): a day whose sessions together did every
-  exercise's minimum for the phase, the same `dayProgress` a split day uses.
-  Counted per phase from every session of the program (`programSessions`,
-  the newest 2,000).
-- **The phase bar** on the program page: `6 of 14 done days`, `Phase 2: … opens
-  at 14`, a bar, and a line saying what a done day is.
-- **This week**: done days, Monday to Sunday, against the program's sessions a
-  week (`1 of 3–4 sessions`).
-- **The last four weeks**: a square a day (done, some sets, nothing, still to
-  come, today ringed), and `3 weeks in a row on target`. It counts weeks, not
-  days (his call): the program asks for 3–4 a week, so a daily streak would
-  break on every rest day. The week going on never breaks it.
-- **The effort warning**, in the program's terms: `1 exercise at 7/10 this
-  week. The program says stay at 3–5.` It counts exercises, not sets as the
-  plan said, because effort is given once per exercise.
-- **How you felt**: the phase's average before and after, and a line for each
-  over the last 14 sessions, drawn as inline SVG with no chart library.
-- **The gate**: when the phase's done days are reached, `Phase 2: … is open`
-  with what is new in it (by name, since each phase's exercises are rows of
-  their own), the first new exercise's video, `Move on to …`, and `Or keep
-  going here. It never moves you on by itself.` Nothing is stored. The program
-  opens on the phase of the last workout, so the first session on the next
-  phase is the move.
-- **A phase whose gate has not opened** says `Opens after 14 done days of …
-  (6 so far). The program says not to skip a phase.` above a Start that still
-  works (his call).
-- **The Today card** adds `6 of 14 done days · This week: 1 of 3–4 sessions`,
-  and `Phase 2: … is open` with `Move on` once its phase's gate opens.
-- It is worked out on the server from what has reached it, so a workout still
-  on the phone counts once it is sent.
-- Guides: `program.md` (Your progress, the gate, how to move on) and
-  `overview.md` (the Today card's lines). Two icons registered for guides:
-  `arrow-right` and `triangle-alert`.
-
-**Driven** on a production build against the dev branch, on the founder's
-program:
-
-- The Today card for phase 2 read `1 of 14 done days · This week: 1 of 3–4
-  sessions`.
-- At 375 px, phase 1's page showed `1 of 14 done days` with `Phase 2: Weeks
-  3-4 opens at 14` and `This week 1 of 3–4 sessions`. Its calendar marked
-  today done. The effort warning read `1 exercise at 7/10 this week`, from the
-  7/10 given in F2a's drive, and `How you felt` read 2 sessions, 4 before →
-  6.5 after. No sideways scroll.
-- Phase 2's page said `Opens after 14 done days of Phase 1: Weeks 1-2 (1 so
-  far). …` above its progress and a Start that still worked.
-- With phase 1's days set to 1 for the drive (restored to 14), phase 1's page
-  showed `Phase 2: Weeks 3-4 is open`: its four exercises, all new, the first
-  one's video, and `Move on to Phase 2: Weeks 3-4` linking to `?phase=2`.
-  Phase 2's warning went away.
-- With phase 2's days set to 1 (restored), the Today card showed `Phase 3:
-  Weeks 5-6 is open` with `Move on` linking to `?phase=3`.
-- The drive found three wording bugs, all fixed: `4 of them new` when all are
-  new (now `all new`), `1 days before moving on`, and `1 of 1 done days`.
-- The app window was minimized for part of the drive, so the page's text was
-  read instead of taking screenshots.
-
-Tests: `tests/fitness-progress.test.ts` (new, pure): done and partial days, a
-program's done day across phases, the gate and its words, the Monday week and
-this week's count, weeks on target (the week going on never breaks it), the
-four-week calendar, the effort warning in the program's terms, the feel's
-averages and series, what the next phase brings. `tests/fitness-ops.test.ts`
-(db): `programSessions` with each session's phase, feels and efforts.
-`tests/fitness-day.test.ts`: the session's new fields.
-
-### 2026-09-27 — F2c: split days, and a Today card (`claude/fitness-f2c`)
-
-No migration and no seed. The founder approved the screens from a mockup
-(the split choice, the evening pick-up, the Today card) and the rule that
-**every set done counts toward the day, however short it came up**. With this,
-F2 (workout mode) is built.
-
-- **A day is a ledger** (`core/day.ts`): the sets each exercise needs (its
-  minimum), the sets done across the day's sessions, and what is left. The
-  day is done when every exercise that is not optional has had its minimum.
-  That is the done day F3's gate will count.
-- **A set is a full set** (`fullSets`): one of "1 × 15 rolls per side" is both
-  sides. The session's `Session done` count and the program page's `Last
-  workout` count this way now. F2a counted each side as a set, so a drive's
-  "7 sets" is 6.
-- **"Half now, the rest later today"** at the start does the first half of
-  every exercise's sets, rounded up (1 of 2, 2 of 3). A session later that day
-  starts as `The rest of today`: the day so far with when each session was
-  (`Evening · 4 sets · 2 minutes`), and only what is left (`1 more set`),
-  passing over the exercises the day already has (`done today`). Once the day
-  is done, the start offers `Start another session`, which does everything
-  again and counts too. The choice only shows when halving changes something.
-- **The session carries its own aim** (`SessionDoc.aim`, the phone's alone,
-  like `plannedSets`): per item, the sets it does and the most "one more set"
-  may reach, so the morning and the evening together stay within the
-  program's maximum for the day. A document from before has none and aims at
-  each minimum, as before.
-- **The finish says how the day stands**: `That is every set today asks for.`
-  or `Still to do today: 4 sets. Start again later today and it picks up
-  here.` The coach's first-set intro says the session's share ("1 set of 8
-  breaths").
-- **The program page's Start** reads `Do the rest of today` after a session
-  earlier today, with `Today: Evening · 4 sets. 4 sets left.`, or `Start
-  another session` with `Today's sets are done: …`. `Last workout` steps
-  aside when its workout was today on the phase on screen.
-- **A Today card on the Workouts home** (`components/today-card.tsx`): the
-  program last followed, on its last workout's phase. It lists today's
-  sessions, says what is left and of which exercises, and has one button:
-  `Start today's session`, `Do the rest` or `Resume`. Once every set is done
-  it says `Every set done today.` and asks nothing. It sends unsent workouts
-  while the page is open.
-- **Where the day comes from**: the pages load the program's sessions from
-  the space's yesterday to tomorrow (`recentSessions`, full sets per item),
-  and the phone adds its own documents, sent or not, the phone's copy winning
-  (`dayOf`). So a morning done without signal is already counted.
-- **"Morning" is read on the space's clock** (`hourIn`), never the device's:
-  these screens are rendered on the server first, and a device clock there is
-  the server's.
-- Guides: `workout.md` (the start screen on a split day, `How much now?`, the
-  finish's line, a how-to for splitting a day), `program.md` (the Start
-  button's labels, `Last workout`), `overview.md` (the Today card).
-
-**Driven** on a production build against the dev branch, on the founder's
-program, with the breathing pace set to 1 s and 1 s for speed and cleared
-after. Phase 1 already had four sessions today from the earlier drives, which
-showed the done day: the Today card listed them with `Every set done today.`,
-the program page read `Start another session` with `Today's sets are done:
-Afternoon · 6 sets, …`, and the start screen said `Today's sets are done`
-with no split choice. On phase 2, a fresh day: `How much now?` with `All of
-it` chosen, and `Half now, the rest later today` turning every row to `1 of 2
-sets`. The half session ran `Set 1 of 1` on each exercise, per side where
-asked, and finished with `Still to do today: 4 sets.` (4 exercises, 4 sets).
-The program page then read `Do the rest of today` with `Today: Evening · 4
-sets. 4 sets left.`, and the Today card `Evening · 4 sets`, the four
-exercises left and `Do the rest`, as in the mockup. That opened `The rest of
-today` with the evening, `1 more set` on each and no split choice; its finish
-said `That is every set today asks for.`, and the program page `Start another
-session` with `Today's sets are done: Evening · 4 sets, Evening · 4 sets.`. At
-375 px, the Today card and the split choice fit with no sideways scroll. No
-hydration error from the server's render of "Evening". The drive left two
-phase 2 sessions on dev, so the program opens on phase 2 there.
-
-Tests: `tests/fitness-day.test.ts` (new, pure: a full set, a morning half and
-an evening that picks up, the day's maximum, another session after a done
-day, a session from before split days, the server's and the phone's copies,
-what the start screen says, the space's day and hour; the evening test was
-checked to fail with the skip taken out), `tests/fitness-session.test.ts` (a
-per-side set counted once), `tests/fitness-coach.test.ts` (the share said),
-`tests/fitness-ops.test.ts` (db: `recentSessions` on the days asked for with
-full sets per item, one side not yet a set, `lastSession` in full sets,
-`latestFollowed`).
-
-### 2026-09-27 — F2b: the coach's voice and the looping demo (`claude/fitness-f2b`)
-
-No migration and no seed: everything F2b adds lives on the phone.
-
-- **The demo loops above the count** (`components/workout/demo-loop.tsx`).
-  The exercise's clip starts by itself, muted, and goes round between the
-  video's `Start` and `End` (or from `Start` to the video's end) at 0.5×,
-  0.75× or 1×, remembered per device. Under it: pause and play, the speeds,
-  and `With sound`, which plays the clip once from its start at 1× with the
-  author talking and then goes back to the loop. A set beginning to run does
-  the same, so the demo never talks over the count. It is YouTube's player
-  driven by the IFrame Player API (`youtube-api.ts`), inside YouTube's terms
-  for an API client (Inline video, below). The loop is the page's own, a check
-  every 250 ms that seeks back a quarter of a second before the end. A video
-  that may not be embedded, is gone or will not play says why, with `Open in
-  YouTube`, and a page that cannot load the API gets F1's player. The exercise
-  screen is now one per exercise, so the demo keeps playing from set to set.
-- **The coach's voice** (`core/coach.ts`): the screen, said at the moments it
-  cannot be seen. As a set appears it says the exercise, what to do and the
-  side to start on the first time ("Side-lying pullback. 2 sets of 5 to 8
-  breaths, each side. Right side first."), then "Now the left side." or "Set 2
-  of 3. Right side.". Reps and rolls get their cue with it. In a breath set it
-  says the cue as the middle breath starts and "Last one." as the last one
-  does. In a hold, the cue halfway, and "Ten seconds left." in one of 30 s or
-  more. "Exercise done." as the check appears. Not the count breath by breath:
-  the tones already mark every turn.
-- **One voice** ([ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md);
-  `src/lib/speech/queue-policy.ts`, `voice-queue.ts`). Every line carries a
-  priority, an optional key and a freshness. A higher line interrupts, a newer
-  line with the same key replaces, and a stale line is dropped, never said
-  late. Workout mode speaks through `coachSay` (`sound.ts`), which honours the
-  two switches in the top bar: the megaphone (the coach's voice, shown only
-  while the phone can speak) and the speaker, which now silences everything.
-  The founder's posture tool speaks through the same `coachSay`, with
-  `priority: "high"`.
-- **The speech engine learned when a line ends** (`speakLine` in say.ts):
-  the browser says so; the app's voice answers before it speaks, so there the
-  end is estimated from the line's length.
-- **Fixed for the tell box as well:** an utterance stopped by the next one
-  (`interrupted`, `canceled`) or refused before the page's first tap
-  (`not-allowed`) no longer counts as proof that the device cannot speak. That
-  proof switched the voice off for the rest of the page. And a line overtaken
-  by a newer one before it began (the same tick, or while the voices were
-  still loading) was said after it; it is dropped now.
-- **F1's player is never under 200 px tall.** YouTube's terms ask it of every
-  embedded player, and a phone's width made the 16:9 box 193 px.
-- Guides: `workout.md` (the demo, the voice, the two switches, the how-to) and
-  `editor.md` (`Start` and `End` bound the loop).
-
-**Driven** on a production build against the dev branch, in the founder's
-space, on his imported program. For speed, the breathing pace was set to 2 s
-and 2 s, and exercise 3's video was given a 0:05–0:15 clip; both were cleared
-after. A recorder on the page's speech engine logged every line, when it
-started and when it ended.
-
-- A whole session of four exercises and seven sets, in the Windows voice at
-  rate 0.95. The rolls said their intros with their cues, the second one per
-  side: "Sidelying Half-Rolling in 90/90. 1 set of 15 rolls, each side. Right
-  side first. Low back stays relaxed the whole time." then "Now the left side.
-  No pinching felt in the hip.". The first intro took 8.6 s to say. In the
-  breath exercise, the first cue came 21 s after Start (the countdown and four
-  breaths), "Last one." at 33 s, and "Set 2 of 2." as the next set counted
-  down. Set 2 had its own cue, then "Last one.", then "Exercise done." as the
-  check appeared.
-- The warm-up line, cut off by the first real one, reported `interrupted` and
-  did not silence the device (the fix).
-- The voice switch off: nothing said for 30 s, through the end of a set and
-  the next set's start. Back on, then all sound off: "Last one." was cut off
-  0.4 s in, and the voice switch stayed, so the phone was not taken for a
-  silent one.
-- Skipping three exercises in a row: each intro cut off the one before, the
-  newest step being the true one.
-- The demo: the privacy-enhanced player, muted, 416 × 234 px in a desktop
-  pane. 0.5× applied, was remembered, and carried to the next exercise. `With
-  sound` unmuted it and played from the clip's start at 1×, with the speeds
-  grayed out, and at the video's end it went back to the muted 0.5× loop. The
-  muted loop came round at a video's end. Exercise 3's clip went round 0:05 →
-  0:15 → 0:05. `With sound` kept playing through a countdown, then went back
-  to the muted loop the moment the set ran. One player stayed across both
-  sides of an exercise. Scrolled fully out of sight (a 375 × 420 view), it
-  paused; scrolled back, it played.
-- The browser pane refuses a video that starts by itself, even muted. The
-  demo said `This phone waits for a tap before it plays a video. Tap play.`,
-  and play started it.
-- Finish saved: `Session saved`, then `Last workout: today · Phase 1: Weeks
-  1-2 · 7 sets · felt 4 before, 6 after`.
-- **Two bugs the drive found, fixed.** The chosen speed did not show on the
-  dark screen: the outline button's dark-mode fill beat the highlight, so the
-  chosen speed now takes the primary look. And at 375 px, with the voice
-  switch added, "Exercise 4 of 4" and "Kept on this phone" each wrapped onto
-  two lines; the save status now sits under where you are. Both were
-  re-checked at 375 px on a new build, with a second, short session run
-  through to its finish.
-- The last change (a line overtaken before it began is dropped) was driven on
-  its own build. Each intro was still cut off by the next, the voice switch
-  stayed, and a double tap on Skip skipped one exercise, not two.
-
-Tests: `tests/speech-queue.test.ts` (the voice's rules, the length estimate,
-which speech errors mean a silent device), `tests/fitness-coach.test.ts`
-(every line the coach says, set by set), `tests/fitness-core.test.ts` (the
-demo's player parameters and when the loop goes round).
-
-### 2026-09-27 — F2a: workout mode, the session (`claude/fitness-f2`)
-
-Migrations `0428` (four tables, two enums, the breathing pace on programs;
-hand-reordered, with three column-list SET NULL keys, see Decisions) and
-`0429` (their RLS), applied to the dev branch and to production before the
-merge (production on the founder's word, ADR 0014: additive only). No seed:
-the catalogue did not change. The founder approved the screens from a mockup
-and the slice order F2a → F2b (coach voice, looping demo) → F2c (split days).
-
-- **`Start today's session`** under a phase on the program page runs that
-  phase full screen and dark (`/personal/m/fitness/programs/[id]/session`):
-  a feel check (0–10), one exercise at a time, three taps after each, and a
-  finish with the feel after. The program page opens on the phase of the last
-  workout, says `Last workout: today · … · felt 4 before, 7 after`, and turns
-  the button into `Resume today's session` while one is open on the phone.
-- **The pacer** counts breaths at the program's own pace: a new breathing pace
-  on the program, which the importer fills from the book and the editor
-  changes (5 s and 5 s when empty). A circle shrinks on the breath out and
-  grows on the breath in, a tone marks each turn, and the set finishes itself
-  at the top of the range with a chime and a buzz; `Finish set` works from the
-  bottom of it, `One didn't count` takes a breath back, and it pauses. Holds
-  count down. Reps and rolls confirm the target (his call). The first set of
-  an exercise waits for Start; every later set and side counts down five
-  seconds and starts itself.
-- **After each exercise**: effort 1–10 with the program's zone outlined and a
-  word when it is exceeded, the exercise's own checks to tick, and `Anything
-  hurt?` with where; `One more set` up to the program's maximum.
-- **Kept on the phone, sent whole** ([ADR 0113](../decisions/0113-a-workout-session-is-a-document-the-phone-keeps-and-sends-whole.md)):
-  the session is a document in the phone's storage, changed by pure functions
-  (`core/session.ts`) and sent after every change to `saveSessionAction`,
-  which makes the database match it. No signal: the top says `Kept on this
-  phone`, and it goes up on its own when the phone comes back, or the next
-  time the program page is open. A session left open closes the next day at
-  its last set.
-- **The screen stays on** (Screen Wake Lock) while a session is open.
-- **A log outlives an edit**: a session keeps its phase's name and each
-  exercise its name, unit and per-side, and their keys to the program set null
-  when an edit removes what they logged. Deleting the program still deletes
-  its workouts, and the delete dialog now says how many.
-- **Seams for the founder's posture tool**, which he is building himself: the
-  exercise screen's top slot (the video today), the enrollment's `side`, and
-  F2b's one voice.
-
-**Driven** on the dev branch in the founder's space, on his imported program,
-with the breathing pace set to 1 s and 1 s for speed and cleared after: a
-whole session of four exercises and seven sets. It covered rolls confirmed
-and one taken off, both sides of a per-side exercise, the pacer running two
-sets of 8 by itself, a 5–8 set stopped at 5 with a pause and a breath taken
-back, effort 7 above the zone with its warning, and a pinch with where. A
-reload mid-exercise landed on the same side. A set done with the network
-failing showed `Kept on this phone` (revision 11 on the phone, 10 sent) and
-went up on its own when the network came back. Finish saved and returned to
-the program with `Last workout: today · Phase 1: Weeks 1-2 · 7 sets · felt 4
-before, 7 after`, and the rows read back from the dev database matched. The
-drive found three bugs, all fixed: "3–5is the program's zone" (the compiled
-JSX dropped a space), sound never unlocked after a reload (any tap now
-unlocks it), and `Kept on this phone` lingering after a send had got through.
-
-Tests: `tests/fitness-session.test.ts` (pure: a session walked from Start to
-Finish, a double tap refused, one more set, skipping, resuming from storage,
-the schema), `tests/fitness-core.test.ts` (the pace through the draft and the
-form), `tests/fitness-ops.test.ts` (a session sent whole again and again, a
-late older copy ignored, a set taken back, an id from another program's
-session and a day ahead refused, a log outliving the edit of its exercise
-and its phase, deleting the program), `tests/isolation/fitness.test.ts` (the
-four tables between two spaces).
-
-Older entries (F1 and the plan) are in [fitness-build-log.md](fitness-build-log.md).
+Older entries (F3, F2c, F2b, F2a, F1 and the plan) are in [fitness-build-log.md](fitness-build-log.md).
 
 ## What his program demands of the model
 
@@ -508,7 +279,7 @@ the PDF and the part of the model that keeps it.
 | Effort "3/10, never beyond 5/10": the author calls trying too hard the biggest mistake | Effort logged per set, and a warning when it runs above the program's ceiling |
 | Every exercise has "How to know you're doing it right" (three or four cues) | `cues` on the exercise, shown during the set and ticked after it |
 | A video link on every exercise, a playlist per phase | A video on the exercise, played inline |
-| A five-test self-assessment says which side you are "lateralized" to, and changes four exercises in phases 2–4 to one side | The person's side on the enrolment, and a side rule on the item (`both`, `toward`, `away`). Until the assessment is done, both sides, which is the program's own default |
+| A five-test self-assessment says which side you are "lateralized" to, and changes four exercises in phases 2–4 to one side | The assessment on the program (each test with `leftMeans`, the side it points to when the left went further), the person's side on the enrolment, and a side rule on the item (`both`, `toward`, `away`, and what the side is: the side, the side lain on, the leg on top). Until the assessment is done, both sides, which is the program's own default |
 | Calf raise progression: "move on once you can do 2 sets of 15 perfect reps" | A progression ladder on the item with an advance rule, and a nudge when the log meets it |
 | An optional exercise ("if you have extra time"), and alternatives ("I like this one more, but most people don't have the equipment") | `optional` on an item, and an alternative that can be swapped in |
 | Sessions 3–4 a week ("3 is good, 4 is great, 5 is even better") | A weekly target on the program |
@@ -695,6 +466,15 @@ push only, not a line in the daily digest; a reminder skips a day that is done
 and nothing more (he was offered "quiet for the week once its sessions are
 done" and declined).
 
+**F4b's first half is built**: the self-assessment and the one-sided exercises
+are in the program, read from the PDF (the table's picture too, ADR 0117) into
+the program he already has with "Read the PDF again", and editable. Where it
+moved from the list below: each test is answered with which side went further,
+and the app applies the table (`leftMeans`). **The second half is next**:
+taking it (the flow with the author's video, the answers and the side saved on
+the enrolment, redoing it) and one-sided workouts (the plan, the coach and the
+set saying the side, and why).
+
 - **The self-assessment**: the five tests as a short flow with the author's
   video, the answer (left, right or none) saved on the enrolment, and the four
   affected exercises switched to one side, each saying why.
@@ -765,18 +545,18 @@ The founder does not want to leave the app to watch a demo.
 Every table carries `tenant_id` with FORCE RLS (the two ordinary policies,
 `0427`) and composite FKs `(tenant_id, x)`, all `on delete cascade`. The
 first five are F1's (migration `0426`), the next four F2a's (`0428`),
-`fitness_reminders` F4a's (`0430`, RLS `0431`); `fitness_progressions` is
-planned. F2a's three keys from a log to the program it logged are the
+`fitness_reminders` F4a's (`0430`, RLS `0431`), and F4b's columns and two
+enums `0432`; `fitness_progressions` is planned. F2a's three keys from a log to the program it logged are the
 column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `fitness_programs` | A program: name, author, source (`imported` / `own`), notes (its rules in words), sessions a week and effort as ranges, the breathing pace (`breath_out_s`, `breath_in_s`, 1–30; F2a), `archived_at`, `version` | `version` guards an edit from a second tab. One active at a time will be the UI's rule, not the table's |
+| `fitness_programs` | A program: name, author, source (`imported` / `own`), notes (its rules in words), sessions a week and effort as ranges, the breathing pace (`breath_out_s`, `breath_in_s`, 1–30; F2a), `assessment` (jsonb, the side self-assessment: video, `least`, tests with `leftMeans`, notes; F4b), `archived_at`, `version` | `version` guards an edit from a second tab. One active at a time will be the UI's rule, not the table's |
 | `fitness_phases` | Ordered phases (`position`) with `min_done_days` (1–365, or none) and notes | |
 | `fitness_exercises` | name, purpose, cues (jsonb list), unit (`reps` / `breaths` / `rolls` / `seconds`), videos (jsonb list), notes | **`program_id` NOT NULL for now**: an exercise belongs to the program that made it. A library shared between programs is F5, and relaxing this column is where it starts |
-| `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). Alternative-of and the side rule are F4 |
+| `fitness_phase_items` | An exercise in a phase: position, `sets_min`/`sets_max`, `target_min`/`target_max`, `per_side`, `optional`, notes | Ranges checked in the database (sets 1–20, count 1–1000, a top never below its bottom). `side_rule` (`both` / `toward` / `away`) and `side_means` (`side` / `lying` / `top_leg`), F4b: a CHECK allows a rule only on a per-side item. Alternative-of is F4 |
 | `fitness_imports` | A PDF on its way to being a program: file name, pages, links, status (`drafting` / `draft` / `failed` / `saved` / `discarded`), the draft, the error, the program it became | Holds the draft json and the counts, never the book's text; the draft is dropped once saved |
-| `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
+| `fitness_enrollments` | Following a program: `started_on` (the person's own day), `side` (`left` / `right`, or none), `side_answers` (jsonb: each test by name and which side went further, F4b) and `side_assessed_at`, `ended_at` | F2a. Made by the first session; one open per program (a partial unique index). No current phase: each session names its phase, and moving on is F3's gate |
 | `fitness_sessions` | One workout: the phone's own id, its enrollment, its phase (and the phase's name, kept), `local_day`, started and finished, feel before and after (0–10), note, `revision` | F2a. `revision` only goes up, so a late older copy never undoes a newer one. A day can hold several: a split day is two or more (F2c). No morning-or-evening slot is stored; a session's part of the day is its `started_at` on the space's clock |
 | `fitness_session_exercises` | An exercise as done in a session: its item and exercise, position, name, unit and per-side as they were, effort (1–10), the cues felt, `hurt` (`none` / `pinch` / `yes`) and where, skipped, finished | F2a. The three taps after an exercise live here, per exercise, not per set |
 | `fitness_sets` | A set: its number, side, `target` (the least asked) and `count` (what was done), `done_at` | F2a. The id is the phone's, so there is no separate idempotency key. Load (weight) is F5 |
@@ -785,12 +565,21 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 
 ## Key files & seams
 
-- `src/db/schema/fitness.ts` — the nine tables, the enums, `FitnessVideo`.
+- `src/db/schema/fitness.ts` — the ten tables, the enums, `FitnessVideo`,
+  `FitnessAssessment`.
 - `src/modules/fitness/core/` — the pure half: `youtube.ts` (links,
   timestamps, the embed URL), `program.ts` (the save's schema and rules,
   `prescription`), `draft.ts` (the `record_program` tool, the prompt,
-  `normalizeDraft`), `editor.ts` (the editor's form, both ways), `errors.ts`.
-- `src/modules/fitness/draft-model.ts` — the one Claude call.
+  `normalizeDraft`, and which pages go as pictures: `pointsToPicture`,
+  `pictureFits`), `editor.ts` (the editor's form, both ways), `errors.ts`.
+- `src/modules/fitness/core/side.ts` — a person's side (F4b): `testPoints`,
+  `assessedSide`, `sideFor`, `sideWords`, `ruleWords`.
+- `src/modules/fitness/core/read-again.ts` — reading a saved program's PDF
+  again (F4b): `record_additions`, its prompt, `mergeAdditions`,
+  `READ_AGAIN_WORDS`. `readAgain` is in `import-ops.ts`, `callAdditionsModel`
+  in `draft-model.ts`, the screen in `components/read-again.tsx`.
+- `src/modules/fitness/draft-model.ts` — the Claude calls: the draft, and
+  reading again (F4b), the pages' pictures as image blocks.
 - `src/modules/fitness/embeds.ts` — `checkVideo` and `markVideos`: YouTube's
   oEmbed answer (plays here or not, and the title).
 - `src/modules/fitness/import-ops.ts` — `draftProgram` and the import's life.
@@ -852,14 +641,16 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - `src/app/personal/(space)/m/` — the tool's routes: `[slug]` (the front page),
   `fitness/import`, `fitness/import/[id]`, `fitness/new`,
   `fitness/programs/[id]`, `fitness/programs/[id]/edit`,
+  `fitness/programs/[id]/read` (reading the PDF again),
   `fitness/programs/[id]/session` (workout mode).
 - `src/lib/pdf/browser.ts` — `loadPdfjs`, shared with Documents.
 - `tests/fitness-core.test.ts`, `tests/fitness-session.test.ts`,
   `tests/fitness-coach.test.ts`, `tests/speech-queue.test.ts`,
   `tests/speech-voices.test.ts`, `tests/speech-say.test.ts` (`pickVoice`),
+  `tests/fitness-side.test.ts`, `tests/fitness-read-again.test.ts`,
   `tests/fitness-ops.test.ts`, `tests/isolation/fitness.test.ts`.
 - `docs/help/fitness/` — `overview.md` (`**Route:** /personal/m/fitness/**`),
-  `import.md`, `editor.md`, `program.md`, `workout.md`.
+  `import.md`, `editor.md`, `program.md`, `read-again.md`, `workout.md`.
 
 ## Decisions & gotchas
 
@@ -873,8 +664,15 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   program's YouTube links and their titles, which are public, to test the
   link shapes the PDF really uses; no text from the book.
 - **The book never reaches the server.** Only the words and links a draft
-  needs are sent, and the import row keeps the draft, not the text. The
-  privacy line on the import screen says so, and it must stay true.
+  needs are sent, with a picture of a page whose table is an image
+  ([ADR 0117](../decisions/0117-a-page-whose-table-is-a-picture-is-sent-as-a-picture.md)),
+  and the import row keeps the draft, not the text. The privacy line on the
+  import and read-again screens says so, and it must stay true.
+- **A prompt describes his program's shape, never its words** (F4b). The
+  assessment instructions say how such a table reads in general; the first
+  draft of them quoted his table's notation and a line of his book, and a
+  comment named his tests. None of that is in the code now, and the fixtures'
+  one-sided exercises are invented ones whose names are not in his PDF.
 - **`0426` is hand-reordered.** Drizzle emits every foreign key before every
   index, and a composite FK onto `(tenant_id, id)` needs its unique index to
   exist first, so the five `*_tenant_id_id_idx` indexes were moved above the
@@ -992,6 +790,27 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - **A reminder's tap goes through the door.** The phone may be in the business
   when it is tapped, and the space's own pages refuse a business session, so
   the push opens `/personal/open?next=<the program>`.
+- **The person says what they saw; the app applies the table** (F4b, his
+  call). Each test is answered left, right or the same for which side went
+  further, and `leftMeans` turns it into a side, so a reversed test needs no
+  thought mid-assessment. A side needs the program's number of tests to agree
+  and more than the other side; otherwise both sides.
+- **A side rule is on the item, per phase.** The same exercise in two phases is
+  two items, and a program may do it on one side in one phase only, so reading
+  again asks for an entry per phase. A CHECK keeps a rule off an item not done
+  per side, and the editor resets one when `Per side` is unticked.
+- **Read again, never import again** (F4b). A second import would be a second
+  program with none of his workouts. Reading again merges what is new into the
+  program (every id kept, so the save updates the same rows) and writes
+  nothing until Save, under the version it read.
+- **A picture is rendered as `print`.** pdf.js continues a `display` render on
+  animation frames, which a background tab never gets, so a read stalled on
+  the table's page until the tab came back to the front. `print` continues on
+  microtasks.
+- **Claude copies what the prompt lists.** Reading again first listed a per-side
+  exercise as `Name (per side)`, and every name came back with the note on it.
+  A prompt's own markup is either left out of the answer by name or ignored on
+  the way in; here, both.
 - **The demo's player is made in a node React does not own.** The API
   replaces the element it is given with its iframe, so the demo hands it a
   `div` made in the effect, inside the box React renders empty. React never
@@ -1019,6 +838,15 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   so a long line may be cut off by the next one. The build that adds VIBRATE
   and CAMERA can have the native voice report its end (`onDone`), and
   `speakLine` would use it where it is there.
+- **F4b's second half: taking the assessment, and one-sided workouts.** The
+  program holds the tests and the rules; nothing sets a person's side yet, so
+  every session still does both sides. `side_answers` and `side_assessed_at`
+  wait for it.
+- **His production program has no self-assessment yet.** It gets one when the
+  PDF is read again there, after `0432` is on production and this is merged.
+- **Reading a PDF on a phone is unwatched.** The drives read it in a desktop
+  browser; a phone's pdf.js and a 1,100 px canvas for the picture are
+  assumptions.
 - **No reminder has reached a phone yet** (F4a). The cron and the sender
   were driven on dev, where no phone is registered. Production has his phone
   and FCM's credentials: the first evening after the merge is the test.
@@ -1059,8 +887,9 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - **F2 is built; Workouts is still `coming_soon`.** Making it `available`
   opens the Personal space door to every business user, and it wants the
   health-data privacy policy first (P1). The founder's call.
-- **Scanned PDFs are refused** (`NO_TEXT`). Reading pictures of pages would
-  need OCR; nobody has asked.
+- **Scanned PDFs are refused** (`NO_TEXT`). A picture of a page is sent only
+  for a table its words point to (ADR 0117); reading a whole scanned program
+  would need OCR, or every page as a picture. Nobody has asked.
 - **A save is one statement per row.** Fine next to the database; from a
   laptop to Neon a fifteen-exercise program took several seconds to save on
   the drive. Batch the inserts if a program ever feels slow in production.

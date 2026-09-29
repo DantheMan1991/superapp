@@ -1,9 +1,13 @@
 import {
+  DEFAULT_TEST_QUESTION,
   programProblems,
+  type AssessmentInput,
   type FitnessUnitValue,
   type ItemInput,
   type PhaseInput,
   type ProgramInput,
+  type SideMeans,
+  type SideRule,
   type VideoInput,
 } from "./program";
 import { formatTimestamp, parseTimestamp, parseYouTubeUrl } from "./youtube";
@@ -56,6 +60,26 @@ export interface EditorItem {
   cues: string;
   notes: string;
   videos: EditorVideo[];
+  /** One side only, once the person's side is known (F4b). */
+  sideRule: SideRule;
+  sideMeans: SideMeans;
+}
+
+export interface EditorTest {
+  key: string;
+  name: string;
+  question: string;
+  leftMeans: "left" | "right";
+}
+
+/** The side self-assessment as the editor holds it (F4b). */
+export interface EditorAssessment {
+  /** The author's video, as a video row; its link may be empty. */
+  video: EditorVideo;
+  /** How many tests must agree, as typed. */
+  least: string;
+  tests: EditorTest[];
+  notes: string;
 }
 
 export interface EditorPhase {
@@ -77,6 +101,8 @@ export interface EditorProgram {
   effortMax: string;
   breathOutS: string;
   breathInS: string;
+  /** Null when the program has none. */
+  assessment: EditorAssessment | null;
   phases: EditorPhase[];
 }
 
@@ -121,6 +147,26 @@ export function toEditorItem(item: ItemInput): EditorItem {
     cues: item.cues.join("\n"),
     notes: item.notes,
     videos: item.videos.map(toEditorVideo),
+    sideRule: item.sideRule,
+    sideMeans: item.sideMeans,
+  };
+}
+
+export function toEditorTest(test: AssessmentInput["tests"][number]): EditorTest {
+  return { key: newKey(), name: test.name, question: test.question, leftMeans: test.leftMeans };
+}
+
+/** A new test row. */
+export function emptyEditorTest(): EditorTest {
+  return { key: newKey(), name: "", question: DEFAULT_TEST_QUESTION, leftMeans: "left" };
+}
+
+export function toEditorAssessment(assessment: AssessmentInput): EditorAssessment {
+  return {
+    video: assessment.video ? toEditorVideo(assessment.video) : emptyEditorVideo(),
+    least: String(assessment.least),
+    tests: assessment.tests.map(toEditorTest),
+    notes: assessment.notes,
   };
 }
 
@@ -146,6 +192,7 @@ export function toEditor(program: ProgramInput): EditorProgram {
     effortMax: numberText(program.effortMax),
     breathOutS: numberText(program.breathOutS),
     breathInS: numberText(program.breathInS),
+    assessment: program.assessment ? toEditorAssessment(program.assessment) : null,
     phases: program.phases.map(toEditorPhase),
   };
 }
@@ -248,10 +295,35 @@ export function fromEditor(
           perSide: item.perSide,
           optional: item.optional,
           notes: item.notes.trim(),
+          // The side is only asked about an exercise done per side; one unticked
+          // since keeps no rule it can no longer show.
+          sideRule: item.perSide ? item.sideRule : "both",
+          sideMeans: item.perSide ? item.sideMeans : "side",
         };
       }),
     };
   });
+
+  let assessment: AssessmentInput | null = null;
+  if (editor.assessment) {
+    const row = editor.assessment;
+    let video: VideoInput | null = null;
+    if (row.video.url.trim() !== "") {
+      const read = readEditorVideo(row.video);
+      if (read.ok) video = { ...read.video, label: null };
+      else problems.push(`Self-assessment: ${read.problem}`);
+    }
+    assessment = {
+      video,
+      least: need("Self-assessment: tests that must agree", row.least, true) ?? 1,
+      tests: row.tests.map((test) => ({
+        name: test.name.trim(),
+        question: test.question.trim() || DEFAULT_TEST_QUESTION,
+        leftMeans: test.leftMeans,
+      })),
+      notes: row.notes.trim(),
+    };
+  }
 
   const program: ProgramInput = {
     name: editor.name.trim(),
@@ -263,12 +335,14 @@ export function fromEditor(
     effortMax: need("Effort (to)", editor.effortMax, false),
     breathOutS: need("Breathing out", editor.breathOutS, false),
     breathInS: need("Breathing in", editor.breathInS, false),
+    assessment,
     phases,
   };
   problems.push(...programProblems(program));
   outOfRange(problems, "Sessions a week", [program.sessionsPerWeekMin, program.sessionsPerWeekMax], 14);
   outOfRange(problems, "Effort", [program.effortMin, program.effortMax], 10);
   outOfRange(problems, "Breathing pace", [program.breathOutS, program.breathInS], 30);
+  if (assessment) outOfRange(problems, "Self-assessment: tests that must agree", [assessment.least], 20);
   program.phases.forEach((phase, p) => {
     const phaseName = phase.name || `Phase ${p + 1}`;
     outOfRange(problems, `${phaseName}: days before moving on`, [phase.minDoneDays], 365);

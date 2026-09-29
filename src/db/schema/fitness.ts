@@ -53,6 +53,21 @@ export const fitnessUnit = pgEnum("fitness_unit", ["reps", "breaths", "rolls", "
 export const fitnessProgramSource = pgEnum("fitness_program_source", ["imported", "own"]);
 
 /**
+ * Which side an exercise is done on once the person's side is known (F4b):
+ * both, the side they lean toward, or the side they lean away from.
+ */
+export const fitnessSideRule = pgEnum("fitness_side_rule", ["both", "toward", "away"]);
+
+/**
+ * What "the side" is for an exercise done lying down, so the screen and the
+ * coach can say it: the side itself ("Left side only"), the side lain on
+ * ("Lying on your left side") or the leg on top ("Left leg on top"). The
+ * founder's program has the last two: one exercise named by the side lain
+ * on, another by the leg on top.
+ */
+export const fitnessSideMeans = pgEnum("fitness_side_means", ["side", "lying", "top_leg"]);
+
+/**
  * An import's life. `drafting` while Claude reads it (a minute or so);
  * `draft` when there is something to review; `failed` with the reason;
  * `saved` once it made a program; `discarded` when the person threw it away.
@@ -88,6 +103,27 @@ export interface FitnessVideo {
   embeddable: boolean | null;
 }
 
+/**
+ * A PROGRAM'S SIDE SELF-ASSESSMENT (F4b): the tests that say which side a
+ * person leans to, and how many must agree. The founder's program has a few,
+ * each comparing how far a movement goes on the left with the right, and a
+ * table saying which side each result points to.
+ *
+ * `leftMeans` is that table in one field: which side a test points to when
+ * the LEFT side went further. Most point the same way; a reversed one (where
+ * leaning left shows as the RIGHT side going further) says "right". So the
+ * person answers what they saw, and never needs the table.
+ */
+export interface FitnessAssessment {
+  /** The author's video that shows the tests; the first link, like an exercise's. */
+  video: FitnessVideo | null;
+  /** How many tests must point one way for a side, as the program sets it. */
+  least: number;
+  tests: { name: string; question: string; leftMeans: "left" | "right" }[];
+  /** What the program says about it, in a sentence or two of our own words. */
+  notes: string;
+}
+
 export const fitnessPrograms = pgTable(
   "fitness_programs",
   {
@@ -114,6 +150,8 @@ export const fitnessPrograms = pgTable(
      */
     breathOutS: integer("breath_out_s"),
     breathInS: integer("breath_in_s"),
+    /** The side self-assessment, when the program has one (F4b). Checked in the app, like `videos`. */
+    assessment: jsonb("assessment").$type<FitnessAssessment>(),
     /** Put away, not deleted: F2's logs will hang off it. */
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     version: integer("version").notNull().default(1),
@@ -242,6 +280,14 @@ export const fitnessPhaseItems = pgTable(
     optional: boolean("optional").notNull().default(false),
     /** What the book says about THIS use of it: a side rule, a progression, a variation. */
     notes: text("notes").notNull().default(""),
+    /**
+     * Done on one side only, once the person's side is known (F4b): on the
+     * side they lean TOWARD, or the one they lean AWAY from. `both` until then,
+     * and for everybody who never takes the assessment: the program's default.
+     */
+    sideRule: fitnessSideRule("side_rule").notNull().default("both"),
+    /** What that side is, for the words: the side itself, the side lain on, or the leg on top. */
+    sideMeans: fitnessSideMeans("side_means").notNull().default("side"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -268,6 +314,8 @@ export const fitnessPhaseItems = pgTable(
       "fitness_phase_items_target_range",
       sql`${t.targetMin} between 1 and 1000 and (${t.targetMax} is null or ${t.targetMax} between ${t.targetMin} and 1000)`,
     ),
+    // One side only is a thing only an exercise done per side can be.
+    check("fitness_phase_items_side_rule_per_side", sql`${t.sideRule} = 'both' or ${t.perSide}`),
   ],
 );
 
@@ -355,6 +403,13 @@ export const fitnessEnrollments = pgTable(
     /** The person's own calendar day the first session was on. */
     startedOn: date("started_on").notNull(),
     side: fitnessSide("side"),
+    /**
+     * The self-assessment behind `side` (F4b): each test by name, with what
+     * the person saw ("left", "right" or "same" for which side went further),
+     * so the result can be shown and redone. Null until it is taken.
+     */
+    sideAnswers: jsonb("side_answers").$type<{ name: string; further: "left" | "right" | "same" }[]>(),
+    sideAssessedAt: timestamp("side_assessed_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

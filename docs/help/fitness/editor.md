@@ -16,6 +16,17 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 - **`Sessions a week`.** How many sessions a week the program asks for, as one number or a range: `3` to `4`. Leave the second box empty for a single number.
 - **`Effort, out of 10`.** How hard the program says to work, on a scale of 1 to 10, as one number or a range. After each exercise in a session, this range is marked on the effort scale.
 - **`Breathing pace, in seconds`.** How long to breathe out and how long to breathe in, for example `5` out, `5` in. The breath pacer in a session keeps this pace. Left empty, it uses 5 and 5. An import fills it in when the program states a pace.
+- **`Side self-assessment`.** For a program with tests that find which side you lean to, and exercises it does on one side because of it. Most programs have none. Then the box reads `For a program with tests that say which side you lean to, and exercises done on one side because of it.`, with {button:Add a self-assessment|outline|plus}, which opens an empty one. An import fills it in when the PDF has one. With one:
+  - **{button:Remove|ghost|trash}** takes the self-assessment out of the program.
+  - **`The video that shows the tests`.** Paste the YouTube link to the program's video of the tests. The line under it says `plays here`, `only plays on YouTube` or `checked when you save`.
+  - **`Tests`**, each in its own numbered box:
+    - **The test's name**, in `Name of the test`.
+    - **{icon:trash}** removes that test.
+    - **The question**, what you compare on the two sides. Left empty, it asks `Which side went further?`.
+    - **Which way it counts**: `Left further means you lean left`, for most tests, or `Left further means you lean right`, for a test the program counts the other way round. Copy this from the program's table. When you take the tests you say only which side went further, and the app counts it the right way.
+  - **{button:Add a test|outline|plus}** adds a test at the end.
+  - **`Tests that must agree`**, with `of 5` beside it: how many tests must point to the same side for it to be yours. With fewer, you do both sides.
+  - **`What the program says about it`.** A sentence or two on what to do with the result.
 - **The count line**, for example `4 phases · 14 exercises`.
 - **Each phase**, in its own box:
   - **`Phase 1`** and its name, for example `Weeks 1–2`.
@@ -31,6 +42,8 @@ You reach this screen three ways. After an import, it opens on the draft, titled
   - **`Sets`.** How many sets, as one number or a range: `2` to `3`.
   - **`Count`.** How many reps, breaths, rolls or seconds in each set, as one number or a range.
   - **`Per side`.** Tick it when the count is for each side.
+  - **`Side, once yours is known`**, when `Per side` is ticked. What the program says to do once you know which side you lean to: `Both sides`, the default, `Only the side you lean toward` or `Only the side you lean away from`. Untick `Per side` and the exercise goes back to both sides.
+  - **`That side is`**, when the exercise is done on one side. How the side is named, for an exercise done lying down: `The side`, `The side you lie on` or `The leg on top`. Under it, the words for someone who leans left, for example `Leaning left, a workout says: Lying on your left side.`
   - **`Optional`.** Tick it when the program says the exercise is extra.
   - **`How to know you are doing it right`.** The program's checks, one per line. They show under the exercise while you follow the program.
   - **`Videos`.** Each video has its own box. Paste a YouTube link into `Paste a YouTube link`. The line under it tells you what happens to it: `plays here`, `only plays on YouTube`, or `checked when you save`. From the second video on, `Name (optional)` names the video, for example `Alternative`. Leave it empty and the video's own title on YouTube is filled in when you save, for example `Inner Foot Roll`. The first video has no name box: it shows under the exercise's own name. `Start` and `End` play just part of the video, written as minutes and seconds like `0:42`. In a session, the demo goes round and round that part; see [Doing a session](workout.md). {icon:trash} removes a video. {button:Add a video|outline|plus} adds another. With no video, it reads `No video yet.`
@@ -47,9 +60,10 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 ## How to check a draft from your PDF
 
 1. Read the note at the top, then go through the phases in order.
-2. Open each exercise and compare it with the book: the sets, the count, what it is counted in, per side, and the video.
-3. Fix anything that is wrong, and fill in anything the draft left empty.
-4. Click {button:Save program|primary}. You see `Program saved. It is ready to follow.` and the program opens.
+2. Open each exercise and compare it with the book: the sets, the count, what it is counted in, per side, the side, and the video.
+3. If the draft has a `Side self-assessment`, compare each test with the program's table, above all which way it counts, and check `Tests that must agree`.
+4. Fix anything that is wrong, and fill in anything the draft left empty.
+5. Click {button:Save program|primary}. You see `Program saved. It is ready to follow.` and the program opens.
 
 ## How to build a program by hand
 
@@ -64,6 +78,17 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 1. Open the program and click {button:Edit program|outline|pencil}.
 2. Change what you need. Everything you keep stays the same program, so nothing about it is lost.
 3. Click {button:Save program|primary}. You see `Program saved`.
+
+## How to add a side self-assessment by hand
+
+1. Under `Side self-assessment`, click {button:Add a self-assessment|outline|plus}.
+2. Paste the link to the video that shows the tests.
+3. Give the first test its name, and choose which way it counts. Click {button:Add a test|outline|plus} for each of the others.
+4. Fill in `Tests that must agree`.
+5. Open each exercise the program does on one side. Tick `Per side` if it is not ticked, then choose `Side, once yours is known` and `That side is`.
+6. Click {button:Save program|primary}.
+
+For a program imported from a PDF, the PDF can fill this in for you. See [Reading the PDF again](read-again.md).
 
 ## How to delete a program
 
@@ -88,6 +113,13 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 | `Effort must be between 1 and 10.` | Effort is on a scale of 1 to 10. |
 | `Breathing pace must be between 1 and 30.` | Each part of the pace is a number of seconds, from 1 to 30. |
 | `Breathing out must be a whole number.` | Write the seconds as a whole number, like `5`. The same goes for breathing in. |
+| `The self-assessment needs at least one test.` | Add a test, or remove the self-assessment. |
+| `Self-assessment, test 2 needs a name.` | A test has no name. |
+| `Self-assessment: tests that must agree needs a number.` | `Tests that must agree` is empty. |
+| `Self-assessment: tests that must agree must be a whole number.` | Write it as a whole number, like `3`. |
+| `Self-assessment: tests that must agree must be between 1 and 20.` | The number is 0, or too large. |
+| `The self-assessment asks for 4 tests to agree but has 3 tests.` | More tests must agree than there are. Lower the number, or add the missing tests. |
+| `Self-assessment: That is not a link to one YouTube video.` | The video link is not YouTube, or it is a playlist. Paste the link to the one video. |
 | `This program changed since you opened it. Reload the page to see the latest, then make your change again.` | It was saved somewhere else, for example in another tab, after you opened it. Reload, then make your change again. |
 | `That program is not here any more. It may have been deleted.` | The program was deleted after you opened it. |
 | `The program could not be saved. Try again.` | Something went wrong. Click {button:Save program|primary} again. |
@@ -101,6 +133,7 @@ You reach this screen three ways. After an import, it opens on the draft, titled
 - **Moving an exercise to another phase.** Not built. Remove it from one phase and add it to the other.
 - **Using one exercise in two programs.** Each program keeps its own exercises for now.
 - **Uploading your own video.** Only YouTube links for now.
+- **Taking the side self-assessment.** Not built yet. Until it is, a session has you do every exercise on both sides.
 
 ## Who can do what
 

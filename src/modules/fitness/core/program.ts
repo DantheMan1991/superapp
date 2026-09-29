@@ -15,6 +15,14 @@ import { z } from "zod";
 export const FITNESS_UNITS = ["reps", "breaths", "rolls", "seconds"] as const;
 export type FitnessUnitValue = (typeof FITNESS_UNITS)[number];
 
+/** Which side an exercise is done on once the person's side is known (F4b; core/side.ts). */
+export const SIDE_RULES = ["both", "toward", "away"] as const;
+export type SideRule = (typeof SIDE_RULES)[number];
+
+/** What "the side" is for the words: the side, the side lain on, or the leg on top. */
+export const SIDE_MEANS = ["side", "lying", "top_leg"] as const;
+export type SideMeans = (typeof SIDE_MEANS)[number];
+
 /** How each unit reads after a number: "8 breaths", "1 roll". */
 export const UNIT_WORDS: Record<FitnessUnitValue, { one: string; many: string }> = {
   reps: { one: "rep", many: "reps" },
@@ -49,6 +57,9 @@ export const itemInputSchema = z.object({
   perSide: z.boolean(),
   optional: z.boolean(),
   notes: z.string().trim().max(1000),
+  /** `default`s so a draft stored before F4b still opens. */
+  sideRule: z.enum(SIDE_RULES).default("both"),
+  sideMeans: z.enum(SIDE_MEANS).default("side"),
 });
 
 export const phaseInputSchema = z.object({
@@ -58,6 +69,25 @@ export const phaseInputSchema = z.object({
   notes: z.string().trim().max(1000),
   items: z.array(itemInputSchema).max(40),
 });
+
+/** One test of a side self-assessment (F4b; `FitnessAssessment` in the schema says what each field means). */
+export const assessmentTestSchema = z.object({
+  name: z.string().trim().max(80),
+  /** What the person is asked: "Which side went further?" */
+  question: z.string().trim().max(160),
+  /** Which side the test points to when the LEFT side went further. */
+  leftMeans: z.enum(["left", "right"]),
+});
+
+export const assessmentInputSchema = z.object({
+  video: videoInputSchema.nullable(),
+  least: z.number().int().min(1).max(20),
+  tests: z.array(assessmentTestSchema).max(20),
+  notes: z.string().trim().max(1000),
+});
+
+/** The question a test asks when the book gives none: the founder's program compares ranges. */
+export const DEFAULT_TEST_QUESTION = "Which side went further?";
 
 export const programInputSchema = z.object({
   name: z.string().trim().max(120),
@@ -73,6 +103,8 @@ export const programInputSchema = z.object({
    */
   breathOutS: count(30).nullable().default(null),
   breathInS: count(30).nullable().default(null),
+  /** The side self-assessment, when the program has one (F4b). `default(null)` for drafts stored before it. */
+  assessment: assessmentInputSchema.nullable().default(null),
   phases: z.array(phaseInputSchema).max(24),
 });
 
@@ -94,6 +126,7 @@ export function breathPace(program: { breathOutS: number | null; breathInS: numb
 }
 
 export type VideoInput = z.infer<typeof videoInputSchema>;
+export type AssessmentInput = z.infer<typeof assessmentInputSchema>;
 export type ItemInput = z.infer<typeof itemInputSchema>;
 export type PhaseInput = z.infer<typeof phaseInputSchema>;
 export type ProgramInput = z.infer<typeof programInputSchema>;
@@ -129,8 +162,27 @@ export function programProblems(program: ProgramInput): string[] {
           problems.push(`${where}: a video's end must come after its start.`);
         }
       });
+      if (item.sideRule !== "both" && !item.perSide) {
+        problems.push(`${where}: only an exercise done per side can be done on one side.`);
+      }
     });
   });
+  const assessment = program.assessment;
+  if (assessment) {
+    if (assessment.tests.length === 0) problems.push("The self-assessment needs at least one test.");
+    assessment.tests.forEach((test, t) => {
+      if (test.name.trim() === "") problems.push(`Self-assessment, test ${t + 1} needs a name.`);
+    });
+    if (assessment.tests.length > 0 && assessment.least > assessment.tests.length) {
+      problems.push(
+        `The self-assessment asks for ${assessment.least} tests to agree but has ${countOf(assessment.tests.length, "test", "tests")}.`,
+      );
+    }
+    const video = assessment.video;
+    if (video && video.startS != null && video.endS != null && video.endS <= video.startS) {
+      problems.push("The self-assessment's video must end after its start.");
+    }
+  }
   return problems;
 }
 
@@ -187,8 +239,14 @@ export function emptyProgram(): ProgramInput {
     effortMax: null,
     breathOutS: null,
     breathInS: null,
+    assessment: null,
     phases: [emptyPhase(0)],
   };
+}
+
+/** A self-assessment with nothing in it yet but one test: the editor's "Add a self-assessment". */
+export function emptyAssessment(): AssessmentInput {
+  return { video: null, least: 1, tests: [{ name: "", question: DEFAULT_TEST_QUESTION, leftMeans: "left" }], notes: "" };
 }
 
 export function emptyPhase(index: number): PhaseInput {
@@ -217,5 +275,7 @@ export function emptyItem(): ItemInput {
     perSide: false,
     optional: false,
     notes: "",
+    sideRule: "both",
+    sideMeans: "side",
   };
 }

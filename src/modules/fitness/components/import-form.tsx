@@ -13,7 +13,8 @@ import { readProgramPdf, TooManyPagesError } from "./read-program-pdf";
 
 /**
  * IMPORT A PROGRAM: choose the PDF, it is read here, the words and links go to
- * be drafted, and the review opens. Drafting takes about a minute, so the
+ * be drafted (with a picture of a page whose table is an image, ADR 0117), and
+ * the review opens. Drafting takes about a minute, so the
  * screen says so and counts; closing the tab does not lose it — the import is
  * already a row, and it waits under Drafts on the Workouts page.
  */
@@ -21,7 +22,7 @@ import { readProgramPdf, TooManyPagesError } from "./read-program-pdf";
 type Step =
   | { kind: "idle" }
   | { kind: "reading"; done: number; total: number }
-  | { kind: "drafting"; pages: number; links: number; since: number }
+  | { kind: "drafting"; pages: number; links: number; pictures: number; since: number }
   | { kind: "failed"; message: string; pages: number | null; links: number | null };
 
 const HOME = "/personal/m/fitness";
@@ -65,7 +66,8 @@ export function ImportForm() {
       });
       return;
     }
-    const request = { fileName: chosen.name, pageCount: read.pageCount, pages: read.pages };
+    // A page whose table is a picture goes as a picture too (F4b, ADR 0117).
+    const request = { fileName: chosen.name, pageCount: read.pageCount, pages: read.pages, pictures: read.pictures };
     // A scan or a book is refused HERE, before a word is sent (ADR 0112). The
     // server asks the same question again.
     const problem = draftTextProblem(request);
@@ -80,7 +82,7 @@ export function ImportForm() {
     }
     const since = Date.now();
     setNow(since);
-    setStep({ kind: "drafting", pages: read.pageCount, links: read.linkCount, since });
+    setStep({ kind: "drafting", pages: read.pageCount, links: read.linkCount, pictures: read.pictures.length, since });
     let outcome;
     try {
       outcome = await draftProgramAction(request);
@@ -159,6 +161,7 @@ export function ImportForm() {
           <p className="flex items-center gap-2">
             <CircleCheck className="size-4 text-success" aria-hidden />
             Read {countOf(step.pages, "page", "pages")} and {countOf(step.links, "link", "links")}
+            {step.pictures > 0 ? `, and ${countOf(step.pictures, "page", "pages")} as a picture` : ""}
           </p>
           <p className="flex items-center gap-2">
             <Loader2 className="size-4 animate-spin text-module-accent" aria-hidden />
@@ -184,7 +187,8 @@ export function ImportForm() {
 
       <p className="flex items-start gap-2 rounded-xl bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
         <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
-        The file stays on your device. Only its words and links are sent, to draft the program.
+        The file stays on your device. Only its words and links are sent, to draft the program, with a picture of
+        any page that shows a table as an image.
       </p>
 
       <div className="flex flex-wrap gap-2">

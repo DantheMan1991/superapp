@@ -20,26 +20,37 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { saveProgramAction } from "../actions";
 import {
+  emptyEditorTest,
   emptyEditorVideo,
   fromEditor,
   readEditorVideo,
   toEditor,
+  toEditorAssessment,
   toEditorItem,
   toEditorPhase,
+  type EditorAssessment,
   type EditorItem,
   type EditorPhase,
   type EditorProgram,
+  type EditorTest,
   type EditorVideo,
 } from "../core/editor";
 import {
+  DEFAULT_TEST_QUESTION,
   FITNESS_UNITS,
+  SIDE_MEANS,
+  SIDE_RULES,
   UNIT_WORDS,
+  emptyAssessment,
   emptyItem,
   emptyPhase,
   prescription,
   type FitnessUnitValue,
   type ProgramInput,
+  type SideMeans,
+  type SideRule,
 } from "../core/program";
+import { sideFor, sideWords } from "../core/side";
 import { DiscardImportButton } from "./discard-import-button";
 import { DeleteProgramButton } from "./delete-program-button";
 
@@ -211,6 +222,8 @@ export function ProgramEditor({ initial, mode }: { initial: ProgramInput; mode: 
           </p>
         </div>
       </section>
+
+      <AssessmentCard assessment={program.assessment} onChange={(assessment) => patch({ assessment })} />
 
       <p className="text-sm text-muted-foreground">
         {program.phases.length} {program.phases.length === 1 ? "phase" : "phases"} · {exerciseCount}{" "}
@@ -555,6 +568,8 @@ function ItemRow({
             </label>
           </div>
 
+          {item.perSide && <SideFields id={id} item={item} onPatch={onPatch} />}
+
           <div className="space-y-1.5">
             <Label htmlFor={`${id}-cues`}>How to know you are doing it right</Label>
             <Textarea
@@ -593,6 +608,219 @@ function ItemRow({
         </div>
       )}
     </li>
+  );
+}
+
+const SIDE_RULE_LABELS: Record<SideRule, string> = {
+  both: "Both sides",
+  toward: "Only the side you lean toward",
+  away: "Only the side you lean away from",
+};
+
+const SIDE_MEANS_LABELS: Record<SideMeans, string> = {
+  side: "The side",
+  lying: "The side you lie on",
+  top_leg: "The leg on top",
+};
+
+/**
+ * ONE SIDE, FOR SOMEBODY WHO LEANS (F4b): the program's rule for this
+ * exercise once the person's side is known, and what that side is, with the
+ * words a workout will say for somebody who leans left.
+ */
+function SideFields({
+  id,
+  item,
+  onPatch,
+}: {
+  id: string;
+  item: EditorItem;
+  onPatch: (next: Partial<EditorItem>) => void;
+}) {
+  const leansLeft = sideFor(item.sideRule, "left");
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label htmlFor={`${id}-side-rule`}>Side, once yours is known</Label>
+        <Select value={item.sideRule} onValueChange={(value) => onPatch({ sideRule: value as SideRule })}>
+          <SelectTrigger id={`${id}-side-rule`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SIDE_RULES.map((rule) => (
+              <SelectItem key={rule} value={rule}>
+                {SIDE_RULE_LABELS[rule]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {item.sideRule !== "both" && (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${id}-side-means`}>That side is</Label>
+          <Select value={item.sideMeans} onValueChange={(value) => onPatch({ sideMeans: value as SideMeans })}>
+            <SelectTrigger id={`${id}-side-means`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SIDE_MEANS.map((means) => (
+                <SelectItem key={means} value={means}>
+                  {SIDE_MEANS_LABELS[means]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {leansLeft && (
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {`Leaning left, a workout says: ${sideWords(item.sideMeans, leansLeft)}.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * THE SIDE SELF-ASSESSMENT (F4b): the author's video, the tests and which
+ * way each counts, and how many must agree. Most programs have none.
+ */
+function AssessmentCard({
+  assessment,
+  onChange,
+}: {
+  assessment: EditorAssessment | null;
+  onChange: (next: EditorAssessment | null) => void;
+}) {
+  if (!assessment) {
+    return (
+      <section className="space-y-2 rounded-2xl bg-card p-4 shadow-elevation-1 sm:p-5">
+        <h2 className="font-heading font-medium">Side self-assessment</h2>
+        <p className="text-sm text-muted-foreground">
+          For a program with tests that say which side you lean to, and exercises done on one side because of it.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => onChange(toEditorAssessment(emptyAssessment()))}>
+          <Plus aria-hidden /> Add a self-assessment
+        </Button>
+      </section>
+    );
+  }
+  const patch = (next: Partial<EditorAssessment>) => onChange({ ...assessment, ...next });
+  const patchTest = (key: string, next: Partial<EditorTest>) =>
+    patch({ tests: assessment.tests.map((test) => (test.key === key ? { ...test, ...next } : test)) });
+  const read = assessment.video.url.trim() === "" ? null : readEditorVideo(assessment.video);
+  return (
+    <section className="space-y-4 rounded-2xl bg-card p-4 shadow-elevation-1 sm:p-5" aria-label="Side self-assessment">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="font-heading font-medium">Side self-assessment</h2>
+          <p className="text-sm text-muted-foreground">
+            Each test asks which side went further, and the answer points to the side you lean to. Your side is the one
+            enough tests agree on.
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" className="shrink-0 text-destructive" onClick={() => onChange(null)}>
+          <Trash2 aria-hidden /> Remove
+        </Button>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="assessment-video">The video that shows the tests</Label>
+        <Input
+          id="assessment-video"
+          value={assessment.video.url}
+          onChange={(e) => patch({ video: { ...assessment.video, url: e.target.value } })}
+          placeholder="Paste a YouTube link"
+        />
+        {read && !read.ok && <p className="text-sm text-destructive">{read.problem}</p>}
+        {read && read.ok && (
+          <p className="text-sm text-muted-foreground">
+            YouTube video {read.video.id} ·{" "}
+            {read.video.embeddable === true
+              ? "plays here"
+              : read.video.embeddable === false
+                ? "only plays on YouTube"
+                : "checked when you save"}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label>Tests</Label>
+        <ol className="space-y-2">
+          {assessment.tests.map((test, t) => (
+            <li key={test.key} className="space-y-2 rounded-xl border border-border p-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground tabular-nums">{t + 1}</span>
+                <Input
+                  value={test.name}
+                  onChange={(e) => patchTest(test.key, { name: e.target.value })}
+                  placeholder="Name of the test"
+                  aria-label={`Test ${t + 1} name`}
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Remove test ${t + 1}`}
+                  onClick={() => patch({ tests: assessment.tests.filter((x) => x.key !== test.key) })}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  value={test.question}
+                  onChange={(e) => patchTest(test.key, { question: e.target.value })}
+                  placeholder={DEFAULT_TEST_QUESTION}
+                  aria-label={`Test ${t + 1} question`}
+                />
+                <Select
+                  value={test.leftMeans}
+                  onValueChange={(value) => patchTest(test.key, { leftMeans: value as "left" | "right" })}
+                >
+                  <SelectTrigger className="w-full" aria-label={`Test ${t + 1}: when the left side went further`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="left">Left further means you lean left</SelectItem>
+                    <SelectItem value="right">Left further means you lean right</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => patch({ tests: [...assessment.tests, emptyEditorTest()] })}
+        >
+          <Plus aria-hidden /> Add a test
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Label htmlFor="assessment-least">Tests that must agree</Label>
+        <Input
+          id="assessment-least"
+          inputMode="numeric"
+          className="w-20"
+          value={assessment.least}
+          onChange={(e) => patch({ least: e.target.value })}
+        />
+        <span className="text-muted-foreground">{`of ${assessment.tests.length}`}</span>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="assessment-notes">What the program says about it</Label>
+        <Textarea
+          id="assessment-notes"
+          rows={2}
+          value={assessment.notes}
+          onChange={(e) => patch({ notes: e.target.value })}
+        />
+      </div>
+    </section>
   );
 }
 

@@ -1,12 +1,8 @@
 import "server-only";
 import { CLAUDE_MODEL, getClaude } from "@/lib/claude";
-import {
-  DRAFT_SYSTEM,
-  RECORD_PROGRAM_TOOL,
-  buildDraftPrompt,
-  recordProgramTool,
-  type DraftRequest,
-} from "./core/draft";
+import { DRAFT_SYSTEM, buildDraftPrompt, recordProgramTool, type DraftRequest } from "./core/draft";
+import type { ProgramInput } from "./core/program";
+import { ADDITIONS_SYSTEM, buildAdditionsPrompt, recordAdditionsTool } from "./core/read-again";
 
 /**
  * THE ONE CLAUDE CALL IN WORKOUTS: the pages of a program PDF in, the
@@ -42,6 +38,9 @@ import {
 
 export type DraftModel = (request: DraftRequest) => Promise<unknown>;
 
+/** Reading a program again (F4b): the pages, and the program as the app has it. */
+export type AdditionsModel = (request: DraftRequest, program: ProgramInput) => Promise<unknown>;
+
 /** Why Claude's answer could not be used, for the sentence the person sees. */
 export class DraftModelError extends Error {
   constructor(readonly code: "REFUSED" | "TRUNCATED" | "NO_TOOL") {
@@ -50,7 +49,29 @@ export class DraftModelError extends Error {
   }
 }
 
-export const callDraftModel: DraftModel = async (request) => {
+/**
+ * The words, then each picture of a page (F4b, ADR 0117) after a line naming
+ * it: a table given as an image is read with the words that point to it.
+ */
+function content(text: string, request: DraftRequest) {
+  return [
+    { type: "text" as const, text },
+    ...request.pictures.flatMap((picture) => [
+      { type: "text" as const, text: `Page ${picture.n}, as a picture:` },
+      {
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: "image/jpeg" as const, data: picture.jpeg },
+      },
+    ]),
+  ];
+}
+
+async function callTool(
+  system: string,
+  tool: { name: string; description: string; input_schema: Record<string, unknown> & { type: "object" } },
+  text: string,
+  request: DraftRequest,
+): Promise<unknown> {
   const response = await getClaude()
     .beta.messages.stream({
       model: CLAUDE_MODEL,
@@ -58,10 +79,10 @@ export const callDraftModel: DraftModel = async (request) => {
       thinking: { type: "adaptive" },
       betas: ["server-side-fallback-2026-06-01"],
       fallbacks: [{ model: "claude-opus-4-8" }],
-      system: DRAFT_SYSTEM,
-      tools: [{ ...recordProgramTool, eager_input_streaming: true }],
-      tool_choice: { type: "tool", name: RECORD_PROGRAM_TOOL },
-      messages: [{ role: "user", content: buildDraftPrompt(request) }],
+      system,
+      tools: [{ ...tool, eager_input_streaming: true }],
+      tool_choice: { type: "tool", name: tool.name },
+      messages: [{ role: "user", content: content(text, request) }],
     })
     .finalMessage();
 
@@ -69,9 +90,13 @@ export const callDraftModel: DraftModel = async (request) => {
   // a tool_use block, holding a program that stops halfway.
   if (response.stop_reason === "refusal") throw new DraftModelError("REFUSED");
   if (response.stop_reason === "max_tokens") throw new DraftModelError("TRUNCATED");
-  const call = response.content.find(
-    (block) => block.type === "tool_use" && block.name === RECORD_PROGRAM_TOOL,
-  );
+  const call = response.content.find((block) => block.type === "tool_use" && block.name === tool.name);
   if (!call || call.type !== "tool_use") throw new DraftModelError("NO_TOOL");
   return call.input;
-};
+}
+
+export const callDraftModel: DraftModel = (request) =>
+  callTool(DRAFT_SYSTEM, recordProgramTool, buildDraftPrompt(request), request);
+
+export const callAdditionsModel: AdditionsModel = (request, program) =>
+  callTool(ADDITIONS_SYSTEM, recordAdditionsTool, buildAdditionsPrompt(request, program), request);

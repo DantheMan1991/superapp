@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   ArrowDown,
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   ArrowUp,
   Banknote,
@@ -113,6 +114,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "cloud-off": CloudOff,
   "arrow-down": ArrowDown,
   "arrow-left": ArrowLeft,
+  "arrow-left-right": ArrowLeftRight,
   // Workouts' "Move on to Phase 2" (fitness.md, F3).
   "arrow-right": ArrowRight,
   "arrow-up": ArrowUp,

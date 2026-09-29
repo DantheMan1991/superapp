@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FITNESS_UNITS, type FitnessUnitValue } from "./program";
+import { FITNESS_UNITS, type FitnessUnitValue, type SideMeans } from "./program";
 
 /**
  * WORKOUT MODE'S PURE HALF (docs/modules/fitness.md, F2a).
@@ -28,8 +28,9 @@ export type Hurt = (typeof HURTS)[number];
 
 /**
  * The order a per-side exercise's sides are done in. The founder's program
- * sets none, and right first is the common default. F4 (the program's own
- * left-or-right assessment) is where this becomes the person's.
+ * sets none, and right first is the common default. An exercise the program
+ * does on one side for someone who leans (F4b) has no order: it is done on
+ * that side only (`PlanItem.onlySide`).
  */
 export const SIDE_ORDER: readonly Side[] = ["right", "left"];
 
@@ -56,6 +57,13 @@ export const sessionExerciseSchema = z.object({
   name: z.string().trim().min(1).max(120),
   unit: z.enum(FITNESS_UNITS),
   perSide: z.boolean(),
+  /**
+   * The one side a per-side exercise is done on, for a person whose side is
+   * known (F4b): such an exercise is logged as not `perSide`, each set with
+   * this side, so a set counts once. The phone's alone, like `plannedSets`:
+   * the server keeps each set's side, which says the same.
+   */
+  onlySide: z.enum(SIDES).nullable().optional(),
   /**
    * How many sets this exercise is being done for: the program's minimum,
    * raised by "one more set" up to its maximum. The phone's alone; the server
@@ -134,6 +142,14 @@ export interface PlanItem {
   targetMax: number | null;
   notes: string;
   video: PlanVideo | null;
+  /**
+   * The one side this exercise is done on today (F4b): its rule applied to
+   * the person's side. Such an item is not `perSide`, so its sets count once
+   * and its words drop "each side". Absent for both sides.
+   */
+  onlySide?: Side | null;
+  /** How that side is said: the side itself, the side lain on, or the leg on top. */
+  sideMeans?: SideMeans;
 }
 
 export interface SessionPlan {
@@ -150,6 +166,8 @@ export interface SessionPlan {
   breath: { outS: number; inS: number };
   /** The program's effort zone, shaded on the scale after each exercise. */
   effort: { min: number; max: number } | null;
+  /** The person's side, from the program's self-assessment (F4b). Absent or null until it is known. */
+  lean?: Side | null;
   items: PlanItem[];
 }
 
@@ -163,6 +181,11 @@ export type Step =
 /** The sides each set is done on: both, in order, for a per-side exercise. */
 export function sidesFor(perSide: boolean): readonly (Side | null)[] {
   return perSide ? SIDE_ORDER : [null];
+}
+
+/** The sides each set of an item or a logged exercise is done on: its one side, when it has one (F4b). */
+export function sidesOf(exercise: { perSide: boolean; onlySide?: Side | null }): readonly (Side | null)[] {
+  return exercise.onlySide ? [exercise.onlySide] : sidesFor(exercise.perSide);
 }
 
 /** The exercise the session logged for a plan item, if it has started it. */
@@ -210,10 +233,10 @@ export function nextStep(plan: SessionPlan, doc: SessionDoc): Step {
     const logged = loggedFor(doc, item);
     if (!logged) {
       if (plannedFor(doc, item).sets === 0) continue;
-      return { kind: "set", itemIndex: i, number: 1, side: sidesFor(item.perSide)[0] };
+      return { kind: "set", itemIndex: i, number: 1, side: sidesOf(item)[0] };
     }
     if (logged.skipped || logged.finishedAt) continue;
-    const sides = sidesFor(logged.perSide);
+    const sides = sidesOf(logged);
     const done = logged.sets.length;
     if (done < logged.plannedSets * sides.length) {
       return {
@@ -275,6 +298,9 @@ function startExercise(plan: SessionPlan, doc: SessionDoc, itemIndex: number, id
     name: item.name,
     unit: item.unit,
     perSide: item.perSide,
+    // Only when there is one: every document before F4b, and every exercise
+    // done on both sides, looks exactly as it did.
+    ...(item.onlySide ? { onlySide: item.onlySide } : {}),
     // At least one: an item is only started for a set it has, or to skip it.
     plannedSets: Math.max(1, plannedFor(doc, item).sets),
     effort: null,

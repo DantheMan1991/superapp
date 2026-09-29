@@ -7,6 +7,7 @@ import { localDayIn } from "@/modules/fitness/core/day";
 import { loadProgram } from "@/modules/fitness/program-ops";
 import { loadReminders } from "@/modules/fitness/reminder-ops";
 import { lastSession, programSessions } from "@/modules/fitness/session-ops";
+import { loadSide } from "@/modules/fitness/side-ops";
 import { ProgramView } from "@/modules/fitness/components/program-view";
 
 export const dynamic = "force-dynamic";
@@ -30,12 +31,12 @@ export default async function ProgramPage({
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
   const today = localDayIn(ctx.tenant.timezone, new Date());
-  const [[program, last, sessions, reminders], hasPhone] = await Promise.all([
+  const [[program, last, sessions, reminders, side], hasPhone] = await Promise.all([
     withTenant(
       ctx.tenant.id,
       async (tx) => {
         const loaded = await loadProgram(tx, ctx.tenant.id, id);
-        if (!loaded) return [null, null, [], []] as const;
+        if (!loaded) return [null, null, [], [], null] as const;
         return [
           loaded,
           await lastSession(tx, ctx.tenant.id, id),
@@ -43,6 +44,8 @@ export default async function ProgramPage({
           await programSessions(tx, ctx.tenant.id, id),
           // The morning and evening reminders (F4a).
           await loadReminders(tx, ctx.tenant.id, id),
+          // What the program's tests found (F4b).
+          await loadSide(tx, ctx.tenant.id, id),
         ] as const;
       },
       { role: ctx.role },
@@ -69,6 +72,7 @@ export default async function ProgramPage({
       timeZone={ctx.tenant.timezone}
       reminders={reminders}
       hasPhone={hasPhone}
+      side={side}
     />
   );
 }

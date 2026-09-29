@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { assessedSide, ruleWords, sideFor, sideWords, testPoints } from "../src/modules/fitness/core/side";
+import {
+  assessedSide,
+  FURTHER_CHOICES,
+  oneSideLine,
+  onlySideOf,
+  phasesWords,
+  ruleWords,
+  savedCounts,
+  sideAnswersSchema,
+  sideFor,
+  sideWords,
+  testPoints,
+} from "../src/modules/fitness/core/side";
 
 /**
  * A PERSON'S SIDE (docs/modules/fitness.md, F4b): which side a test's answer
@@ -88,5 +100,55 @@ describe("a one-sided exercise", () => {
     expect(ruleWords("toward", "top_leg")).toBe("The leg on the side you lean toward on top");
     expect(ruleWords("away", "side")).toBe("Only on the side you lean away from");
     expect(ruleWords("both", "lying")).toBeNull();
+  });
+});
+
+describe("taking the tests (part 2)", () => {
+  const named = tests.map((test, i) => ({ ...test, name: ["Trunk turn", "Arm sweep", "Reach up", "Hip swing", "Knee fall"][i] }));
+
+  it("offers left, about the same and right, in that order, and takes one answer per test", () => {
+    expect(FURTHER_CHOICES).toEqual(["left", "same", "right"]);
+    const programId = "11111111-1111-4111-8111-111111111111";
+    expect(sideAnswersSchema.safeParse({ programId, answers: ["left", "same", "right"] }).success).toBe(true);
+    expect(sideAnswersSchema.safeParse({ programId, answers: [] }).success).toBe(false);
+    expect(sideAnswersSchema.safeParse({ programId, answers: ["up"] }).success).toBe(false);
+    expect(sideAnswersSchema.safeParse({ programId: "nope", answers: ["left"] }).success).toBe(false);
+  });
+
+  it("counts a saved result again against the program's tests, by name, and not when they changed", () => {
+    const saved = named.map((test, i) => ({ name: test.name, further: (["left", "right", "left", "left", "right"] as const)[i] }));
+    expect(savedCounts(named, saved, 3)).toEqual({ side: "left", left: 5, right: 0 });
+    // Saved in another order, or with other spacing and case: still the same answers.
+    const shuffled = [...saved].reverse().map((a) => ({ ...a, name: ` ${a.name.toUpperCase()} ` }));
+    expect(savedCounts(named, shuffled, 3)).toEqual({ side: "left", left: 5, right: 0 });
+    // A test renamed or added since: no counts, rather than a guess.
+    expect(savedCounts(named.map((t, i) => (i === 0 ? { ...t, name: "Neck turn" } : t)), saved, 3)).toBeNull();
+    expect(savedCounts([...named, { name: "Extra", leftMeans: "left" }], saved, 3)).toBeNull();
+  });
+});
+
+describe("a one-sided exercise, once the side is known (part 2)", () => {
+  it("is that side only when it is done per side and has a rule, and both sides otherwise", () => {
+    expect(onlySideOf({ perSide: true, sideRule: "toward" }, "left")).toBe("left");
+    expect(onlySideOf({ perSide: true, sideRule: "away" }, "left")).toBe("right");
+    expect(onlySideOf({ perSide: true, sideRule: "both" }, "left")).toBeNull();
+    expect(onlySideOf({ perSide: false, sideRule: "toward" }, "left")).toBeNull();
+    expect(onlySideOf({ perSide: true, sideRule: "toward" }, null)).toBeNull();
+  });
+
+  it("says its side on the program page, with the reason, since away names the other side", () => {
+    expect(oneSideLine("lying", "left", "left")).toBe("Lying on your left side only, because you lean left.");
+    expect(oneSideLine("lying", "right", "left")).toBe("Lying on your right side only, because you lean left.");
+    expect(oneSideLine("top_leg", "left", "left")).toBe("Left leg on top only, because you lean left.");
+    expect(oneSideLine("side", "right", "right")).toBe("Right side only, because you lean right.");
+  });
+
+  it("says where the program's one-sided exercises are", () => {
+    expect(phasesWords([])).toBe("");
+    expect(phasesWords([2])).toBe("phase 2");
+    expect(phasesWords([2, 2, 3])).toBe("phases 2 and 3");
+    expect(phasesWords([4, 2, 3, 2])).toBe("phases 2 to 4");
+    expect(phasesWords([2, 4])).toBe("phases 2 and 4");
+    expect(phasesWords([1, 2, 4])).toBe("phases 1, 2 and 4");
   });
 });

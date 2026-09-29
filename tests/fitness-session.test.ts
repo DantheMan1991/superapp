@@ -4,6 +4,7 @@ import {
   canAddSet,
   finishExercise,
   finishSession,
+  fullSets,
   lastActivity,
   localDayOf,
   nextStep,
@@ -191,5 +192,56 @@ describe("a session, walked from Start to Finish", () => {
     expect(sessionDocSchema.safeParse({ ...doc, localDay: "27/09/2026" }).success).toBe(false);
     expect(sessionDocSchema.safeParse({ ...doc, id: "not-a-uuid" }).success).toBe(false);
     expect(sessionDocSchema.safeParse({ ...doc, revision: 0 }).success).toBe(false);
+  });
+});
+
+describe("one side only, for a person whose side is known (F4b)", () => {
+  /** The first item as `sessionPlan` gives it to someone who leans left: lying on the left, and not per side. */
+  function oneSided(): SessionPlan {
+    const p = plan();
+    return { ...p, lean: "left", items: [{ ...p.items[0], perSide: false, onlySide: "left", sideMeans: "lying" }, p.items[1]] };
+  }
+
+  it("does every set on that side, never turning to the other, and counts each set once", () => {
+    const p = oneSided();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: 4 });
+    expect(nextStep(p, doc)).toEqual({ kind: "set", itemIndex: 0, number: 1, side: "left" });
+    doc = set(p, doc, 0, 8, 2);
+    expect(nextStep(p, doc)).toEqual({ kind: "set", itemIndex: 0, number: 2, side: "left" });
+    doc = set(p, doc, 0, 8, 4);
+    expect(nextStep(p, doc)).toEqual({ kind: "check", itemIndex: 0 });
+
+    const logged = doc.exercises[0];
+    expect(logged).toMatchObject({ perSide: false, onlySide: "left" });
+    expect(logged.sets.map((s) => [s.number, s.side])).toEqual([
+      [1, "left"],
+      [2, "left"],
+    ]);
+    // Two sets, not one: a set on its one side is a whole set.
+    expect(fullSets(logged.perSide, logged.sets.map((s) => s.side))).toBe(2);
+    expect(sessionSummary(doc).sets).toBe(2);
+    // What a reload reads back: the side is in the document, so the next set is still on it.
+    doc = oneMoreSet(p, doc, 0);
+    const reloaded = sessionDocSchema.parse(JSON.parse(JSON.stringify(doc)));
+    expect(nextStep(p, reloaded)).toEqual({ kind: "set", itemIndex: 0, number: 3, side: "left" });
+  });
+
+  it("finishes an exercise begun on both sides on both, when the side is saved mid-session", () => {
+    let doc = beginSession(plan(), { id: id(), now: at(0), feelBefore: null });
+    doc = set(plan(), doc, 0, 8, 1);
+    const p = oneSided();
+    // Begun right side first: the left of set 1 comes next, as it would have.
+    expect(nextStep(p, doc)).toEqual({ kind: "set", itemIndex: 0, number: 1, side: "left" });
+    doc = set(p, doc, 0, 8, 2);
+    expect(nextStep(p, doc)).toEqual({ kind: "set", itemIndex: 0, number: 2, side: "right" });
+    expect(doc.exercises[0]).not.toHaveProperty("onlySide");
+  });
+
+  it("leaves a document of both sides exactly as it was: no side field on an exercise done on both", () => {
+    const p = plan();
+    let doc = beginSession(p, { id: id(), now: at(0), feelBefore: null });
+    doc = set(p, doc, 0, 8, 1);
+    expect(doc.exercises[0]).not.toHaveProperty("onlySide");
+    expect(sessionDocSchema.safeParse({ ...doc, exercises: [{ ...doc.exercises[0], onlySide: "middle" }] }).success).toBe(false);
   });
 });

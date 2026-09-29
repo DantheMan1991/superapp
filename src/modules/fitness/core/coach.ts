@@ -10,7 +10,9 @@
  *
  *   a set appears      what it is: the exercise and its prescription on the
  *                      first set, then "Set 2 of 3. Right side." or "Now the
- *                      left side." A set counted in reps or rolls has no timer
+ *                      left side." A one-sided exercise (F4b) says its side
+ *                      every set, "Lying on your left side.", and never the
+ *                      other. A set counted in reps or rolls has no timer
  *                      to say a cue halfway through, so its cue comes here.
  *   a breath set       the cue as the middle breath starts; "Last one." as
  *                      the last one starts. The tones still mark every turn.
@@ -28,6 +30,7 @@
 import { forSpeech } from "@/lib/speech/say";
 import type { VoiceLine } from "@/lib/speech/queue-policy";
 import { UNIT_WORDS } from "./program";
+import { sideWords as oneSideWords } from "./side";
 import {
   finishExercise,
   loggedFor,
@@ -82,16 +85,23 @@ export function setIntro(plan: SessionPlan, doc: SessionDoc, step: Extract<Step,
   const done = logged?.sets.length ?? 0;
   const planned = logged?.plannedSets ?? plannedFor(doc, item).sets;
   const parts: string[] = [];
+  // One side only (F4b): said every set, the way the program names it, and
+  // there is no other side to turn to. As the exercise was started: one begun
+  // on both sides before the side was saved finishes on both.
+  const onlySide = logged ? (logged.onlySide ?? null) : (item.onlySide ?? null);
+  const only = onlySide ? oneSideWords(item.sideMeans ?? "side", onlySide) : null;
   if (done === 0) {
     const aimed = plannedFor(doc, item).sets;
     // A split day's share (F2c) says this session's sets: "1 set of 8 breaths".
     parts.push(item.name, spokenPrescription(aimed === item.setsMin ? item : { ...item, setsMin: aimed, setsMax: null }));
-    if (step.side) parts.push(`${sideName(step.side)} first`);
-  } else if (step.side && step.side !== SIDE_ORDER[0]) {
+    if (only) parts.push(only);
+    else if (step.side) parts.push(`${sideName(step.side)} first`);
+  } else if (!only && step.side && step.side !== SIDE_ORDER[0]) {
     parts.push(`Now the ${step.side} side`);
   } else {
     parts.push(`Set ${step.number} of ${Math.max(planned, step.number)}`);
-    if (step.side) parts.push(sideName(step.side));
+    if (only) parts.push(only);
+    else if (step.side) parts.push(sideName(step.side));
   }
   // Reps and rolls have no timer to say a cue halfway through.
   const cue = item.unit === "reps" || item.unit === "rolls" ? cueFor(item, done) : null;

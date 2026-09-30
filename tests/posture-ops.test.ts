@@ -121,4 +121,27 @@ d("posture checks in the account", () => {
     expect(await inTenant(tenant, (tx) => deletePostureCheck(tx, tenant, doc.id))).toEqual({ deleted: false });
     expect(await inTenant(tenant, (tx) => getPostureCheck(tx, tenant, doc.id))).toBeNull();
   });
+
+  it("keeps a repeat pointing at the check it repeats, and lets go when that one is deleted (3b)", async () => {
+    const first = aCheck("2026-09-05T07:00:00.000Z");
+    const again = aCheck("2026-09-05T07:25:00.000Z", { repeatOf: first.id });
+    await inTenant(tenant, (tx) => savePostureCheck(tx, tenant, first));
+    await inTenant(tenant, (tx) => savePostureCheck(tx, tenant, again));
+    expect((await inTenant(tenant, (tx) => getPostureCheck(tx, tenant, again.id)))!.repeatOf).toBe(first.id);
+    // The column-list SET NULL (0436): only repeat_of goes, the repeat stays.
+    await inTenant(tenant, (tx) => deletePostureCheck(tx, tenant, first.id));
+    const left = await inTenant(tenant, (tx) => getPostureCheck(tx, tenant, again.id));
+    expect(left).not.toBeNull();
+    expect(left!.repeatOf).toBeNull();
+  });
+
+  it("keeps a repeat of a check it cannot find as an ordinary check", async () => {
+    const theirs = aCheck("2026-09-06T07:00:00.000Z");
+    await inTenant(other, (tx) => savePostureCheck(tx, other, theirs));
+    for (const repeatOf of [randomUUID(), theirs.id]) {
+      const doc = aCheck("2026-09-06T07:30:00.000Z", { repeatOf });
+      await inTenant(tenant, (tx) => savePostureCheck(tx, tenant, doc));
+      expect((await inTenant(tenant, (tx) => getPostureCheck(tx, tenant, doc.id)))!.repeatOf).toBeNull();
+    }
+  });
 });

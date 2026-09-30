@@ -7,6 +7,7 @@ import { Check, CircleDot, Crosshair, Eye, EyeOff, Loader2, Ruler, TriangleAlert
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import type { Place } from "../core/placement";
 import { stickersIn, VIEWS, type View } from "../core/sticker-map";
 import { useWakeLock } from "../../components/workout/use-wake-lock";
 import { askToKeepStorage, newCheckId, sweepAbandoned } from "../store/checks";
@@ -53,6 +54,8 @@ export function PostureCheck({
   reportHref,
   setupHref,
   testSources,
+  repeatOf,
+  lastPlaces,
 }: {
   owner: string;
   naturalVoice: boolean;
@@ -61,6 +64,10 @@ export function PostureCheck({
   reportHref: string;
   setupHref: string;
   testSources: boolean;
+  /** The check this one repeats, stickers taken off and put back on (3b); null for an ordinary check. */
+  repeatOf: { id: string; takenAt: string } | null;
+  /** Where each sticker sat on the last check (3b); null before a first check. */
+  lastPlaces: Record<string, Place> | null;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("intro");
@@ -140,7 +147,7 @@ export function PostureCheck({
         },
       },
       naturalVoice,
-      { id, owner, keepPhotos },
+      { id, owner, keepPhotos, repeatOf: repeatOf?.id ?? null, lastPlaces },
       testSource,
     );
     session.current = s;
@@ -287,6 +294,18 @@ export function PostureCheck({
 
         {phase === "intro" && (
           <div className="space-y-4 text-sm">
+            {repeatOf && (
+              <div className="space-y-1 rounded-xl bg-card p-3">
+                <p className="font-medium">
+                  A repeat of your check from{" "}
+                  {new Date(repeatOf.takenAt).toLocaleString("en-US", { hour: "numeric", minute: "2-digit" })}
+                </p>
+                <p className="text-muted-foreground">
+                  Take every sticker off, then put them back on the way you usually do. The difference between the two
+                  checks is your own measuring noise: after three repeats it replaces the published figures.
+                </p>
+              </div>
+            )}
             {!setupRun && (
               <div className="flex gap-2 rounded-xl bg-warning/15 p-3">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" aria-hidden />
@@ -351,6 +370,16 @@ export function PostureCheck({
                   <div className="h-full bg-primary transition-[width]" style={{ width: `${(viewStep.read / HOLD_FRAMES) * 100}%` }} />
                 </div>
               </div>
+            )}
+            {step?.kind === "slipped" && (
+              <ul className="space-y-1 rounded-xl bg-warning/15 p-3 text-sm" aria-label="Stickers not where they were last time">
+                {step.shifts.map((s) => (
+                  <li key={s.id} className="flex justify-between gap-3">
+                    <span className="first-letter:uppercase">{s.name}</span>
+                    <span className="text-warning-foreground">{s.words}</span>
+                  </li>
+                ))}
+              </ul>
             )}
             {step?.kind === "starting" && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">

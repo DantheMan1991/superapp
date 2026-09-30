@@ -46,6 +46,8 @@ export const postureCheckDocSchema = z.strictObject({
   captures: z.array(postureCaptureSchema).min(1).max(16),
   notes: z.array(z.string().max(200)).max(12),
   version: z.literal(1),
+  /** The check this one repeats, stickers off and back on (3b); absent from a phone that predates it. */
+  repeatOf: z.string().uuid().nullable().optional(),
 });
 
 export type PostureCheckDoc = z.infer<typeof postureCheckDocSchema>;
@@ -61,7 +63,13 @@ export function localDayOf(at: Date): string {
  * schema names, and a NaN (which the phone's storage keeps but the trip to
  * the account does not) as nothing.
  */
-export function toCheckDoc(check: { id: string; at: string; captures: readonly ViewCapture[]; notes: readonly string[] }): PostureCheckDoc {
+export function toCheckDoc(check: {
+  id: string;
+  at: string;
+  captures: readonly ViewCapture[];
+  notes: readonly string[];
+  repeatOf?: string | null;
+}): PostureCheckDoc {
   const finiteOrNull = (n: number | null) => (n !== null && Number.isFinite(n) ? n : null);
   return {
     id: check.id,
@@ -82,5 +90,6 @@ export function toCheckDoc(check: { id: string; at: string; captures: readonly V
     })),
     notes: check.notes.map((n) => n.slice(0, 200)).slice(0, 12),
     version: 1,
+    repeatOf: check.repeatOf ?? null,
   };
 }

@@ -50,6 +50,16 @@ export async function savePostureCheck(
   }
   const taken = new Date(doc.takenAt);
   const takenAt = taken.getTime() > now.getTime() + FUTURE_SKEW_MS ? now : taken;
+  // A repeat of a check this space no longer has (deleted meanwhile) is kept
+  // as an ordinary check: the difference it was for can no longer be read.
+  let repeatOf: string | null = null;
+  if (doc.repeatOf && doc.repeatOf !== doc.id) {
+    const [original] = await tx
+      .select({ id: schema.fitnessPostureChecks.id })
+      .from(schema.fitnessPostureChecks)
+      .where(and(eq(schema.fitnessPostureChecks.tenantId, tenantId), eq(schema.fitnessPostureChecks.id, doc.repeatOf)));
+    repeatOf = original ? original.id : null;
+  }
   const inserted = await tx
     .insert(schema.fitnessPostureChecks)
     .values({
@@ -60,6 +70,7 @@ export async function savePostureCheck(
       captures: stored(doc.captures),
       notes: doc.notes,
       version: doc.version,
+      repeatOf,
     })
     .onConflictDoNothing({ target: schema.fitnessPostureChecks.id })
     .returning({ id: schema.fitnessPostureChecks.id });
@@ -80,6 +91,7 @@ function toHistory(row: typeof schema.fitnessPostureChecks.$inferSelect): Histor
     takenAt: row.takenAt.toISOString(),
     localDay: row.localDay,
     captures: row.captures as ViewCapture[],
+    repeatOf: row.repeatOf,
   };
 }
 

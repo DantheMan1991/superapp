@@ -690,15 +690,30 @@ export const fitnessPostureChecks = pgTable(
     notes: jsonb("notes").$type<string[]>().notNull().default([]),
     /** The shape of `captures`; 1 is slice 2's. */
     version: integer("version").notNull().default(1),
+    /**
+     * The check this one repeats (slice 3b): the same day, every sticker taken
+     * off and put back on, so the difference between the two is the person's
+     * own measuring noise. Null for an ordinary check, and when the check it
+     * repeated is deleted.
+     */
+    repeatOf: uuid("repeat_of"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("fitness_posture_checks_tenant_id_id_idx").on(t.tenantId, t.id),
     index("fitness_posture_checks_tenant_taken_idx").on(t.tenantId, t.takenAt),
+    // Hand-edited in the migration to the column-list form `ON DELETE SET NULL ("repeat_of")`:
+    // a bare SET NULL would try to null tenant_id too and can never run on a composite key.
+    foreignKey({
+      name: "fitness_posture_checks_repeat_fk",
+      columns: [t.tenantId, t.repeatOf],
+      foreignColumns: [t.tenantId, t.id],
+    }).onDelete("set null"),
     check("fitness_posture_checks_captures_array", sql`jsonb_typeof(${t.captures}) = 'array'`),
     check("fitness_posture_checks_notes_array", sql`jsonb_typeof(${t.notes}) = 'array'`),
     check("fitness_posture_checks_version_known", sql`${t.version} = 1`),
+    check("fitness_posture_checks_repeat_not_self", sql`${t.repeatOf} is null or ${t.repeatOf} <> ${t.id}`),
   ],
 );
 

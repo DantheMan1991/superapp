@@ -24,12 +24,17 @@ import { MEASURES, type MeasureKey, type ViewCapture } from "../src/modules/fitn
  * for anything but numbers and words.
  */
 
-function check(id: string, takenAt: string, measures: Partial<Record<MeasureKey, Partial<MeasurePoint>>>): CheckSummary {
+function check(
+  id: string,
+  takenAt: string,
+  measures: Partial<Record<MeasureKey, Partial<MeasurePoint>>>,
+  repeatOf: string | null = null,
+): CheckSummary {
   const full: Partial<Record<MeasureKey, MeasurePoint>> = {};
   for (const [key, m] of Object.entries(measures) as [MeasureKey, Partial<MeasurePoint>][]) {
     full[key] = { value: 0, unit: MEASURES[key].unit, words: "w", tier: MEASURES[key].tier, rounds: [], ...m };
   }
-  return { id, takenAt, localDay: takenAt.slice(0, 10), views: 4, rounds: 2, vertical: "plumb", measures: full };
+  return { id, takenAt, localDay: takenAt.slice(0, 10), views: 4, rounds: 2, vertical: "plumb", measures: full, places: {}, repeatOf };
 }
 
 describe("the noise a change must beat", () => {
@@ -38,29 +43,78 @@ describe("the noise a change must beat", () => {
     const n = noiseFor("shoulder-level", history);
     expect(n.used).toBe(MEASURES["shoulder-level"].mdc);
     expect(n.from).toBe("published");
-    expect(n.own?.checks).toBe(1);
+    expect(n.rounds?.checks).toBe(1);
+    expect(n.repeats).toBeNull();
   });
 
-  it("becomes the person's own once three checks show it bigger", () => {
+  it("rises to the person's rounds once three checks show them bigger", () => {
     // Rounds 4° apart every time: SEM = 4 / √2, so 1.96 × √2 × SEM = 7.84°, more than the published 3.6°.
     const history = ["a", "b", "c"].map((id, i) =>
       check(id, `2026-10-0${i + 1}T07:00:00Z`, { "shoulder-level": { value: 1, rounds: [3, -1] } }),
     );
     const n = noiseFor("shoulder-level", history);
-    expect(n.own?.checks).toBe(OWN_NOISE_AFTER);
-    expect(n.own?.mdc).toBeCloseTo(7.84, 6);
+    expect(n.rounds?.checks).toBe(OWN_NOISE_AFTER);
+    expect(n.rounds?.mdc).toBeCloseTo(7.84, 6);
     expect(n.used).toBeCloseTo(7.84, 6);
-    expect(n.from).toBe("yours");
+    expect(n.from).toBe("rounds");
   });
 
-  it("never drops below the published figure: rounds minutes apart cannot speak for another day", () => {
+  it("never drops below the published figure from rounds: minutes apart cannot speak for another day", () => {
     const steady = ["a", "b", "c", "d"].map((id, i) =>
       check(id, `2026-10-0${i + 1}T07:00:00Z`, { "shoulder-level": { value: 1, rounds: [1.1, 1] } }),
     );
     const n = noiseFor("shoulder-level", steady);
-    expect(n.own!.mdc).toBeLessThan(1);
+    expect(n.rounds!.mdc).toBeLessThan(1);
     expect(n.used).toBe(MEASURES["shoulder-level"].mdc);
     expect(n.from).toBe("published");
+  });
+
+  it("becomes the person's own after three repeat checks, lower as well as higher (the founder's call)", () => {
+    // Each repeat 1° from its check: SEM = 1 / √2, so 1.96 × √2 × SEM = 1.96°, under the published 3.6°.
+    const days = ["01", "08", "15"];
+    const history = days.flatMap((d, i) => [
+      check(`c${i}`, `2026-10-${d}T07:00:00Z`, { "shoulder-level": { value: 2, rounds: [2, 2] } }),
+      check(`r${i}`, `2026-10-${d}T07:20:00Z`, { "shoulder-level": { value: i % 2 ? 1 : 3, rounds: [2, 2] } }, `c${i}`),
+    ]);
+    const two = noiseFor("shoulder-level", history.slice(0, 4));
+    expect(two.repeats?.pairs).toBe(2);
+    expect(two.from).toBe("published");
+    const three = noiseFor("shoulder-level", history);
+    expect(three.repeats?.pairs).toBe(3);
+    expect(three.used).toBeCloseTo(1.96, 6);
+    expect(three.from).toBe("repeats");
+    // And higher, when the repeats disagree more than the studies did.
+    const wide = days.flatMap((d, i) => [
+      check(`c${i}`, `2026-10-${d}T07:00:00Z`, { "shoulder-level": { value: 0 } }),
+      check(`r${i}`, `2026-10-${d}T07:20:00Z`, { "shoulder-level": { value: 4 } }, `c${i}`),
+    ]);
+    expect(noiseFor("shoulder-level", wide).used).toBeCloseTo(7.84, 6);
+  });
+});
+
+describe("a repeat check", () => {
+  const history = [
+    check("mon", "2026-10-05T07:00:00Z", { "body-line": { value: 1 } }),
+    check("tue", "2026-10-06T07:00:00Z", { "body-line": { value: 2 } }),
+    check("tue-again", "2026-10-06T07:25:00Z", { "body-line": { value: 2.5 } }, "tue"),
+    check("wed", "2026-10-07T07:00:00Z", { "body-line": { value: 3 } }),
+  ];
+
+  it("is compared with the check it repeats, and never stands in for an ordinary check", () => {
+    expect(previousOf("tue-again", history)?.id).toBe("tue");
+    expect(previousOf("wed", history)?.id).toBe("tue");
+    expect(firstOf([history[2], ...history])?.id).toBe("mon");
+  });
+
+  it("is left out of a measure's trend", () => {
+    expect(trend("body-line", history)!.points.map((p) => p.id)).toEqual(["mon", "tue", "wed"]);
+  });
+
+  it("names the check it repeats in the spreadsheet", () => {
+    const rows = historyCsv(history).trimEnd().split("\r\n");
+    expect(rows[0].endsWith(",repeat_of")).toBe(true);
+    expect(rows[3].endsWith(",2026-10-06T07:00:00Z")).toBe(true);
+    expect(rows[2].endsWith(",")).toBe(true);
   });
 });
 
@@ -138,9 +192,9 @@ describe("the numbers as a spreadsheet", () => {
       check("a", "2026-10-01T07:00:00Z", { "back-hip-level": { value: 12.4, unit: "mm", rounds: [12, 13], words: 'Left dimple lower by 12 mm, "about"' } }),
     ]);
     const lines = csv.trimEnd().split("\r\n");
-    expect(lines[0]).toBe("taken_at,day,measure,value,unit,round_1,round_2,tier,words");
-    expect(lines[1]).toBe('2026-10-01T07:00:00Z,2026-10-01,Low back dimples,12,mm,12,13,trend only,"Left dimple lower by 12 mm, ""about"""');
-    expect(lines[2]).toBe("2026-10-15T07:00:00Z,2026-10-15,Shoulder level,1.23,degrees,1.2,1.27,reliable,Right shoulder lower by 1.2°");
+    expect(lines[0]).toBe("taken_at,day,measure,value,unit,round_1,round_2,tier,words,repeat_of");
+    expect(lines[1]).toBe('2026-10-01T07:00:00Z,2026-10-01,Low back dimples,12,mm,12,13,trend only,"Left dimple lower by 12 mm, ""about""",');
+    expect(lines[2]).toBe("2026-10-15T07:00:00Z,2026-10-15,Shoulder level,1.23,degrees,1.2,1.27,reliable,Right shoulder lower by 1.2°,");
   });
 });
 

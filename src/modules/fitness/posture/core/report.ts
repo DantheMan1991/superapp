@@ -224,8 +224,17 @@ function fmt(value: number, unit: MeasureDef["unit"]): string {
  * change a later check must beat: the published figure, or the person's own
  * once their checks show it is bigger (core/history.ts `noiseFor`).
  */
-export function noiseWords(m: MeasureResult, realChange: { value: number; yours: boolean } = { value: m.mdc, yours: false }): string {
-  const real = `A change of more than ${fmt(realChange.value, m.unit)} between checks would be real${realChange.yours ? " (your own figure, from your checks)" : ""}.`;
+export function noiseWords(
+  m: MeasureResult,
+  realChange: { value: number; from: "published" | "rounds" | "repeats"; repeats?: number } = { value: m.mdc, from: "published" },
+): string {
+  const source =
+    realChange.from === "repeats"
+      ? ` (your own figure, from ${realChange.repeats ?? 0} repeat checks)`
+      : realChange.from === "rounds"
+        ? " (your own figure, from your rounds)"
+        : "";
+  const real = `A change of more than ${fmt(realChange.value, m.unit)} between checks would be real${source}.`;
   if (m.spread === null) return real;
   if (m.unsteady) {
     return `Your two rounds differed by ${fmt(m.spread, m.unit)}, more than a real change: stand the same way each round. ${real}`;

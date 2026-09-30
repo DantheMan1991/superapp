@@ -67,7 +67,13 @@ export function CheckHistory({
     const onlyHere = (phone ?? [])
       .filter((c) => !inAccount.has(c.id))
       .map((c) => ({
-        ...summarize({ id: c.id, takenAt: new Date(c.at).toISOString(), localDay: localDayOf(new Date(c.at)), captures: c.captures }),
+        ...summarize({
+          id: c.id,
+          takenAt: new Date(c.at).toISOString(),
+          localDay: localDayOf(new Date(c.at)),
+          captures: c.captures,
+          repeatOf: c.repeatOf ?? null,
+        }),
         phone: c,
       }));
     return [...fromAccount, ...onlyHere].sort((a, b) => b.takenAt.localeCompare(a.takenAt));
@@ -118,6 +124,7 @@ export function CheckHistory({
                     {when.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
+                    {r.repeatOf ? "Repeat, stickers put back on · " : ""}
                     {r.views === 4 ? "All four views" : `${r.views} of 4 views`} · {measures} {measures === 1 ? "measure" : "measures"}
                   </div>
                   {unsent && (

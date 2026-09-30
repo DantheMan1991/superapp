@@ -1,14 +1,15 @@
 import { MEASURING_MODEL } from "../core/assets";
 import type { ViewCapture } from "../core/measures";
-import { CHECK_LINES, allCheckLines, missingLine, SETUP_LINES, turnLine } from "../core/lines";
+import { CHECK_LINES, allCheckLines, missingLine, slippedLine, SETUP_LINES, turnLine } from "../core/lines";
+import { placesOf, shiftsBetween, SLIPPED_MM, type Place, type Shift } from "../core/placement";
 import { captureFrom } from "../core/report";
-import { stickersIn, VIEWS, type View } from "../core/sticker-map";
+import { stickerById, stickersIn, VIEWS, type View } from "../core/sticker-map";
 import { torsoLength, type PosePoint } from "../core/views";
 import type { FromWorker, PhotoResult } from "../worker/protocol";
 import { deleteCheck, holdCheckLock, saveCheck } from "../store/checks";
 import { sendCheckNow, sendPendingChecksWithin } from "../store/sync";
 import type { StoredCheck } from "../store/db";
-import { CaptureBase, sleep, type CaptureCallbacks } from "./capture-base";
+import { CaptureBase, sleep, type CaptureCallbacks, type Held } from "./capture-base";
 import { startPostureVoice } from "./voice";
 
 /**
@@ -43,6 +44,8 @@ export type CheckStep =
   | { kind: "level"; roll: number | null; pitch: number | null }
   | { kind: "plumb" }
   | { kind: "view"; view: View; round: number; read: number }
+  /** A sticker is not where it was last time (3b): the person is asked to fix it, then face the phone again. */
+  | { kind: "slipped"; view: View; round: number; shifts: Shift[] }
   | { kind: "between" }
   | { kind: "saving" };
 
@@ -92,12 +95,22 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
   private modelLoaded = false;
   /** Lets go of this check's lock (`holdCheckLock`): the browser does it too when the page goes. */
   private releaseLock: () => void = () => undefined;
+  /** Views already asked to fix a slipped sticker: once each, never a loop. */
+  private readonly askedToFix = new Set<View>();
 
   constructor(
     video: HTMLVideoElement,
     cb: CheckCallbacks,
     naturalVoice: boolean,
-    private readonly check: { id: string; owner: string; keepPhotos: boolean },
+    private readonly check: {
+      id: string;
+      owner: string;
+      keepPhotos: boolean;
+      /** The check this one repeats, stickers taken off and put back on (3b). */
+      repeatOf: string | null;
+      /** Where each sticker sat on the last check (3b), to notice one that slipped; null for a first check. */
+      lastPlaces: Record<string, Place> | null;
+    },
     testSource: MediaStream | null = null,
   ) {
     super(video, cb, naturalVoice, testSource);
@@ -171,6 +184,7 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
       captures: this.captures,
       notes: this.notes,
       version: 1,
+      repeatOf: this.check.repeatOf,
     };
   }
 
@@ -345,7 +359,30 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
       );
       return;
     }
-    const capture = captureFrom({
+    let capture = this.captureOf(view, round, { ...held, size: held.size });
+    // A sticker that slipped since last time is fixed before it is measured
+    // (3b, the founder's call): once a view, in the first round.
+    if (round === 1 && this.check.lastPlaces && !this.askedToFix.has(view)) {
+      const slipped = shiftsBetween(placesOf([capture]), this.check.lastPlaces).filter((s) => s.mm >= SLIPPED_MM);
+      if (slipped.length > 0) {
+        this.askedToFix.add(view);
+        capture = await this.fixStickers(view, round, capture, slipped);
+        if (this.closed) return;
+      }
+    }
+    this.captures.push(capture);
+    if (this.photosOn && !this.photographed.has(view)) await this.keepViewPhoto(view, round);
+    this.mark(round, view, "done");
+    // A sticker missing in the first round can be put back before the second.
+    if (round === 1) {
+      for (const s of stickersIn(view).filter((x) => !capture.stickers[x.id]).slice(0, 2)) this.say(missingLine(s), 0);
+    }
+    this.say(SETUP_LINES.viewDone, 0);
+    await sleep(1200);
+  }
+
+  private captureOf(view: View, round: number, held: Held & { size: NonNullable<Held["size"]> }): ViewCapture {
+    return captureFrom({
       view,
       round,
       frames: held.frames,
@@ -357,15 +394,62 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
       height: held.size.height,
       stillPx: held.stillPx,
     });
-    this.captures.push(capture);
-    if (this.photosOn && !this.photographed.has(view)) await this.keepViewPhoto(view, round);
-    this.mark(round, view, "done");
-    // A sticker missing in the first round can be put back before the second.
-    if (round === 1) {
-      for (const s of stickersIn(view).filter((x) => !capture.stickers[x.id]).slice(0, 2)) this.say(missingLine(s), 0);
+  }
+
+  /**
+   * A sticker is not where it was last time: the coach names it (two at most)
+   * and asks the person to put it back, then waits for them to move to it and
+   * reads the view again. "It's where it should be" keeps it as it is; so does
+   * no move in half a minute. Either way the report says so.
+   */
+  private async fixStickers(view: View, round: number, capture: ViewCapture, slipped: Shift[]): Promise<ViewCapture> {
+    const names = (shifts: Shift[]) => shifts.map((s) => `${s.name} (${s.words})`).join(", ");
+    this.cb.step({ kind: "slipped", view, round, shifts: slipped });
+    for (const s of slipped.slice(0, 2)) {
+      const sticker = stickerById(s.id);
+      if (sticker) this.say(slippedLine(sticker), 0);
     }
-    this.say(SETUP_LINES.viewDone, 0);
-    await sleep(1200);
+    this.say(CHECK_LINES.fixSticker, 0);
+    const keep = [{ id: "keep", label: "It's where it should be" }];
+    const kept = (why: string) => {
+      this.note(`Not where last time's were: ${names(slipped)}. ${why}`);
+      return capture;
+    };
+
+    // Hands on a sticker move the wrists, and bending moves the hips.
+    const before = this.lastPose;
+    const moved = (pts: PosePoint[]) => {
+      if (!before) return true;
+      const torso = torsoLength(before);
+      return [15, 16, 23, 24].some((i) => Math.hypot(pts[i].x - before[i].x, pts[i].y - before[i].y) > 0.2 * torso);
+    };
+    this.setTask({ kind: "pose", model: MEASURING_MODEL, delegate: this.delegate });
+    const move = await this.wait<true>({
+      check: (r) => (!r.pose || r.pose.people === 0 || !r.pose.points ? true : moved(r.pose.points) ? true : null),
+      actions: keep,
+      timeoutMs: 30_000,
+    });
+    if (this.closed) return capture;
+    if (move.kind === "action") return kept("Kept as they were, as you said.");
+    if (move.kind === "timeout") return kept("Nobody moved to them, so they were kept as they were.");
+
+    this.cb.step({ kind: "view", view, round, read: 0 });
+    const again = await this.holdView(view, {
+      holdFrames: HOLD_FRAMES,
+      timeoutMs: VIEW_TIMEOUT_MS,
+      actions: keep,
+      progress: (read, _framing, pts) => {
+        this.lastPose = pts;
+        this.cb.step({ kind: "view", view, round, read });
+      },
+    });
+    if (this.closed) return capture;
+    if (again.outcome.kind !== "value" || !again.size) return kept("Kept as they were.");
+    const next = this.captureOf(view, round, { ...again, size: again.size });
+    const still = shiftsBetween(placesOf([next]), this.check.lastPlaces ?? {}).filter((s) => s.mm >= SLIPPED_MM);
+    if (still.length > 0) this.note(`Still not where last time's were after a second look: ${names(still)}.`);
+    else this.say(CHECK_LINES.stickerBack, 0);
+    return next;
   }
 
   /** The photo of this view, kept by the worker; the check waits for it, briefly. */
@@ -449,7 +533,13 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
     } else {
       // This phone could not keep it (a private window): straight to the
       // account instead, so the check is not lost with the page.
-      const sent = await sendCheckNow({ id: this.check.id, at: this.at, captures: this.captures, notes: this.notes });
+      const sent = await sendCheckNow({
+        id: this.check.id,
+        at: this.at,
+        captures: this.captures,
+        notes: this.notes,
+        repeatOf: this.check.repeatOf,
+      });
       saveError = "ok" in sent ? null : `${saveError}; ${sent.error}`;
     }
     this.cb.done({

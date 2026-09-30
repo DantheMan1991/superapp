@@ -96,10 +96,22 @@ export const CHECK_LINES = {
   phoneMoved: "The phone has moved. Hold on while I find the plumb line again.",
   roundTwo: "Round two. Step off your outline and shake out, then step back on and face the phone.",
   done: "That's the check done. You can come back to the phone.",
+  // A sticker that slipped since last time (slice 3b): named by `slippedLine`, then these.
+  fixSticker: "If it slipped, put it back, then face the phone again.",
+  stickerBack: "Thanks. That matches last time.",
 } as const;
+
+/** Said by name for a sticker that is not where it was on the last check (3b). */
+export function slippedLine(sticker: Sticker): string {
+  return `Your ${sticker.name.toLowerCase()} sticker isn't where it was last time.`;
+}
 
 /** Every line the check can say, for fetching the recordings ahead. */
 export function allCheckLines(): string[] {
   const setupOnly: string[] = [SETUP_LINES.timing, SETUP_LINES.done, SETUP_LINES.allStickers, SETUP_LINES.seeYou];
-  return [...Object.values(CHECK_LINES), ...allSetupLines().filter((line) => !setupOnly.includes(line))];
+  return [
+    ...Object.values(CHECK_LINES),
+    ...STICKERS.map(slippedLine),
+    ...allSetupLines().filter((line) => !setupOnly.includes(line)),
+  ];
 }

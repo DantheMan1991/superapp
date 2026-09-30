@@ -1,4 +1,5 @@
 import { MEASURE_ORDER, MEASURES, type MeasureKey, type Tier, type ViewCapture } from "./measures";
+import { placesOf, type Place } from "./placement";
 import { buildReport, type Report } from "./report";
 
 /**
@@ -6,22 +7,36 @@ import { buildReport, type Report } from "./report";
  * Pure.
  *
  * - `summarize`: one check down to its measures' values, in each measure's
- *   lead unit, with each round's value (the check's own repeat).
+ *   lead unit, with each round's value (the check's own repeat), and where
+ *   each sticker sat against the body (core/placement.ts).
  * - `noiseFor`: how big a change between two checks must be before it is
  *   called real. The published figure (a full re-test, stickers put back on
- *   another day) to begin with; the person's own, from the gap between their
- *   rounds, once there are enough checks to say, and only when it is bigger.
- *   Rounds are read minutes apart with the stickers left on, so they can show
- *   a person is less steady than the studies' people, never that they are
- *   steadier across days: the published figure stays the floor.
+ *   another day) to begin with. Then the person's own:
+ *   - from REPEAT CHECKS (3b): a second check the same day with every sticker
+ *     taken off and put back on, the published re-test done on this person.
+ *     Three of them, and their figure replaces the published one, higher or
+ *     lower (the founder's call, 2026-09-30);
+ *   - until then, from the gap between each check's ROUNDS, and only when it
+ *     is bigger: rounds are minutes apart with the stickers left on, so they
+ *     can show a person is less steady than the studies' people, never that
+ *     they are steadier across days.
  * - `compare`: one measure in two checks, the change in plain words, and
  *   whether it is more than that noise. Never better or worse: a change is a
  *   change (ADR 0119).
- * - `trend`: one measure across every check, for the posture page.
+ * - `trend`: one measure across every check, for the posture page. A repeat
+ *   is left out of the trend and of the checks compared by default: it is the
+ *   same day's check again, there to measure the noise.
  * - `historyCsv`: every check's measures as rows, for a spreadsheet.
  */
 
-export type HistoryCheck = { id: string; takenAt: string; localDay: string; captures: ViewCapture[] };
+export type HistoryCheck = {
+  id: string;
+  takenAt: string;
+  localDay: string;
+  captures: ViewCapture[];
+  /** The check this one repeats, stickers taken off and put back on (3b); null for an ordinary check. */
+  repeatOf?: string | null;
+};
 
 export type MeasurePoint = {
   /** In `unit`: the value the report leads with. */
@@ -41,6 +56,9 @@ export type CheckSummary = {
   rounds: number;
   vertical: Report["vertical"];
   measures: Partial<Record<MeasureKey, MeasurePoint>>;
+  /** Where each sticker sat against the body, by `view:stickerId` (core/placement.ts). */
+  places: Record<string, Place>;
+  repeatOf: string | null;
 };
 
 export function summarize(check: HistoryCheck): CheckSummary {
@@ -64,6 +82,8 @@ export function summarize(check: HistoryCheck): CheckSummary {
     rounds: report.rounds,
     vertical: report.vertical,
     measures,
+    places: placesOf(check.captures),
+    repeatOf: check.repeatOf ?? null,
   };
 }
 
@@ -72,7 +92,7 @@ export function chronological<T extends { takenAt: string }>(checks: readonly T[
   return [...checks].sort((a, b) => (a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0));
 }
 
-/** How many checks with two rounds before the person's own figure is used. */
+/** How many checks with two rounds, or repeat checks, before the person's own figure is used. */
 export const OWN_NOISE_AFTER = 3;
 
 export type Noise = {
@@ -80,30 +100,52 @@ export type Noise = {
   /** The published smallest real change, in the lead unit. */
   published: number;
   /** From the gap between the person's rounds, once there is any. */
-  own: { checks: number; mdc: number } | null;
+  rounds: { checks: number; mdc: number } | null;
+  /** From the person's repeat checks (stickers off and back on the same day), once there is any. */
+  repeats: { pairs: number; mdc: number } | null;
   /** The one a change is held to. */
   used: number;
-  from: "published" | "yours";
+  from: "published" | "rounds" | "repeats";
 };
+
+/** 1.96 × √2 × SEM, with SEM = √(Σd² / 2n): the change two readings need to differ by at 95%. */
+function mdcOf(gaps: readonly number[]): number {
+  const sem = Math.sqrt(gaps.reduce((s, d) => s + d * d, 0) / (2 * gaps.length));
+  return 1.96 * Math.SQRT2 * sem;
+}
 
 /**
  * The smallest real change for one measure, from a person's checks. Each
- * check read twice gives one gap between its rounds; their spread is the
- * measurement's own error for this person (SEM = √(Σd² / 2n)), and a change
- * between two checks needs to be 1.96 × √2 × SEM to be more than it at 95%.
+ * repeat check against the check it repeats, and each check's two rounds,
+ * give a gap; their spread is the measurement's own error for this person.
  */
 export function noiseFor(key: MeasureKey, history: readonly CheckSummary[]): Noise {
   const published = MEASURES[key].mdc;
-  const gaps = history
-    .map((c) => c.measures[key])
-    .filter((m): m is MeasurePoint => !!m && m.rounds.length >= 2 && m.unit === MEASURES[key].unit)
+  const unit = MEASURES[key].unit;
+  const point = (c: CheckSummary | undefined) => {
+    const m = c?.measures[key];
+    return m && m.unit === unit ? m : null;
+  };
+
+  const roundGaps = history
+    .map(point)
+    .filter((m): m is MeasurePoint => m !== null && m.rounds.length >= 2)
     .map((m) => m.rounds[0] - m.rounds[1]);
-  if (gaps.length === 0) return { key, published, own: null, used: published, from: "published" };
-  const sem = Math.sqrt(gaps.reduce((s, d) => s + d * d, 0) / (2 * gaps.length));
-  const mdc = 1.96 * Math.SQRT2 * sem;
-  const own = { checks: gaps.length, mdc };
-  if (gaps.length < OWN_NOISE_AFTER || mdc <= published) return { key, published, own, used: published, from: "published" };
-  return { key, published, own, used: mdc, from: "yours" };
+  const byId = new Map(history.map((c) => [c.id, c]));
+  const repeatGaps = history.flatMap((c) => {
+    if (!c.repeatOf) return [];
+    const again = point(c);
+    const first = point(byId.get(c.repeatOf));
+    return again && first ? [again.value - first.value] : [];
+  });
+
+  const rounds = roundGaps.length > 0 ? { checks: roundGaps.length, mdc: mdcOf(roundGaps) } : null;
+  const repeats = repeatGaps.length > 0 ? { pairs: repeatGaps.length, mdc: mdcOf(repeatGaps) } : null;
+  if (repeats && repeats.pairs >= OWN_NOISE_AFTER) return { key, published, rounds, repeats, used: repeats.mdc, from: "repeats" };
+  if (rounds && rounds.checks >= OWN_NOISE_AFTER && rounds.mdc > published) {
+    return { key, published, rounds, repeats, used: rounds.mdc, from: "rounds" };
+  }
+  return { key, published, rounds, repeats, used: published, from: "published" };
 }
 
 function amount(value: number, unit: "deg" | "mm"): string {
@@ -169,15 +211,22 @@ export function compare(
   return { key, then: a, now: b, change, words: changeWords(key, change, b.unit), noise, beyond: Math.abs(change) > noise.used };
 }
 
-/** The check to compare with by default: the one just before, if there is one. */
+/**
+ * The check to compare with by default. For a repeat, the check it repeats
+ * (the difference is the person's own noise); otherwise the ordinary check
+ * just before, if there is one.
+ */
 export function previousOf(id: string, history: readonly CheckSummary[]): CheckSummary | null {
-  const ordered = chronological(history);
+  const self = history.find((c) => c.id === id);
+  if (self?.repeatOf) return history.find((c) => c.id === self.repeatOf) ?? null;
+  const ordered = chronological(history).filter((c) => !c.repeatOf || c.id === id);
   const i = ordered.findIndex((c) => c.id === id);
   return i > 0 ? ordered[i - 1] : null;
 }
 
+/** The first ordinary check (a repeat is never anybody's first). */
 export function firstOf(history: readonly CheckSummary[]): CheckSummary | null {
-  return chronological(history)[0] ?? null;
+  return chronological(history).find((c) => !c.repeatOf) ?? null;
 }
 
 export type Trend = {
@@ -193,9 +242,9 @@ export type Trend = {
   beyond: boolean;
 };
 
-/** One measure across every check that has it, oldest first; null with fewer than two. */
+/** One measure across every ordinary check that has it, oldest first; null with fewer than two. */
 export function trend(key: MeasureKey, history: readonly CheckSummary[]): Trend | null {
-  const ordered = chronological(history).filter((c) => c.measures[key]);
+  const ordered = chronological(history).filter((c) => c.measures[key] && !c.repeatOf);
   if (ordered.length < 2) return null;
   const unit = ordered[ordered.length - 1].measures[key]!.unit;
   const same = ordered.filter((c) => c.measures[key]!.unit === unit);
@@ -233,8 +282,9 @@ function cell(value: string | number | null): string {
  */
 export function historyCsv(history: readonly CheckSummary[]): string {
   const rows: (string | number | null)[][] = [
-    ["taken_at", "day", "measure", "value", "unit", "round_1", "round_2", "tier", "words"],
+    ["taken_at", "day", "measure", "value", "unit", "round_1", "round_2", "tier", "words", "repeat_of"],
   ];
+  const byId = new Map(history.map((c) => [c.id, c]));
   for (const c of chronological(history)) {
     for (const key of MEASURE_ORDER) {
       const m = c.measures[key];
@@ -250,6 +300,8 @@ export function historyCsv(history: readonly CheckSummary[]): string {
         fixed(m.rounds[1]),
         m.tier === "reliable" ? "reliable" : "trend only",
         m.words,
+        // A repeat names the check it repeats by when that was taken.
+        c.repeatOf ? (byId.get(c.repeatOf)?.takenAt ?? "") : "",
       ]);
     }
   }

@@ -46,6 +46,8 @@ export type StoredCheck = {
   sentAt?: string | null;
   /** The account's last refusal, when it answered with one rather than not at all. */
   refused?: string | null;
+  /** The check this one repeats, every sticker taken off and put back on (slice 3b). */
+  repeatOf?: string | null;
 };
 
 export type StoredPhoto = {

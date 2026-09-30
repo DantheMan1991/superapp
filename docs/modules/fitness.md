@@ -13,6 +13,18 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — The posture check begins (`claude/posture-setup-check`)
+
+The Workouts page gains a **Posture check** card (between Today and Your
+programs) that leads to `/personal/m/fitness/posture`. The posture check has
+its own dossier, [posture.md](posture.md), with its plan, its slices and this
+first one's build log (checking the setup on the person's phone), and two ADRs:
+[0118](../decisions/0118-a-posture-checks-pictures-never-leave-the-phone.md)
+and [0119](../decisions/0119-a-posture-measure-is-read-from-stickers-and-reported-against-yourself.md).
+Its code lives under `src/modules/fitness/posture/`, behind the same
+`requireModuleEnabled(…, "fitness")` gate, so it previews exactly where
+Workouts does.
+
 ### 2026-09-29 — F4c: an exercise's levels, and moving up (`claude/fitness-f4c`)
 
 The last of F4. His program starts the calf raise at a first level and says
@@ -406,8 +418,8 @@ from the list above:
   middle breath starts or halfway through a hold, through ONE voice queue
   ([ADR 0114](../decisions/0114-a-workout-has-one-voice-and-a-line-knows-how-long-it-is-worth-saying.md)).
   `sayIt` cancels whatever it is saying on every new line, which is right for
-  the tell box and wrong for a pacer, a cue and (later) the founder's posture
-  feedback all wanting to speak in the same minute.
+  the tell box and wrong for a pacer, a cue and (later) the posture check's
+  feedback ([posture.md](posture.md)) all wanting to speak in the same minute.
 - **No spoken count, breath by breath.** The tones mark every turn. A number
   said every ten seconds for twenty minutes would nag, so the voice says only
   "Last one.".
@@ -432,13 +444,14 @@ from the list above:
   in a recorded natural voice ([ADR 0115](../decisions/0115-the-coach-speaks-in-a-recorded-voice-fetched-ahead-and-kept-on-the-phone.md)).
   The build log has it.
 
-His posture tool (camera, feedback) is his to build, in parallel. F2 builds
-nothing camera-related and leaves three seams for it: the exercise screen's
-top **stage** (the looping demo today, a camera view during a set later),
-the one **voice** (built in F2b: `coachSay({ text, priority: "high", key:
-"posture" })` cuts in on a cue or a count, replaces its own unsaid last
-correction, and goes unsaid when more than two seconds late), and the
-enrollment's **side**, where a left-or-right assessment lands.
+The posture check (camera, feedback) is its own area with its own dossier,
+[posture.md](posture.md), begun 2026-09-30. F2 built nothing camera-related
+and left three seams for it, which its slice 5 (live cues during a workout)
+uses: the exercise screen's top **stage** (the looping demo today, a camera
+view during a set later), the one **voice** (built in F2b: `coachSay({ text,
+priority: "high", key: "posture" })` cuts in on a cue or a count, replaces its
+own unsaid last correction, and goes unsaid when more than two seconds late),
+and the enrollment's **side**, where a left-or-right assessment lands.
 
 ### F3 — progress and the gate
 
@@ -880,7 +893,7 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - **Workout mode in the Android app.** The pacer's buzz needs the VIBRATE
   permission, which the app does not have: the phone's browser buzzes, the app
   will not until a new build, best made together with the CAMERA permission
-  the founder's posture tool needs. Screen Wake Lock inside the app's WebView
+  the posture check needs ([posture.md](posture.md), slice 6). Screen Wake Lock inside the app's WebView
   has not been watched either.
 - **Nobody has heard the pacer or the coach on a phone.** The drives ran in a
   browser pane. The tones, their volume, the buzz and the voice are unproven

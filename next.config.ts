@@ -103,6 +103,20 @@ const nextConfig: NextConfig = {
   // an origin error, it is `/sign-in` and `/sign-up` returning 404 while every
   // other route keeps working. Half an hour of looking in the wrong place.
   allowedDevOrigins: ["localhost", "127.0.0.1"],
+  async headers() {
+    return [
+      // The posture check's pose model (docs/modules/posture.md): the task
+      // library, its WebAssembly and three models, 46 MB together, copied into
+      // `public/pose/` by scripts/copy-pose-assets.ts. `public/` is served
+      // `max-age=0`, which would have a phone revalidate all of it before every
+      // check; every path here carries the package version or the model's
+      // hash, so a file at a given path never changes and can be kept for good.
+      {
+        source: "/pose/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+    ];
+  },
   async redirects() {
     // Muscle-memory aliases for the auth pages.
     return [

@@ -325,6 +325,18 @@ under `withSystem`. **What "never" covers is the product**: `withSystem` code
 and the database owner can still read the rows, and nothing written for a
 person may claim otherwise.
 
+**S16 — A posture check's pictures never leave the phone.**
+The posture check films a person in little or no clothing (ADR
+[0118](decisions/0118-a-posture-checks-pictures-never-leave-the-phone.md)).
+Every frame is read on the phone, in a worker, and closed; only numbers leave
+the worker (its one `send` throws on anything binary), only numbers reach the
+account, and a photo the person keeps stays in the browser's storage on that
+phone, never the gallery. The pose model is served from this site. Unlike S15's
+"never", this one holds against us too: no server of ours ever has a picture to
+leak. `tests/posture-privacy.test.ts` fails on network, storage, recording or
+another site's URL anywhere in the posture code; an exception needs the ADR's
+argument first.
+
 ---
 
 ## 4. Checklists

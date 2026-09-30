@@ -65,9 +65,10 @@ calls the actions, both its sends go through `toCheckDoc`, it never touches a
 photo, the schema file names no loose type). The strict schema and the noise
 floor were each broken on purpose and the tests failed (3 of 35).
 
-0434 and 0435 are on the **dev** branch (verify-rls: 256 tables, forced, both
-policies). **Production waits for the founder's word**, before the merge
-(ADR 0014).
+0434 and 0435 are on the **dev** branch and on **production** (the founder's
+word, 2026-09-30, before the merge per ADR 0014: production's ledger was at
+0433 with exactly these two pending; verify-rls green on both, 256 tables,
+forced, both policies).
 
 Driven in the browser pane on the dev database: two checks from the test
 picture and a copy with the left shoulder sticker moved 24 px lower; the
@@ -567,8 +568,6 @@ check and its report opens offline.
 - **Whether the phone keeps the storage.** "Keep a photo" asks
   `navigator.storage.persist()`; Chrome decides for itself, and nobody has
   seen its answer on the S25, or IndexedDB in the app's WebView.
-- **Migrations 0434 and 0435 on production** wait for the founder's word, and
-  go before the merge (ADR 0014); dev has them.
 - **Checks taken before slice 3** are on the phone that took them only; the
   posture page sends them the first time it opens there after the deploy
   (they are unsent by definition), photos staying behind.

@@ -6,6 +6,7 @@ import { stickersIn, VIEWS, type View } from "../core/sticker-map";
 import { torsoLength, type PosePoint } from "../core/views";
 import type { FromWorker, PhotoResult } from "../worker/protocol";
 import { deleteCheck, holdCheckLock, saveCheck } from "../store/checks";
+import { sendCheckNow, sendPendingChecksWithin } from "../store/sync";
 import type { StoredCheck } from "../store/db";
 import { CaptureBase, sleep, type CaptureCallbacks } from "./capture-base";
 import { startPostureVoice } from "./voice";
@@ -440,6 +441,17 @@ export class CheckSession extends CaptureBase<CheckCallbacks> {
     this.saved = true;
     this.releaseLock();
     this.say(CHECK_LINES.done, 0);
+    if (saveError === null) {
+      // The numbers to the account (slice 3), so the report opens from there
+      // with the history beside it; a slow or missing connection is left to
+      // send later, and the report opens from this phone meanwhile.
+      await sendPendingChecksWithin(this.check.owner, 4000);
+    } else {
+      // This phone could not keep it (a private window): straight to the
+      // account instead, so the check is not lost with the page.
+      const sent = await sendCheckNow({ id: this.check.id, at: this.at, captures: this.captures, notes: this.notes });
+      saveError = "ok" in sent ? null : `${saveError}; ${sent.error}`;
+    }
     this.cb.done({
       checkId: this.check.id,
       saved: saveError === null,

@@ -193,15 +193,16 @@ export function PostureCheck({
         <div className="flex gap-2 rounded-xl bg-warning/15 p-3 text-sm">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" aria-hidden />
           <span>
-            This check could not be kept on this phone ({unsaved.saveError}). Copy its numbers now: they are gone when you
-            leave this page.
+            This check could not be kept on this phone or in your account ({unsaved.saveError}). Copy its numbers now:
+            they are gone when you leave this page.
           </span>
         </div>
         <PostureReport
           check={{ id: unsaved.checkId, at: unsaved.at, captures: unsaved.captures, notes: unsaved.notes, keepPhotos: false }}
           owner={owner}
           backHref={backHref}
-          onPhone={false}
+          history={[]}
+          canDelete={false}
         />
       </div>
     );
@@ -358,7 +359,7 @@ export function PostureCheck({
             )}
             {step?.kind === "saving" && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" aria-hidden /> Keeping the numbers on this phone
+                <Loader2 className="size-4 animate-spin" aria-hidden /> Saving the numbers
               </p>
             )}
             <div className="flex flex-wrap gap-2 text-xs">

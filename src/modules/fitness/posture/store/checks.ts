@@ -78,6 +78,17 @@ export function listChecks(owner: string): Promise<StoredCheck[]> {
   });
 }
 
+/** Change a kept check in place: whether the account has it, and its last refusal. */
+export function markCheck(id: string, patch: Pick<StoredCheck, "sentAt" | "refused">): Promise<void> {
+  return withDb(async (db) => {
+    const tx = db.transaction(CHECKS, "readwrite");
+    const store = tx.objectStore(CHECKS);
+    const check = (await done(store.get(id))) as StoredCheck | undefined;
+    if (check) store.put({ ...check, ...patch });
+    await finished(tx);
+  });
+}
+
 export function getCheck(owner: string, id: string): Promise<StoredCheck | null> {
   return withDb(async (db) => {
     const check = (await done(db.transaction(CHECKS, "readonly").objectStore(CHECKS).get(id))) as StoredCheck | undefined;

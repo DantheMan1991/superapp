@@ -1,18 +1,24 @@
 # Reading your posture report
 
-> What one posture check found: each view drawn from your stickers, every measure in plain words with how much it can be trusted, what could not be measured and why, and your photos if you kept them.
+> What one posture check found: each view drawn from your stickers, every measure in plain words with how much it can be trusted and how it changed since an earlier check, what could not be measured and why, and your photos if you kept them.
 > **Route:** /personal/m/fitness/posture/checks/*
 > **Order:** 53
 
-The report opens by itself when a check ends. To open it later, click the check's row under `Your checks on this phone` on the posture check page. A check is kept in the browser on the phone that took it, so its report opens only there.
+The report opens by itself when a check ends. To open it later, click the check's row under `Your checks` on the posture check page. The check's numbers are in your account, so its report opens on any device you sign in on. Its photos, if you kept them, show only on the phone that took them.
 
 The report describes how you stood during that check. It is not a medical assessment, and it never calls a result normal or not. Most people are a little uneven, and how you stand says little on its own about pain. What matters is how a measure changes between your own checks, and the report tells you how big a change has to be before it is real.
 
 ## What you see
 
-- **`Posture report`**, the title, with {icon:scan-line} and the line `How you stood, from a check kept on this phone.`
+- **`Posture report`**, the title, with {icon:scan-line} and the line `How you stood, from one posture check.`
+- **A line above the report** when your account does not have this check yet, and this phone does:
+  - `Sending this check's numbers to your account.`, with a spinner, while it goes. The page reads your account again when it gets there;
+  - `This check is on this phone only for now. It goes to your account when the phone is online.` when there is no connection. It goes by itself later;
+  - or your account's reason, if it refused the check.
 - **When the check was**, for example `Wednesday, Sep 30, 11:43 AM`. Under it, how many views it read (`All four views`, or `2 of 4 views`), how many rounds, and where true vertical came from: `Vertical from the plumb line, millimeters from its tape marks.` is the best there is.
 - **A yellow box** when the plumb line was not used: `Without the plumb line, the angles against level can be off by about a degree, the size of what is being measured. Hang it where the camera sees it next time.`
+- **`Compared with`**, a list of your checks taken before this one. It starts on the check just before, marked `The check before`, and your very first is marked `Your first check`. Choose `No comparison` to see this check on its own. The line under it says `A change is called real only when it is bigger than the measure's noise: the published figure, or your own once your checks show it is bigger.`
+  - On your first check there is nothing to compare with, and the report says `This is your first check. Your next checks are compared with it, a measure at a time.`
 - **The views**, a drawing of each view the check read, from the first round (or the second, when the first was skipped):
   - the stick figure the pose model found, in gray;
   - your stickers as dots: blue on your left side, green on your right, white on the middle;
@@ -23,7 +29,8 @@ The report describes how you stood during that check. It is not a medical assess
 - **`Measured reliably`**, the measures a photo can take well. Each row shows:
   - the measure's name and {badge:Reliable|secondary};
   - the result in words, in large type, for example `Left shoulder lower by 1.9° (14 mm)`. Millimeters show when the plumb line's tape marks gave the scale;
-  - how your two rounds agreed, for example `Your two rounds agreed within 0.4°. A change of more than 3.6° between checks would be real.` The second sentence is the smallest change between two checks that is more than measuring noise. When the rounds differ by more than that, the line is yellow: `Your two rounds differed by 5.0°, more than a real change: stand the same way each round.`;
+  - when you are comparing, how it changed since the check chosen under `Compared with`. A tinted label says the change in the measure's own words when it is more than the noise, for example `Left side dropped 4.6° against the right`, or `Within your noise` when it is not. Under it, what that check said and what the change amounts to, for example `Was: Left shoulder lower by 1.9° (14 mm). More than the 3.6° a real change needs.` A change is never called better or worse: it is a change;
+  - how your two rounds agreed, for example `Your two rounds agreed within 0.4°. A change of more than 3.6° between checks would be real.` The second sentence is the smallest change between two checks that is more than measuring noise. It is the published figure until your own checks show that your rounds vary by more; then it is your own, and the sentence ends `(your own figure, from your checks)`. It never goes below the published figure. When the rounds differ by more than a real change, the line is yellow: `Your two rounds differed by 5.0°, more than a real change: stand the same way each round.`;
   - a line of context, when the measure has one;
   - where it came from, for example `From the front and back, by your stickers.` `by the pose model's points (no sticker)` means a sticker was missing and the model stood in, which is less exact.
 
@@ -50,7 +57,7 @@ The report describes how you stood during that check. It is not a medical assess
   - a view that was not read, for example `Back, round 2: skipped.`, `Left side, round 1: no steady picture in time.` or `Right side, round 2: not taken, the check was finished early.`;
   - a photo that was not kept, for example `The front photo was not kept: the phone took too long.`, or `Photos could not be kept on this phone: ...`;
   - `Something went wrong reading the pictures: ...`, when the pose model reported a problem.
-- **`Photos on this phone`**, only when the check kept photos and they are still on this phone. It says how many, kept only in this browser on this phone, never uploaded.
+- **`Photos on this phone`**, only on the phone that took the check, when it kept photos and they are still there. It says how many, kept only in this browser on this phone, never uploaded.
   - {button:Show the photos|outline|eye} shows them, one for each view. In the Yosher app, screenshots are blocked while they show. {button:Hide the photos|outline|eye-off} hides them again.
   - `Show the lines`, a switch, on at first: draws true vertical through your feet as a dashed white line, the measures' lines in orange, and a dot on each sticker the check found. Turn it off to see the photo on its own.
   - Tap a photo to make it bigger, and again to make it smaller.
@@ -58,14 +65,14 @@ The report describes how you stood during that check. It is not a medical assess
 - **A note**: `This describes how you stood during this check, for fitness and body awareness. It is not a medical assessment. Most people are a little uneven, and how you stand says little on its own about pain.`
 - **{button:Copy the numbers|primary|copy}** copies the report as text, and reads `Copied`. The text has each measure's words and each round's value, what was not measured, what happened along the way, and a list of each view's numbers for tuning: which stickers were found, how still you were, and the scale. No picture of you is in it. Paste it to a trainer or a physiotherapist, or send it to us.
 - **{button:Back to the posture check|outline}** goes back to the posture check page.
-- **{button:Delete this check|ghost|trash}** asks `Delete this check?` and says `Its numbers and its photos are gone from this phone for good. It is kept nowhere else.` Click {button:Delete this check|destructive} to delete it and go back to the posture check page, or {button:Keep it|ghost}.
+- **{button:Delete this check|ghost|trash}** asks `Delete this check?` and says `Its numbers go from your account and from this phone. This cannot be undone.`, with `, and its photos with them` when this phone kept photos of it. Click {button:Delete this check|destructive} to delete it and go back to the posture check page, or {button:Keep it|ghost}. Another phone that kept a copy forgets it too, the next time its posture check page opens.
 
-## How to read a change
+## How to see what changed
 
-1. Open two reports from `Your checks on this phone`.
-2. Find the same measure in each.
-3. Take the difference. If it is bigger than the change the row calls real, it is more than measuring noise.
-4. If it is smaller, the two checks cannot be told apart. That is the honest answer, and it is common for weeks at a time.
+1. Open the report of your latest check.
+2. Under `Compared with`, choose the check to compare with: the one before, your first, or any other.
+3. Read each measure's label. `Within your noise` means the two checks cannot be told apart for that measure. That is the honest answer, and it is common for weeks at a time.
+4. A label in the measure's own words, like `Left side dropped 4.6° against the right`, is a change bigger than measuring noise.
 
 Put the stickers on the same way each time, and stand in the same outline with the phone at the same height and distance. Most of the noise is where a sticker went.
 
@@ -73,14 +80,18 @@ Put the stickers on the same way each time, and stand in the same outline with t
 
 | Message | What it means |
 | --- | --- |
-| `This check is not on this phone` | The check was taken on another phone or in another browser, or it was deleted, or the site's data was cleared. A check is kept only where it was taken. Open the page on that phone. |
-| `Opening the check` | The report is being read from the phone's storage. |
+| `This check is not here` | Your account does not have this check, and this phone does not either. It may still be on the phone that took it, waiting for a connection, or it was deleted. |
+| `Opening the check` | The report is being read from this phone's storage. |
+| `Sending this check's numbers to your account.` | This phone has the check and is sending it. The page reads your account again when it arrives. |
+| `This check is on this phone only for now. It goes to your account when the phone is online.` | There is no connection. The check goes by itself the next time the posture check page opens online. |
+| `This phone is offline. Delete the check when it is back online.` | A delete needs your account, so nothing was deleted. Try again with a connection. |
+| `The check could not be deleted just now. Try again.` | Your account did not answer. Nothing was deleted. |
 | `Copied` | The numbers are on your clipboard. Paste them where you like. |
 
 ## Not on this page
 
-- **Comparing checks side by side.** Each report stands on its own for now. The history, with changes worked out for you against your own noise, comes in a later update.
-- **This check on your other devices.** It is kept only on the phone that took it until a later update saves the numbers to your account. The photos stay on the phone for good.
+- **Your own noise from a repeat check.** For now a change is held to the published figure, or to your own rounds when they vary more. A second check the same day with the stickers put back on, to learn your own figure, is being planned.
+- **Photos on another device.** They stay on the phone that took them.
 - **A score or a verdict.** The report never adds measures into one number, and never says a result is good or bad.
 
 ## Who can do what

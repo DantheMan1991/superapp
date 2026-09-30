@@ -8,10 +8,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { localDayOf } from "../core/check-doc";
+import {
+  chronological,
+  compare,
+  noiseFor,
+  previousOf,
+  summarize,
+  type CheckSummary,
+  type Comparison,
+  type Noise,
+} from "../core/history";
 import type { ViewCapture } from "../core/measures";
 import { buildReport, detailsText, linesOf, noiseWords, reportText, VERTICAL_WORDS, type MeasureResult } from "../core/report";
 import { stickersIn, VIEWS, type View } from "../core/sticker-map";
-import { deleteCheck } from "../store/checks";
+import { deleteEverywhere } from "../store/sync";
 import { CheckPhotos } from "./check-photos";
 import { ReportFigure } from "./report-figure";
 
@@ -21,6 +32,10 @@ import { ReportFigure } from "./report-figure";
  * own noise, reliable ones first, then what could not be measured and why.
  * Rebuilt from the check's numbers each time it opens (`buildReport`), so a
  * fix to the arithmetic reaches old checks too.
+ *
+ * With earlier checks (slice 3), each measure also says how it changed since
+ * the one chosen under "Compared with", and whether that change is more than
+ * the noise: the published figure, or the person's own once it is bigger.
  *
  * Never a verdict: no normal, no condition, no score. It says how the person
  * stood that day.
@@ -41,25 +56,50 @@ function viewsWords(views: View[]): string {
   return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+function dayWords(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
 export function PostureReport({
   check,
   owner,
   backHref,
-  onPhone,
+  history,
+  canDelete,
 }: {
   check: ReportCheck;
   owner: string;
   backHref: string;
-  /** Kept on this phone: its photos can show and it can be deleted. */
-  onPhone: boolean;
+  /** Every check in the account, summarized; this one is added when it is not there yet. */
+  history: CheckSummary[];
+  /** Kept somewhere (the account, this phone), so there is something to delete. */
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const report = useMemo(() => buildReport(check.captures), [check.captures]);
   const [copied, setCopied] = useState(false);
-  const [hasPhotos, setHasPhotos] = useState(check.keepPhotos);
+  // Whether this phone kept photos can be learned after the report opens (it
+  // reads the phone's storage), so it is followed, not copied into state.
+  const [photosDeleted, setPhotosDeleted] = useState(false);
+  const hasPhotos = check.keepPhotos && !photosDeleted;
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const when = new Date(check.at);
+
+  const all = useMemo(() => {
+    if (history.some((c) => c.id === check.id)) return history;
+    const takenAt = new Date(check.at).toISOString();
+    return [...history, summarize({ id: check.id, takenAt, localDay: localDayOf(new Date(check.at)), captures: check.captures })];
+  }, [history, check]);
+  const self = all.find((c) => c.id === check.id)!;
+  // Only checks taken before this one: a change is always later minus earlier. Newest first.
+  const earlier = useMemo(() => chronological(all).filter((c) => c.takenAt < self.takenAt).reverse(), [all, self.takenAt]);
+  const [compareId, setCompareId] = useState<string | null>(() => previousOf(check.id, all)?.id ?? null);
+  const other = earlier.find((c) => c.id === compareId) ?? null;
+  const first = earlier[earlier.length - 1] ?? null;
+  const before = earlier[0] ?? null;
+
   const reliable = report.measures.filter((m) => m.tier === "reliable");
   const trend = report.measures.filter((m) => m.tier === "trend");
   // The first round's hold of each view, or the second's when the first was skipped.
@@ -80,13 +120,29 @@ export function PostureReport({
 
   async function remove() {
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await deleteCheck(owner, check.id);
+      const outcome = await deleteEverywhere(owner, check.id);
+      if ("error" in outcome) {
+        setDeleteError(outcome.error);
+        return;
+      }
       router.push(backHref);
+      router.refresh();
     } finally {
       setDeleting(false);
     }
   }
+
+  const row = (m: MeasureResult) => (
+    <MeasureRow
+      key={m.key}
+      m={m}
+      noise={noiseFor(m.key, all)}
+      comparison={other ? compare(m.key, self, other, all) : null}
+      otherDay={other ? dayWords(other.takenAt) : null}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -111,6 +167,37 @@ export function PostureReport({
         </div>
       )}
 
+      {earlier.length > 0 ? (
+        <section className="space-y-2 rounded-2xl bg-card p-4 shadow-elevation-1" aria-label="Compared with">
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Compared with</span>
+            <select
+              className="block h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={compareId ?? ""}
+              onChange={(e) => setCompareId(e.target.value || null)}
+            >
+              <option value="">No comparison</option>
+              {earlier.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.id === first?.id ? "Your first check, " : c.id === before?.id ? "The check before, " : ""}
+                  {new Date(c.takenAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-xs text-muted-foreground">
+            A change is called real only when it is bigger than the measure&apos;s noise: the published figure, or your
+            own once your checks show it is bigger.
+          </p>
+        </section>
+      ) : (
+        all.length === 1 && (
+          <p className="text-sm text-muted-foreground">
+            This is your first check. Your next checks are compared with it, a measure at a time.
+          </p>
+        )
+      )}
+
       {figures.length > 0 && (
         <section className="space-y-2" aria-label="The views">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -131,11 +218,7 @@ export function PostureReport({
           <p className="text-sm text-muted-foreground">
             Each has a smallest real change: a difference between two checks bigger than that is more than measuring noise.
           </p>
-          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">
-            {reliable.map((m) => (
-              <MeasureRow key={m.key} m={m} />
-            ))}
-          </ul>
+          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">{reliable.map(row)}</ul>
         </section>
       )}
 
@@ -146,11 +229,7 @@ export function PostureReport({
             Too dependent on where a sticker went, or on bone shape, to read as a value. Compare them only with your own
             earlier checks.
           </p>
-          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">
-            {trend.map((m) => (
-              <MeasureRow key={m.key} m={m} />
-            ))}
-          </ul>
+          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">{trend.map(row)}</ul>
         </section>
       )}
 
@@ -179,8 +258,8 @@ export function PostureReport({
         </section>
       )}
 
-      {onPhone && hasPhotos && (
-        <CheckPhotos owner={owner} checkId={check.id} captures={check.captures} report={report} onDeleted={() => setHasPhotos(false)} />
+      {hasPhotos && (
+        <CheckPhotos owner={owner} checkId={check.id} captures={check.captures} report={report} onDeleted={() => setPhotosDeleted(true)} />
       )}
 
       <div className="flex gap-2 rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">
@@ -191,6 +270,8 @@ export function PostureReport({
         </span>
       </div>
 
+      {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void copy()}>
           <Copy aria-hidden /> {copied ? "Copied" : "Copy the numbers"}
@@ -198,7 +279,7 @@ export function PostureReport({
         <Button asChild variant="outline">
           <Link href={backHref}>Back to the posture check</Link>
         </Button>
-        {onPhone && (
+        {canDelete && (
           <Dialog open={confirming} onOpenChange={setConfirming}>
             <DialogTrigger asChild>
               <Button variant="ghost" className="text-destructive">
@@ -209,7 +290,8 @@ export function PostureReport({
               <DialogHeader>
                 <DialogTitle>Delete this check?</DialogTitle>
                 <DialogDescription>
-                  Its numbers{hasPhotos ? " and its photos" : ""} are gone from this phone for good. It is kept nowhere else.
+                  Its numbers go from your account and from this phone{hasPhotos ? ", and its photos with them" : ""}. This
+                  cannot be undone.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -228,7 +310,21 @@ export function PostureReport({
   );
 }
 
-function MeasureRow({ m }: { m: MeasureResult }) {
+function amount(value: number, unit: "deg" | "mm"): string {
+  return unit === "mm" ? `${Math.round(Math.abs(value))} mm` : `${Math.abs(value).toFixed(1)}°`;
+}
+
+function MeasureRow({
+  m,
+  noise,
+  comparison,
+  otherDay,
+}: {
+  m: MeasureResult;
+  noise: Noise;
+  comparison: Comparison | null;
+  otherDay: string | null;
+}) {
   return (
     <li className="space-y-1 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -236,7 +332,29 @@ function MeasureRow({ m }: { m: MeasureResult }) {
         <Badge variant={m.tier === "reliable" ? "secondary" : "outline"}>{m.tier === "reliable" ? "Reliable" : "Trend only"}</Badge>
       </div>
       <p className="text-lg leading-snug">{m.words}</p>
-      <p className={cn("text-sm", m.unsteady ? "text-warning-foreground" : "text-muted-foreground")}>{noiseWords(m)}</p>
+      {comparison && otherDay && (
+        <div className="space-y-0.5">
+          <span
+            className={cn(
+              "inline-block rounded-md px-1.5 py-0.5 text-xs",
+              comparison.beyond ? "bg-module-accent/10 text-module-accent" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {comparison.beyond ? comparison.words : "Within your noise"}
+          </span>
+          <p className="text-sm text-muted-foreground">
+            Was: {comparison.then.words}.{" "}
+            {comparison.beyond
+              ? `More than the ${amount(comparison.noise.used, comparison.now.unit)} a real change needs.`
+              : comparison.words === "No change"
+                ? "No change."
+                : `${comparison.words}: less than the ${amount(comparison.noise.used, comparison.now.unit)} a real change needs.`}
+          </p>
+        </div>
+      )}
+      <p className={cn("text-sm", m.unsteady ? "text-warning-foreground" : "text-muted-foreground")}>
+        {noiseWords(m, { value: noise.used, yours: noise.from === "yours" })}
+      </p>
       {m.context && <p className="text-sm text-muted-foreground">{m.context}</p>}
       <p className="text-xs text-muted-foreground">
         From the {viewsWords(m.views)}

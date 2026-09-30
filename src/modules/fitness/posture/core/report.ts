@@ -65,7 +65,8 @@ export function captureFrom(input: {
     stickers,
     pose,
     frames: input.frames.length,
-    stillPx: input.stillPx,
+    // Kept as a number or nothing: a NaN does not survive the trip to the account.
+    stillPx: Number.isFinite(input.stillPx) ? input.stillPx : null,
   };
 }
 
@@ -218,9 +219,13 @@ function fmt(value: number, unit: MeasureDef["unit"]): string {
   return unit === "mm" ? `${Math.round(value)} mm` : `${value.toFixed(1)}°`;
 }
 
-/** What the report says about a measure's noise, in one line. */
-export function noiseWords(m: MeasureResult): string {
-  const real = `A change of more than ${fmt(m.mdc, m.unit)} between checks would be real.`;
+/**
+ * What the report says about a measure's noise, in one line. `real` is the
+ * change a later check must beat: the published figure, or the person's own
+ * once their checks show it is bigger (core/history.ts `noiseFor`).
+ */
+export function noiseWords(m: MeasureResult, realChange: { value: number; yours: boolean } = { value: m.mdc, yours: false }): string {
+  const real = `A change of more than ${fmt(realChange.value, m.unit)} between checks would be real${realChange.yours ? " (your own figure, from your checks)" : ""}.`;
   if (m.spread === null) return real;
   if (m.unsteady) {
     return `Your two rounds differed by ${fmt(m.spread, m.unit)}, more than a real change: stand the same way each round. ${real}`;
@@ -267,7 +272,7 @@ export function detailsText(captures: readonly ViewCapture[], expected: (view: V
         `${want.length - missing.length}/${want.length} stickers`,
         missing.length > 0 ? `missing ${missing.join(", ")}` : null,
         `${c.frames} frames`,
-        `still ${Number.isFinite(c.stillPx) ? c.stillPx.toFixed(1) : "?"} px`,
+        `still ${c.stillPx !== null && Number.isFinite(c.stillPx) ? c.stillPx.toFixed(1) : "?"} px`,
         `up ${c.upFrom} (${c.up.x.toFixed(4)}, ${c.up.y.toFixed(4)})`,
         c.pxPerMetre ? `${Math.round(c.pxPerMetre)} px/m` : "no scale",
         `${c.width}x${c.height}`,

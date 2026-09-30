@@ -3039,6 +3039,20 @@
       "when": 1790702367498,
       "tag": "0433_fitness_levels",
       "breakpoints": true
+    },
+    {
+      "idx": 434,
+      "version": "7",
+      "when": 1790788342651,
+      "tag": "0434_fitness_posture_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 435,
+      "version": "7",
+      "when": 1790788364930,
+      "tag": "0435_fitness_posture_checks_rls",
+      "breakpoints": true
     }
   ]
 }

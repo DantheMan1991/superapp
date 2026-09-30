@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
  * code by reading it: nothing under `src/modules/fitness/posture/` or the
  * posture pages may reach the network, store a picture, or record one. The
  * worker is the only place frames are read, and it posts through one `send`
- * that refuses anything binary.
+ * that refuses anything binary. A check's NUMBERS reach the account through
+ * one door (slice 3, ADR 0120): `store/sync.ts`, sending `toCheckDoc`'s output
+ * to an action whose schema is strict and has no place for a picture.
  *
  * A token found here is a failure until it is argued for in the ADR and
  * listed below with its reason, so the next change to this area meets the
@@ -115,9 +117,26 @@ describe("the posture check's code", () => {
     // The lock is taken before the check is written, so no sweep sees one without it.
     expect(session).toMatch(/this\.releaseLock = holdCheckLock\(this\.check\.id\);\s*try \{\s*await saveCheck\(this\.record\("running"\)\);/);
     // Both screens that open after a check was left sweep it up.
-    for (const screen of ["components/posture-check.tsx", "components/checks-on-phone.tsx"]) {
+    for (const screen of ["components/posture-check.tsx", "components/check-history.tsx"]) {
       expect(all.find((f) => f.path.endsWith(screen))!.text, screen).toMatch(/sweepAbandoned\(owner\)/);
     }
+  });
+
+  it("sends the account numbers through one door, and never a photo", () => {
+    const text = (end: string) => all.find((f) => f.path.endsWith(end))!.text;
+    // Only the sync module calls the posture's server actions.
+    const callers = all.filter((f) => /from\s+["'](\.\.?\/)+actions["']/.test(f.text)).map((f) => f.path);
+    expect(callers).toEqual(["src/modules/fitness/posture/store/sync.ts"]);
+    // It sends what `toCheckDoc` makes (numbers and notes), in both its sends.
+    const sync = text("store/sync.ts");
+    expect(sync.match(/savePostureCheckAction\(/g)).toHaveLength(2);
+    expect(sync.match(/savePostureCheckAction\(toCheckDoc\(/g)).toHaveLength(2);
+    // And it never touches a photo.
+    expect(sync).not.toMatch(/readPhotos|photoKeys|\bPHOTOS\b|StoredPhoto|\.blob\b/);
+    // The action takes the strict document and nothing else.
+    const actions = text("posture/actions.ts");
+    expect(actions).toMatch(/postureCheckDocSchema\.safeParse\(input\)/);
+    expect(text("core/check-doc.ts")).not.toMatch(/z\.object\(|z\.any\(|z\.unknown\(|passthrough|z\.instanceof/);
   });
 
   it("reads a kept photo back only for the personal space that took it", () => {

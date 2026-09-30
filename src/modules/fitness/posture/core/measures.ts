@@ -34,7 +34,8 @@ export type ViewCapture = {
   /** Median place of each of the pose model's 33 points. */
   pose: PosePoint[] | null;
   frames: number;
-  stillPx: number;
+  /** How far the body moved over the hold, pixels; null when it was not measured. */
+  stillPx: number | null;
 };
 
 export type MeasureKey =

@@ -3,10 +3,13 @@ import { ScanLine, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { listPostureChecks } from "@/modules/fitness/posture/check-ops";
+import { summarize } from "@/modules/fitness/posture/core/history";
 import { STICKERS, type Sticker } from "@/modules/fitness/posture/core/sticker-map";
-import { ChecksOnPhone } from "@/modules/fitness/posture/components/checks-on-phone";
+import { CheckHistory } from "@/modules/fitness/posture/components/check-history";
 import { RoomDiagram, StickerDiagram } from "@/modules/fitness/posture/components/diagrams";
 import { LastReadout } from "@/modules/fitness/posture/components/last-readout";
 
@@ -14,13 +17,17 @@ export const dynamic = "force-dynamic";
 
 /**
  * POSTURE CHECK (docs/help/fitness/posture.md; docs/modules/posture.md): the
- * way into the check itself and the checks this phone has kept, then what the
- * check needs (a room, a plumb line, stickers), where each sticker goes and
- * how to find the bone under it, and the way into checking the setup.
+ * way into the check itself and your checks over time (from the account, and
+ * any this phone has not sent yet), then what the check needs (a room, a
+ * plumb line, stickers), where each sticker goes and how to find the bone
+ * under it, and the way into checking the setup.
  */
 export default async function PosturePage() {
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
+  const checks = await withTenant(ctx.tenant.id, (tx) => listPostureChecks(tx, ctx.tenant.id), { role: ctx.role });
+  // Worked out here from the numbers, every time: only the results travel to the page.
+  const account = checks.map(summarize);
 
   const midline = STICKERS.filter((s) => s.side === "mid");
   const pairs = STICKERS.filter((s) => s.side === "right");
@@ -58,12 +65,17 @@ export default async function PosturePage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="font-heading font-medium tracking-heading">Your checks on this phone</h2>
+        <h2 className="font-heading font-medium tracking-heading">Your checks</h2>
         <p className="text-sm text-muted-foreground">
-          Kept in this browser on this phone only, for now. Your account does not have them yet, so another phone or
-          browser will not show them.
+          The numbers from each check are kept in your account, so every device you sign in on shows them. Photos stay on
+          the phone that took them.
         </p>
-        <ChecksOnPhone owner={ctx.tenant.id} reportHref="/personal/m/fitness/posture/checks" />
+        <CheckHistory
+          owner={ctx.tenant.id}
+          account={account}
+          reportHref="/personal/m/fitness/posture/checks"
+          exportHref="/personal/m/fitness/posture/export"
+        />
       </section>
 
       <section className="space-y-2">

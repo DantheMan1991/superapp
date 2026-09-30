@@ -9,6 +9,7 @@ import { loadReminders } from "@/modules/fitness/reminder-ops";
 import { lastSession, programSessions } from "@/modules/fitness/session-ops";
 import { loadSide } from "@/modules/fitness/side-ops";
 import { latestTries, loadLevels } from "@/modules/fitness/level-ops";
+import { postureCheckDays } from "@/modules/fitness/posture/check-ops";
 import { ProgramView } from "@/modules/fitness/components/program-view";
 
 export const dynamic = "force-dynamic";
@@ -32,12 +33,12 @@ export default async function ProgramPage({
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
   const today = localDayIn(ctx.tenant.timezone, new Date());
-  const [[program, last, sessions, reminders, side, levels, tries], hasPhone] = await Promise.all([
+  const [[program, last, sessions, reminders, side, levels, tries, postureChecks], hasPhone] = await Promise.all([
     withTenant(
       ctx.tenant.id,
       async (tx) => {
         const loaded = await loadProgram(tx, ctx.tenant.id, id);
-        if (!loaded) return [null, null, [], [], null, {}, new Map()] as const;
+        if (!loaded) return [null, null, [], [], null, {}, new Map(), []] as const;
         const leveled = loaded.phases.flatMap((phase) => phase.items.filter((i) => i.progression).map((i) => i.id));
         return [
           loaded,
@@ -51,6 +52,8 @@ export default async function ProgramPage({
           // The level of each exercise with levels, and its latest go (F4c).
           await loadLevels(tx, ctx.tenant.id, id),
           await latestTries(tx, ctx.tenant.id, leveled),
+          // The posture checks' days: a check at the start and at each phase's end (posture slice 3c).
+          await postureCheckDays(tx, ctx.tenant.id),
         ] as const;
       },
       { role: ctx.role },
@@ -80,6 +83,7 @@ export default async function ProgramPage({
       side={side}
       levels={levels}
       tries={tries}
+      postureChecks={postureChecks}
     />
   );
 }

@@ -18,7 +18,13 @@ Open **Workouts** and click a program. It opens on the phase of your last workou
 - **The phase's name**, with how many exercises it has, `in this order`, and how many days to do it before moving on, for example `14 days before moving on`.
 - **When the phase before this one has not reached its days**, a line with {icon:triangle-alert} says so, for example `Opens after 14 done days of Phase 1: Weeks 1-2 (6 so far). The program says not to skip a phase.` You can still start this phase. It is your call.
 - **When this phase has reached its days**, a box says the next phase is open, for example `Phase 2: Weeks 3-4 is open`, with how many exercises it has and which are new, the first new exercise's video, and {button:Move on to Phase 2: Weeks 3-4|primary|arrow-right}, which opens that phase. Under it: `Or keep going here. It never moves you on by itself.` Nothing changes until you start a session on the next phase. When the next phase does exercises on one side and you have not taken the program's tests, the box also says so, for example `Phase 2: Weeks 3-4 has 2 exercises done on one side. Take the tests first, to find yours.`, with {button:Take the tests|outline}.
+  - **A posture check to end the phase**, with {icon:scan-line}, when you have taken a posture check before: `Take a posture check before you move on. One at the end of each phase shows what that phase changed.`, with {button:Start a posture check|outline}, which opens the check. Once you have moved on it reads `Take a posture check this week, to mark the end of Phase 1: Weeks 1-2.` When a check has marked the end of this phase, the box says which instead, with {icon:check}, for example `Posture checked today, marking the end of Phase 1: Weeks 1-2.`, and `See the report` opens it. See [Posture checks along the way](#posture-checks-along-the-way).
+- **When the program's last phase has reached its days**, and a posture check is asked for or has marked its end, a box reads for example `Phase 4: Weeks 7-8 is complete`, with `14 of 14 done days in the program's last phase. Keep going with it as long as you like.` Under it, either `Take a posture check to see what Starter Mobility changed. It marks the end of Phase 4: Weeks 7-8, the last phase.` with {button:Start a posture check|outline}, or, once a check has, `Posture checked Tue, Oct 27, marking the end of Phase 4: Weeks 7-8.` with `See the report`.
 - **The phase's progress**, once you have done a workout on this program. See [Your progress](#your-progress).
+- **A posture check to ask for**, above the button, with {icon:scan-line}, when one is due and you have taken a posture check before. {button:Start a posture check|outline} under it opens the check. See [Doing a posture check](posture-check.md). What it says:
+  - before your first workout of the program, `Take a posture check before your first workout. Every later check is compared with it.`
+  - in its first week, `Take a posture check this week, to mark the start of Starter Mobility. Every later check is compared with it.`
+  - on the phase after one you moved on from, `Take a posture check this week, to mark the end of Phase 1: Weeks 1-2. One at the end of each phase shows what that phase changed.`
 - **{button:Start today's session|primary|play}.** Starts a session for this phase. See [Doing a session](workout.md).
   - When a session is still open on this phone, the button reads {button:Resume today's session|primary|play}, with a line like `Open for Phase 1: Weeks 1-2. It picks up at the set you were on.` It takes you back to that phase and that set.
   - After a session earlier today on this phase, it reads {button:Do the rest of today|primary|play}, with a line like `Today: Morning · 4 sets. 2 sets left.` The session picks up what is left. See [Doing a session](workout.md).
@@ -99,12 +105,26 @@ A card under Reminders, on a program with a side self-assessment: a few tests th
   - When the program's tests have changed since you took them, it says only when you took them.
 - **{button:Redo the tests|outline}** takes them again. Your new answers replace the old ones. This is the only way to change your side.
 
+## Posture checks along the way
+
+If you use the posture check, the program asks for one at its start and at the end of each phase. Compared with each other, they show what each phase changed. See [Reading your posture report](posture-report.md).
+
+- **The start** is the day of your first workout. A check from a week before it to a week after counts. Before your first workout, a check in the past week counts.
+- **The end of a phase** is the day its done days are reached, or the day you move on to a later phase if that comes first. A check from three days before counts. The ask stays until you move on, and for a week after.
+- **The end of the last phase** is the day its done days are reached. The ask stays until you take a check.
+- **A check counts for one mark only**, the one whose day it is nearest. A repeat check never counts: it is the same day's check again, there to measure your noise.
+- **It asks only if you have taken a posture check before.** The check needs stickers, a plumb line and a tripod, so it never asks someone who has not set it up.
+- **An ask whose days pass without a check goes away.** It is not asked for again, and nothing is lost: you can take a check any day.
+
+In your list of checks, a check that marked something says so, for example `Start of Starter Mobility` or `End of Phase 1: Weeks 1-2`. See [The posture check](posture.md).
+
 ## How to move on to the next phase
 
 1. Open the program on the phase you are doing. When its done days are reached, the box `Phase 2: Weeks 3-4 is open` shows under the phase's name.
-2. Watch the new exercise's video, if you like.
-3. Click {button:Move on to Phase 2: Weeks 3-4|primary|arrow-right}.
-4. Click {button:Start today's session|primary|play}. From your first workout on it, the program opens on the new phase.
+2. If you use the posture check, click {button:Start a posture check|outline} in the box and take it first, so it marks the end of this phase.
+3. Watch the new exercise's video, if you like.
+4. Click {button:Move on to Phase 2: Weeks 3-4|primary|arrow-right}.
+5. Click {button:Start today's session|primary|play}. From your first workout on it, the program opens on the new phase.
 
 ## How to follow a session
 

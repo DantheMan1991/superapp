@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CheckSummary, HistoryCheck } from "../core/history";
+import type { MarkLabel } from "../core/marks";
 import { getCheck } from "../store/checks";
 import type { StoredCheck } from "../store/db";
 import { sendPendingChecks } from "../store/sync";
@@ -22,12 +23,15 @@ export function CheckReport({
   checkId,
   fromAccount,
   history,
+  labels = {},
   backHref,
 }: {
   owner: string;
   checkId: string;
   fromAccount: (HistoryCheck & { notes: string[] }) | null;
   history: CheckSummary[];
+  /** What each check marked in a workout program, by check id (slice 3c). */
+  labels?: Record<string, MarkLabel[]>;
   backHref: string;
 }) {
   const router = useRouter();
@@ -76,6 +80,7 @@ export function CheckReport({
         owner={owner}
         backHref={backHref}
         history={history}
+        labels={labels}
         canDelete
       />
     );
@@ -115,6 +120,7 @@ export function CheckReport({
         owner={owner}
         backHref={backHref}
         history={history}
+        labels={labels}
         canDelete
       />
     </div>

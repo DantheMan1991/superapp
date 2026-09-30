@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useSyncExternalStore } from "react";
-import { Copy, Info, Repeat, Trash2, TriangleAlert } from "lucide-react";
+import { Copy, Flag, Info, Repeat, Trash2, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -20,6 +20,7 @@ import {
   type Comparison,
   type Noise,
 } from "../core/history";
+import type { MarkLabel } from "../core/marks";
 import type { ViewCapture } from "../core/measures";
 import { LISTED_MM, movedFor, shiftsBetween, type Shift } from "../core/placement";
 import { buildReport, detailsText, linesOf, noiseWords, reportText, VERTICAL_WORDS, type MeasureResult } from "../core/report";
@@ -38,6 +39,8 @@ import { ReportFigure } from "./report-figure";
  * With earlier checks (slice 3), each measure also says how it changed since
  * the one chosen under "Compared with", and whether that change is more than
  * the noise: the published figure, or the person's own once it is bigger.
+ * A check that marked a workout program's start or a phase's end says so,
+ * here and among the checks to compare with (slice 3c).
  *
  * Never a verdict: no normal, no condition, no score. It says how the person
  * stood that day.
@@ -80,6 +83,7 @@ export function PostureReport({
   history,
   canDelete,
   checkHref = "/personal/m/fitness/posture/check",
+  labels = {},
 }: {
   check: ReportCheck;
   owner: string;
@@ -90,6 +94,8 @@ export function PostureReport({
   canDelete: boolean;
   /** Where a repeat of this check starts. */
   checkHref?: string;
+  /** What each check marked in a workout program, by check id (slice 3c): this one's, and the earlier ones'. */
+  labels?: Record<string, MarkLabel[]>;
 }) {
   const router = useRouter();
   const report = useMemo(() => buildReport(check.captures), [check.captures]);
@@ -181,6 +187,12 @@ export function PostureReport({
         <p className="font-medium">
           {when.toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
         </p>
+        {labels[check.id]?.map((l) => (
+          // What it marked in a workout program (slice 3c).
+          <p key={l.full} className="flex items-center gap-1.5 text-sm font-medium text-module-accent">
+            <Flag className="size-3.5 shrink-0" aria-hidden /> {l.full}
+          </p>
+        ))}
         <p className="text-sm text-muted-foreground">
           {report.views.length === 4 ? "All four views" : `${report.views.length} of 4 views`}, {report.rounds}{" "}
           {report.rounds === 1 ? "round" : "rounds"}. Vertical from {VERTICAL_WORDS[report.vertical]}
@@ -239,6 +251,7 @@ export function PostureReport({
               {earlier.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.id === first?.id ? "Your first check, " : c.id === before?.id ? "The check before, " : ""}
+                  {labels[c.id] ? `${labels[c.id].map((l) => l.label).join(" · ")}, ` : ""}
                   {new Date(c.takenAt).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                 </option>
               ))}

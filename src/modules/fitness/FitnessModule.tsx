@@ -16,14 +16,18 @@ import { latestFollowed, programSessions } from "./session-ops";
 import { DiscardImportButton } from "./components/discard-import-button";
 import { TodayCard } from "./components/today-card";
 import { PostureCard } from "./posture/components/posture-card";
+import { postureCheckDays } from "./posture/check-ops";
+import { askWords, postureMarks, type MarkCheck } from "./posture/core/marks";
 
 /**
  * WORKOUTS — the tool's front page (docs/help/fitness/overview.md).
  *
  * Today's workout on the program last followed (F2c: the day so far, what is
- * left, one tap to do it), the way into the posture check (docs/modules/
- * posture.md), the programs the person has, and any draft still waiting for
- * them: one being drafted, one ready to review, one that failed.
+ * left, one tap to do it; and a posture check when one is due to mark the
+ * program's start or a phase's end, posture slice 3c), the way into the
+ * posture check (docs/modules/posture.md), the programs the person has, and
+ * any draft still waiting for them: one being drafted, one ready to review,
+ * one that failed.
  * A personal tool: this
  * only ever renders inside a personal space, behind `requirePersonalSpace`
  * and a module gate that refuses it anywhere else (ADR 0111).
@@ -34,10 +38,11 @@ export async function FitnessModule({ ctx }: { ctx: TenantContext }) {
   const [programs, imports, followed] = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [programs, imports, latest] = await Promise.all([
+      const [programs, imports, latest, postureChecks] = await Promise.all([
         listPrograms(tx, ctx.tenant.id),
         listOpenImports(tx, ctx.tenant.id),
         latestFollowed(tx, ctx.tenant.id),
+        postureCheckDays(tx, ctx.tenant.id),
       ]);
       // Today is for the program of the last workout, on that workout's phase:
       // one still in the list (a put-away program has no today).
@@ -46,7 +51,7 @@ export async function FitnessModule({ ctx }: { ctx: TenantContext }) {
       if (!program || program.phases.length === 0) return [programs, imports, null] as const;
       const at = Math.max(0, program.phases.findIndex((phase) => phase.id === latest?.phaseId));
       const sessions = await programSessions(tx, ctx.tenant.id, program.id);
-      return [programs, imports, { program, phaseIndex: at, sessions }] as const;
+      return [programs, imports, { program, phaseIndex: at, sessions, postureChecks }] as const;
     },
     { role: ctx.role },
   );
@@ -171,15 +176,17 @@ function FollowedToday({
   today,
   timeZone,
 }: {
-  followed: { program: LoadedProgram; phaseIndex: number; sessions: DaySession[] };
+  followed: { program: LoadedProgram; phaseIndex: number; sessions: DaySession[]; postureChecks: MarkCheck[] };
   today: string;
   timeZone: string;
 }) {
-  const { program, phaseIndex, sessions } = followed;
+  const { program, phaseIndex, sessions, postureChecks } = followed;
   const phase = program.phases[phaseIndex];
   const next = program.phases[phaseIndex + 1] ?? null;
   const days = programDays(program.phases.map((p) => ({ items: dayItemsOf(p) })), sessions);
   const gate = phaseGate(phase.minDoneDays, days.perPhase[phaseIndex].done.length);
+  // A posture check at the start and at each phase's end, when one is due (posture slice 3c).
+  const { due } = postureMarks({ program, doneDays: days.perPhase.map((p) => p.done), sessions, checks: postureChecks, today });
   return (
     <TodayCard
       programId={program.id}
@@ -194,6 +201,7 @@ function FollowedToday({
       gate={gate}
       week={{ count: weekCount(days.done, today), min: program.sessionsPerWeekMin, max: program.sessionsPerWeekMax }}
       nextOpen={gate.open && gate.needed !== null && next && next.items.length > 0 ? { number: phaseIndex + 2, name: next.name } : null}
+      posture={due ? askWords(due).ask : null}
     />
   );
 }

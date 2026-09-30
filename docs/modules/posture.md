@@ -17,6 +17,66 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — Slice 3c: a check at a program's start and each phase's end (`claude/posture-3c`)
+
+The founder's "build 3c", the same day 3b went up. He was offered it as "a
+reminder to redo the check when your workout program moves to its next
+phase". The rules below are my defaults, to be tuned from his use. No mockup
+this time: he asked for it built, and the screens are lines in boxes the
+program page already has.
+
+- **The marks** (`core/marks.ts`, pure): a program's START, the day of its
+  first workout, and the END of each phase, the day its gate opened (its
+  minimum of done days, F3) or the day the person moved on to a later phase if
+  that came first. A check marks the start from `START_LEAD_DAYS` (7) before
+  the first workout to `GRACE_DAYS` (6) after; a phase's end from
+  `END_LEAD_DAYS` (3) before it, open while the person has not moved on (and
+  at the last phase), then for a week. Checks and marks pair up NEAREST FIRST,
+  a tie going to the mark the check came after, a check marking one at most.
+  A repeat never marks anything. Nothing stored: worked out from the sessions
+  and the checks on every read, as F3's progress and ADR 0120's results are.
+- **Asked for**: the latest mark while it is open and unmet, and only of a
+  person who has taken a posture check before (it needs stickers, a plumb line
+  and a tripod). A mark whose days pass unmet is left behind without a word.
+  On the program page: in the next phase's gate box (`NextPhaseOpen`'s new
+  `posture` slot, after F4b's tests nudge), in a new last-phase box
+  (`LastPhaseDone`, shown only with a mark to carry), or above Start (the
+  start, or the end of the phase just left). The two boxes say which check
+  marked their phase once one has, with its report. On the Workouts home, a
+  line on the Today card; on the posture page, `A check now marks …` beside
+  Start.
+- **Labels**: the posture list, the report's header and its `Compared with`
+  options, and a new `mark` column in the CSV say what a check marked
+  (`markLabels`: short for a list, full with the program named once for the
+  header and the CSV). `marks-ops.ts` works them out over every program with a
+  workout; `postureCheckDays` is the light read (no numbers) the program page
+  and the Workouts home use.
+- No migration, table or policy.
+
+Tests: `tests/posture-marks.test.ts` (13: the start asked for before the first
+workout and marked a week either side of it, left behind after; a phase's end
+opening on its gate day or on moving on early, marked from three days before,
+asked for a week after moving on, open at the last phase; no end for a phase
+never done or with no gate; repeats, one mark per check, nearest first; only
+the latest asked for, and never of someone without a check; labels),
+`posture-history` (the CSV's `mark` column), `posture-ops` (a real program,
+two workouts and three checks: the start and a phase's end labelled, the
+repeat not, the due mark read back through `marksOfPrograms`).
+
+Driven in the browser pane on dev, on the founder's program there (its phases
+touched between Sep 27 and 29), with four made-up checks and phase 2's minimum
+lowered to 1 for a while, all put back after: the Today card's line, the ask
+above Start, the gate box's ask and its "Posture checked today" line, the
+posture page's line and labels, the report's header and options, the CSV, and
+the gate box at 375 px. The last-phase box, which no dev program reaches, was
+looked at on a throwaway page deleted after. The drive found three things:
+- The first pairing, first check in each mark's window, labelled a check
+  taken after phase 2 as the program's START on that compressed program, and
+  would do the same with one-week phases. Nearest first fixes it.
+- The start's full label named the program twice
+  (`Start of X (X)` in the CSV).
+- `{icon:flag}` was not in the guides' icon registry.
+
 ### 2026-09-30 — Slice 3b: a slipped sticker, and the person's own noise (`claude/posture-3b`)
 
 The founder's calls from a mockup, the same day
@@ -445,7 +505,7 @@ posture's actions, always with `toCheckDoc`'s output, never near a photo.
 | 2 | **The standing check** | Built (the build log): the coach leads four views, twice; each view is captured when framed, facing the right way and still; the report shows every measure above with its noise, the figure drawn from the points; kept photos (his choice) stored on the phone behind a tap. Done when the founder has run it on his S25 |
 | 3a | **History** | Built (the build log): checks saved to the account as numbers and sticker places only; compared with any earlier check; a change called only beyond the noise (the person's own when bigger); numbers exported |
 | 3b | **Placement and own noise** | Built (the build log): a sticker that moved 3 cm or more since last time stops the check by name; the report lists stickers against the compared check; repeat checks set the person's own noise after three (his calls, ADR 0121) |
-| 3c | **Retake at each phase** | A nudge to take a check when a workout program moves to its next phase |
+| 3c | **Retake at each phase** | Built (the build log): a check asked for at a workout program's start and at each phase's end, on the program page, the Workouts home and the posture page, of a person who has taken one before; the checks that marked one labelled in the list, the report and the CSV |
 | 4 | **Movement** | Paced double-leg and single-leg squats, single-leg stance and arms overhead: a film held in memory, read after the set at the model's pace, never kept |
 | 5 | **During a workout** | Live cues in workout mode through the seams it left: the stage, `coachSay({ key: "posture" })`, the enrollment's side |
 | 6 | **The Android app** | Built with slice 1 (app 1.0.8): CAMERA and VIBRATE, `@capacitor/privacy-screen` while the camera is on, keep-awake. Done when watched on the S25 |
@@ -465,6 +525,8 @@ are stored: `core/history.ts` works them out on every read. Since 3b,
 `repeat_of` (0436): the check a repeat repeats, a composite key to the same
 space's checks with `ON DELETE SET NULL ("repeat_of")` (hand-edited, as every
 composite SET NULL here), and a CHECK that it is not the check itself.
+Slice 3c stores nothing: a program's posture marks, and which check marked
+each, are worked out from its sessions and the checks (`core/marks.ts`).
 
 The phone keeps:
 
@@ -495,12 +557,21 @@ check and its report opens offline.
   `report.ts` (`captureFrom`, `buildReport`, `noiseWords`, `reportText`,
   `detailsText`, `linesOf`), `placement.ts` (`placesOf`, `shiftsBetween`,
   `movedFor`, `SLIPPED_MM`, `LISTED_MM`), `history.ts` (`summarize`, `noiseFor`,
-  `compare`, `changeWords`, `trends`, `historyCsv`), `check-doc.ts` (the
+  `compare`, `changeWords`, `trends`, `historyCsv`), `marks.ts`
+  (`postureMarks`, `markLabels`, `askWords`, `dueWords`: a program's start and
+  phase ends, 3c), `check-doc.ts` (the
   strict document a phone sends, `toCheckDoc`), `skeleton.ts` (the figure's
   bones), `lines.ts` (every spoken line, `CHECK_LINES` for the check).
 - `src/modules/fitness/posture/actions.ts` (`savePostureCheckAction`,
   `deletePostureCheckAction`) and `check-ops.ts` (server-only: save, list,
-  get, delete, all by tenant).
+  get, delete, all by tenant; `postureCheckDays`, the days without the
+  numbers). `marks-ops.ts` (server-only, 3c): `marksOfPrograms`, every
+  program with a workout's marks, and the one due on the program last
+  followed.
+- Workouts' side of 3c: `components/program-view.tsx` (where each mark goes),
+  `phase-progress.tsx` (`NextPhaseOpen`'s `posture` slot, `LastPhaseDone`),
+  `today-card.tsx` and `FitnessModule.tsx` (the Today card's line), with
+  `posture/components/posture-mark.tsx` (a mark asked for, or its check).
 - `src/modules/fitness/posture/worker/` — `posture.worker.ts`, `protocol.ts`
   (the messages; numbers only) and `photo-writer.ts` (a kept photo, straight
   into IndexedDB).
@@ -614,6 +685,19 @@ check and its report opens offline.
 - **The fix-a-sticker wait needs movement first.** Re-reading the view at once
   would catch the person still standing as they were, before the coach's lines
   end; it waits for the wrists or hips to move, 30 s at most.
+- **A program's posture marks are worked out, never stored** (3c), like its
+  progress (F3: no stored current phase) and a check's results (ADR 0120). An
+  edited program, a deleted check or a late-sent one moves them at once, and
+  there is nothing to keep in step.
+- **Checks and marks pair up nearest first.** Windows overlap when phases are
+  short (the start's week and a one-week phase's end); taking the first check
+  in each window in order gave the start a check taken just before the phase's
+  end. A tie goes to the mark the check came after: a check marks what has
+  happened.
+- **Only the latest mark is asked for, and only of someone who has taken a
+  check.** An older mark whose days passed is left behind rather than nagged
+  about, and a person who never set the check up (stickers, cord, tripod) is
+  never asked: the Posture check card is their way in.
 
 ## Open items
 
@@ -654,5 +738,9 @@ check and its report opens offline.
   from his checks. The notes and the report carry every distance to tune them.
 - **Three repeat pairs is a rough figure** (ADR 0121, his call "higher or
   lower"): the report names the count, and each further repeat steadies it.
-- **Slice 3c**: a nudge to take a check when a workout program moves to its
-  next phase.
+- **The marks' days are defaults, not his** (3c): `START_LEAD_DAYS` 7,
+  `END_LEAD_DAYS` 3 and `GRACE_DAYS` 6 were set without a real phase end
+  behind them. His first gate on production is the test: whether the ask
+  shows where he looks, and whether a week after moving on is long enough.
+- **A long phase name makes a long ask** ("to mark the end of Phase 2: Weeks
+  3-4"): the asks read the program's own names.

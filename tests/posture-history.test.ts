@@ -112,9 +112,9 @@ describe("a repeat check", () => {
 
   it("names the check it repeats in the spreadsheet", () => {
     const rows = historyCsv(history).trimEnd().split("\r\n");
-    expect(rows[0].endsWith(",repeat_of")).toBe(true);
-    expect(rows[3].endsWith(",2026-10-06T07:00:00Z")).toBe(true);
-    expect(rows[2].endsWith(",")).toBe(true);
+    expect(rows[0].endsWith(",repeat_of,mark")).toBe(true);
+    expect(rows[3].endsWith(",2026-10-06T07:00:00Z,")).toBe(true);
+    expect(rows[2].endsWith(",,")).toBe(true);
   });
 });
 
@@ -192,9 +192,16 @@ describe("the numbers as a spreadsheet", () => {
       check("a", "2026-10-01T07:00:00Z", { "back-hip-level": { value: 12.4, unit: "mm", rounds: [12, 13], words: 'Left dimple lower by 12 mm, "about"' } }),
     ]);
     const lines = csv.trimEnd().split("\r\n");
-    expect(lines[0]).toBe("taken_at,day,measure,value,unit,round_1,round_2,tier,words,repeat_of");
-    expect(lines[1]).toBe('2026-10-01T07:00:00Z,2026-10-01,Low back dimples,12,mm,12,13,trend only,"Left dimple lower by 12 mm, ""about""",');
-    expect(lines[2]).toBe("2026-10-15T07:00:00Z,2026-10-15,Shoulder level,1.23,degrees,1.2,1.27,reliable,Right shoulder lower by 1.2°,");
+    expect(lines[0]).toBe("taken_at,day,measure,value,unit,round_1,round_2,tier,words,repeat_of,mark");
+    expect(lines[1]).toBe('2026-10-01T07:00:00Z,2026-10-01,Low back dimples,12,mm,12,13,trend only,"Left dimple lower by 12 mm, ""about""",,');
+    expect(lines[2]).toBe("2026-10-15T07:00:00Z,2026-10-15,Shoulder level,1.23,degrees,1.2,1.27,reliable,Right shoulder lower by 1.2°,,");
+  });
+
+  it("says what a check marked in a workout program (slice 3c)", () => {
+    const csv = historyCsv([check("a", "2026-10-01T07:00:00Z", { "shoulder-level": { value: 1.2 } })], {
+      a: [{ label: "End of Phase 1", full: "End of Phase 1, in Starter Mobility" }],
+    });
+    expect(csv.trimEnd().split("\r\n")[1].endsWith(',,"End of Phase 1, in Starter Mobility"')).toBe(true);
   });
 });
 

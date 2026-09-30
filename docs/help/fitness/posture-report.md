@@ -15,11 +15,11 @@ The report describes how you stood during that check. It is not a medical assess
   - `Sending this check's numbers to your account.`, with a spinner, while it goes. The page reads your account again when it gets there;
   - `This check is on this phone only for now. It goes to your account when the phone is online.` when there is no connection. It goes by itself later;
   - or your account's reason, if it refused the check.
-- **When the check was**, for example `Wednesday, Sep 30, 11:43 AM`. Under it, how many views it read (`All four views`, or `2 of 4 views`), how many rounds, and where true vertical came from: `Vertical from the plumb line, millimeters from its tape marks.` is the best there is.
+- **When the check was**, for example `Wednesday, Sep 30, 11:43 AM`. When it marked your workout program's start or a phase's end, a line with {icon:flag} says which, for example `End of Phase 1: Weeks 1-2, in Starter Mobility` or `Start of Starter Mobility`. See [Following a program](program.md#posture-checks-along-the-way). Under it, how many views it read (`All four views`, or `2 of 4 views`), how many rounds, and where true vertical came from: `Vertical from the plumb line, millimeters from its tape marks.` is the best there is.
 - **A yellow box** when the plumb line was not used: `Without the plumb line, the angles against level can be off by about a degree, the size of what is being measured. Hang it where the camera sees it next time.`
 - **On a repeat check**, a line saying which check it repeats: `A repeat of your check from 2:23 PM, with the stickers put back on. The differences between the two are your own measuring noise.`
 - **`Repeat this check`**, a card, on a check taken today that is not itself a repeat and has not been repeated yet. It says what a repeat is: take every sticker off, put them back on, and check again today; the difference between the two is your own measuring noise, and after three repeats your own figures replace the published ones, higher or lower. Under it, `Repeats so far: 1 of 3.`, or once you have three, `Your own figures are in use, from 3 repeats. Another one makes them steadier.` {button:Start the repeat|outline} opens the check as a repeat of this one. See [Doing a posture check](posture-check.md).
-- **`Compared with`**, a list of your checks taken before this one (repeats are left out). It starts on the check just before, marked `The check before`, and your very first is marked `Your first check`. A repeat starts on the check it repeats. Choose `No comparison` to see this check on its own. The line under it says `A change is called real only when it is bigger than the measure's noise: the published figure, your own from three repeat checks, or your rounds when they vary more.`
+- **`Compared with`**, a list of your checks taken before this one (repeats are left out). It starts on the check just before, marked `The check before`, and your very first is marked `Your first check`. A check that marked your workout program's start or a phase's end says so too, for example `Start of Starter Mobility, Sun, Sep 27, 11:00 AM`, so comparing one phase's end with the start is one choice. A repeat starts on the check it repeats. Choose `No comparison` to see this check on its own. The line under it says `A change is called real only when it is bigger than the measure's noise: the published figure, your own from three repeat checks, or your rounds when they vary more.`
   - **`Stickers against`** the compared check's day, for example `Stickers against Wed, Sep 30`: each sticker that sits 2 cm or more from its place on that check, with how far and which way, for example `Left shoulder tip` `3.5 cm lower`. Under the list, `The other 7 are within 2 cm of where they were.`, or `Every sticker is within 2 cm of where it was.` The small print says it is read against the pose model's points, so only a slip of 2 to 3 cm or more shows.
   - On your first check there is nothing to compare with, and the report says `This is your first check. Your next checks are compared with it, a measure at a time.`
 - **The views**, a drawing of each view the check read, from the first round (or the second, when the first was skipped):
@@ -83,6 +83,13 @@ The report describes how you stood during that check. It is not a medical assess
 4. A label in the measure's own words, like `Left side dropped 4.6° against the right`, is a change bigger than measuring noise.
 
 Put the stickers on the same way each time, and stand in the same outline with the phone at the same height and distance. Most of the noise is where a sticker went.
+
+## How to see what a phase of your program changed
+
+1. Take the check your program asks for at the end of the phase. See [Following a program](program.md#posture-checks-along-the-way).
+2. Open its report. The line under the date says `End of Phase 1: Weeks 1-2, in Starter Mobility`.
+3. Under `Compared with`, choose the check that marked the start (`Start of Starter Mobility`) to see the whole way so far, or the end of the phase before to see this phase alone.
+4. Read each measure's label, as above.
 
 ## How to learn your own noise
 

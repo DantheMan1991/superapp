@@ -13,6 +13,20 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — A posture check at a program's start and each phase's end (`claude/posture-3c`)
+
+The program page asks for a posture check, for a person who has taken one
+before: in the next phase's gate box (`NextPhaseOpen` gains a `posture` slot,
+beside F4b's tests nudge), in a new box for a last phase whose days are in
+(`LastPhaseDone`, shown only with a mark to carry), or above Start (the
+program's start, or the end of the phase just left). The Today card on the
+Workouts home gains a line when one is due. The gate boxes say which check
+marked their phase once one has. The marks are worked out from the sessions
+and the checks, like F3's progress: no workout table or column changed. All
+of it is in [posture.md](posture.md) (slice 3c); the guides are
+[program.md](../help/fitness/program.md#posture-checks-along-the-way) and
+[overview.md](../help/fitness/overview.md).
+
 ### 2026-09-30 — Posture repeat checks and slipped stickers (`claude/posture-3b`)
 
 `fitness_posture_checks` gains `repeat_of` (0436): a posture check can repeat

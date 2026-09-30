@@ -37,6 +37,7 @@ import {
   FileText,
   FileUp,
   Filter,
+  Flag,
   PiggyBank,
   Play,
   FolderInput,
@@ -156,6 +157,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "file-text": FileText,
   "file-up": FileUp,
   filter: Filter,
+  // What a posture check marks in a workout program (posture.md, slice 3c).
+  flag: Flag,
   "piggy-bank": PiggyBank,
   globe: Globe,
   "grip-vertical": GripVertical,

@@ -18,12 +18,14 @@ import {
 } from "../core/progress";
 import type { ReminderView } from "../core/reminders";
 import { oneSideLine, onlySideOf, ruleWords, type Lean } from "../core/side";
+import { postureMarks, type MarkCheck } from "../posture/core/marks";
+import { PostureMark } from "../posture/components/posture-mark";
 import { dayItemsOf, levelClip, type LoadedItem, type LoadedProgram } from "../program-ops";
 import type { LevelTry } from "../level-ops";
 import type { LastSession } from "../session-ops";
 import type { SavedSide } from "../side-ops";
 import { LevelControl } from "./level-control";
-import { GateNotOpen, NextPhaseOpen, PhaseProgress } from "./phase-progress";
+import { GateNotOpen, LastPhaseDone, NextPhaseOpen, PhaseProgress } from "./phase-progress";
 import { ReminderCard } from "./reminder-card";
 import { SideCard } from "./side-card";
 import { StartSessionButton } from "./start-session-button";
@@ -55,6 +57,12 @@ import { VideoPlayer } from "./video-player";
  * YOUR LEVEL (F4c): an exercise with levels says the person's, with Move up
  * and Back a level, a "Ready for" line when its last go made the mark, and
  * its video playing that level's part.
+ *
+ * POSTURE MARKS (docs/modules/posture.md, slice 3c): a posture check at the
+ * program's start and at the end of each phase. The one due is asked for in
+ * the next phase's gate box, in the last phase's box once its days are in,
+ * or above Start (the start, and the phase just left); the gate box and the
+ * last phase's box say which check marked their phase once one has.
  */
 export function ProgramView({
   program,
@@ -68,6 +76,7 @@ export function ProgramView({
   side,
   levels,
   tries,
+  postureChecks,
 }: {
   program: LoadedProgram;
   phaseIndex: number;
@@ -87,6 +96,8 @@ export function ProgramView({
   levels: Record<string, number>;
   /** Each exercise with levels' latest go (F4c), by item id. */
   tries: Map<string, LevelTry>;
+  /** Every posture check's day, for the program's posture marks (posture slice 3c). */
+  postureChecks: readonly MarkCheck[];
 }) {
   const lean = side?.side ?? null;
   const effortTop = program.effortMin != null ? (program.effortMax ?? program.effortMin) : null;
@@ -123,6 +134,21 @@ export function ProgramView({
   const previous = at > 0 ? program.phases[at - 1] : null;
   const previousGate = previous ? phaseGate(previous.minDoneDays, days.perPhase[at - 1].done.length) : null;
   const next = program.phases[at + 1] ?? null;
+  // A posture check at the start and at each phase's end (posture slice 3c).
+  const posture = postureMarks({
+    program,
+    doneDays: days.perPhase.map((p) => p.done),
+    sessions,
+    checks: postureChecks,
+    today,
+  });
+  const due = posture.due;
+  const endOfThis = posture.marks.find((m) => m.kind === "end" && m.phaseIndex === at) ?? null;
+  // This phase's end, in its gate box or its last-phase box: asked for while due, then the check that marked it.
+  const thisEnd = due && due.kind === "end" && due.phaseIndex === at ? due : endOfThis?.met ? endOfThis : null;
+  // Above Start: the program's start, or the end of the phase just left.
+  const beforeStart =
+    due && (due.kind === "start" || (due.kind === "end" && due.phaseIndex === at - 1)) ? due : null;
   const zone =
     program.effortMin != null ? { min: program.effortMin, max: program.effortMax ?? program.effortMin } : null;
   const facts = [
@@ -220,7 +246,13 @@ export function ProgramView({
               {...newIn(phase.items, next.items)}
               oneSided={next.items.filter((item) => item.perSide && item.sideRule !== "both").length}
               testsHref={testsHref}
+              posture={thisEnd && <PostureMark mark={thisEnd} today={today} />}
             />
+          )}
+          {gate && gate.open && gate.needed !== null && !next && thisEnd && (
+            <LastPhaseDone name={phase.name} gate={gate}>
+              <PostureMark mark={thisEnd} today={today} />
+            </LastPhaseDone>
           )}
           {gate && sessions.length > 0 && (
             <PhaseProgress
@@ -241,6 +273,7 @@ export function ProgramView({
           )}
           {phase.items.length > 0 && (
             <div className="space-y-2">
+              {beforeStart && <PostureMark mark={beforeStart} today={today} />}
               <StartSessionButton
                 programId={program.id}
                 phaseIds={program.phases.map((p) => p.id)}

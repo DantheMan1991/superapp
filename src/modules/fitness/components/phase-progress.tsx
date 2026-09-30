@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeftRight, ArrowRight, Check, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,9 @@ function FeelChart({ feel }: { feel: FeelSummary }) {
  * THE GATE, OPEN: the next phase, what is new in it with the first new
  * exercise's video, and the button to move on. The app never moves the
  * person on by itself. When the next phase does exercises on one side and the
- * program's tests are untaken (F4b), it says so and points to them first.
+ * program's tests are untaken (F4b), it says so and points to them first; and
+ * a posture check to mark the end of this phase is asked for here (posture
+ * slice 3c).
  */
 export function NextPhaseOpen({
   name,
@@ -194,6 +197,7 @@ export function NextPhaseOpen({
   video,
   oneSided = 0,
   testsHref = null,
+  posture = null,
 }: {
   name: string;
   href: string;
@@ -204,6 +208,8 @@ export function NextPhaseOpen({
   oneSided?: number;
   /** The program's tests, while they are untaken; null once they are, or when it has none. */
   testsHref?: string | null;
+  /** This phase's posture mark, asked for or met (posture slice 3c). */
+  posture?: ReactNode;
 }) {
   return (
     <div className="space-y-3 rounded-2xl border border-module-accent/50 bg-card p-4">
@@ -220,6 +226,7 @@ export function NextPhaseOpen({
           </Button>
         </div>
       )}
+      {posture}
       {video && (
         <div className="overflow-hidden rounded-xl">
           <VideoPlayer
@@ -237,6 +244,23 @@ export function NextPhaseOpen({
         </Link>
       </Button>
       <p className="text-xs text-muted-foreground">Or keep going here. It never moves you on by itself.</p>
+    </div>
+  );
+}
+
+/**
+ * THE LAST PHASE, ITS DAYS IN (posture slice 3c): there is no next phase to
+ * open, so this says the program's days are done and carries its posture
+ * mark. Shown only with a mark to carry.
+ */
+export function LastPhaseDone({ name, gate, children }: { name: string; gate: PhaseGate; children: ReactNode }) {
+  return (
+    <div className="space-y-3 rounded-2xl border border-module-accent/50 bg-card p-4">
+      <p className="font-medium">{`${name} is complete`}</p>
+      <p className="text-sm text-muted-foreground">
+        {`${doneDaysWords(gate)} in the program's last phase. Keep going with it as long as you like.`}
+      </p>
+      {children}
     </div>
   );
 }

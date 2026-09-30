@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { ScanLine, ShieldCheck } from "lucide-react";
+import { Flag, ScanLine, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { localDayIn } from "@/modules/fitness/core/day";
 import { listPostureChecks } from "@/modules/fitness/posture/check-ops";
+import { dueWords, markLabels } from "@/modules/fitness/posture/core/marks";
+import { marksOfPrograms } from "@/modules/fitness/posture/marks-ops";
 import { summarize } from "@/modules/fitness/posture/core/history";
 import { STICKERS, type Sticker } from "@/modules/fitness/posture/core/sticker-map";
 import { CheckHistory } from "@/modules/fitness/posture/components/check-history";
@@ -21,11 +24,22 @@ export const dynamic = "force-dynamic";
  * any this phone has not sent yet), then what the check needs (a room, a
  * plumb line, stickers), where each sticker goes and how to find the bone
  * under it, and the way into checking the setup.
+ *
+ * With a workout program (slice 3c): what a check now would mark, the
+ * program's start or a phase's end, and in the list, which checks marked one.
  */
 export default async function PosturePage() {
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "fitness");
-  const checks = await withTenant(ctx.tenant.id, (tx) => listPostureChecks(tx, ctx.tenant.id), { role: ctx.role });
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  const { checks, posture } = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const checks = await listPostureChecks(tx, ctx.tenant.id);
+      return { checks, posture: await marksOfPrograms(tx, ctx.tenant.id, checks, today) };
+    },
+    { role: ctx.role },
+  );
   // Worked out here from the numbers, every time: only the results travel to the page.
   const account = checks.map(summarize);
 
@@ -59,6 +73,12 @@ export default async function PosturePage() {
           About three minutes: the voice turns you to all four sides, twice, and the report opens when it is done. It
           describes how you stood that day, for fitness and body awareness, not as a medical assessment.
         </p>
+        {posture.due && (
+          <p className="flex items-start gap-2 text-sm">
+            <Flag className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+            {dueWords(posture.due)}
+          </p>
+        )}
         <Button asChild>
           <Link href="/personal/m/fitness/posture/check">Start a posture check</Link>
         </Button>
@@ -73,6 +93,7 @@ export default async function PosturePage() {
         <CheckHistory
           owner={ctx.tenant.id}
           account={account}
+          labels={markLabels(posture.marks)}
           reportHref="/personal/m/fitness/posture/checks"
           exportHref="/personal/m/fitness/posture/export"
         />

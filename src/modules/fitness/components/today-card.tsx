@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Check, Play } from "lucide-react";
+import { ArrowRight, Check, Play, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { dayOf, hourIn, partOfDay, type DayItem, type DaySession } from "../core/day";
 import { countOf } from "../core/program";
 import { doneDaysWords, type PhaseGate } from "../core/progress";
+import { POSTURE_CHECK_HREF } from "../posture/components/posture-mark";
 import { openSessionFor } from "./workout/session-store";
 import { useSessionSync, useStoredSessions } from "./workout/use-session-sync";
 
@@ -23,6 +24,9 @@ import { useSessionSync, useStoredSessions } from "./workout/use-session-sync";
  * AND THE PHASE (F3): its done days toward the gate, this week against the
  * program's sessions a week, and, once the gate opens, the next phase with a
  * link to move on. Worked out on the server from every session.
+ *
+ * AND A POSTURE CHECK (posture slice 3c), when one is due to mark the
+ * program's start or a phase's end, with the way into it.
  */
 export function TodayCard({
   programId,
@@ -37,6 +41,7 @@ export function TodayCard({
   gate,
   week,
   nextOpen,
+  posture,
 }: {
   programId: string;
   programName: string;
@@ -57,6 +62,8 @@ export function TodayCard({
   week: { count: number; min: number | null; max: number | null };
   /** The next phase, once this one's gate has opened. */
   nextOpen: { number: number; name: string } | null;
+  /** What to ask when a posture check is due (posture slice 3c); null when none is. */
+  posture: string | null;
 }) {
   const sessions = useStoredSessions();
   useSessionSync(sessions);
@@ -105,6 +112,17 @@ export function TodayCard({
             </Link>
           </Button>
         </div>
+      )}
+      {posture && (
+        <p className="flex items-start gap-2 text-sm">
+          <ScanLine className="mt-0.5 size-4 shrink-0 text-module-accent" aria-hidden />
+          <span>
+            {`${posture} `}
+            <Link href={POSTURE_CHECK_HREF} className="font-medium text-module-accent underline-offset-4 hover:underline">
+              Start a posture check
+            </Link>
+          </span>
+        </p>
       )}
       {day.parts.length === 0 ? (
         <p className="text-sm text-muted-foreground">

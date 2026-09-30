@@ -642,6 +642,66 @@ export const fitnessReminders = pgTable(
   ],
 );
 
+/**
+ * One view held still in a posture check, as the phone measured it: where each
+ * sticker and each of the pose model's 33 points sat (medians over the hold,
+ * frame pixels), true up in the same pixels and where it came from, and the
+ * scale. The shape of `ViewCapture` in the posture module
+ * (`src/modules/fitness/posture/core/measures.ts`), which a test holds to this.
+ */
+export interface FitnessPostureCapture {
+  view: "front" | "right" | "back" | "left";
+  round: number;
+  up: { x: number; y: number };
+  upFrom: "plumb" | "sensor" | "none";
+  pxPerMetre: number | null;
+  width: number;
+  height: number;
+  stickers: Record<string, { x: number; y: number }>;
+  pose: { x: number; y: number; visibility: number }[] | null;
+  frames: number;
+  stillPx: number | null;
+}
+
+/**
+ * A POSTURE CHECK (docs/modules/posture.md, slice 3; ADR 0120): the views the
+ * phone held still, as numbers, and what happened along the way. Never a
+ * picture: those stay on the phone that took them, and only if the person
+ * chose to keep them (ADR 0118).
+ *
+ * Kept as the captures, not as results: every measure, comparison and noise
+ * figure is worked out from these each time they are read, so a fix to the
+ * arithmetic reaches every check already taken. The id is the phone's, made
+ * when the check started, so sending it again is the same row, and a photo the
+ * phone kept still knows its check.
+ */
+export const fitnessPostureChecks = pgTable(
+  "fitness_posture_checks",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** When the check started, as the phone said it (bounded a little into the future). */
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
+    /** The person's own calendar day, as the phone said it. */
+    localDay: date("local_day").notNull(),
+    captures: jsonb("captures").$type<FitnessPostureCapture[]>().notNull(),
+    notes: jsonb("notes").$type<string[]>().notNull().default([]),
+    /** The shape of `captures`; 1 is slice 2's. */
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("fitness_posture_checks_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("fitness_posture_checks_tenant_taken_idx").on(t.tenantId, t.takenAt),
+    check("fitness_posture_checks_captures_array", sql`jsonb_typeof(${t.captures}) = 'array'`),
+    check("fitness_posture_checks_notes_array", sql`jsonb_typeof(${t.notes}) = 'array'`),
+    check("fitness_posture_checks_version_known", sql`${t.version} = 1`),
+  ],
+);
+
 export type FitnessProgram = typeof fitnessPrograms.$inferSelect;
 export type FitnessPhase = typeof fitnessPhases.$inferSelect;
 export type FitnessExercise = typeof fitnessExercises.$inferSelect;
@@ -652,3 +712,4 @@ export type FitnessSession = typeof fitnessSessions.$inferSelect;
 export type FitnessSessionExercise = typeof fitnessSessionExercises.$inferSelect;
 export type FitnessSet = typeof fitnessSets.$inferSelect;
 export type FitnessReminder = typeof fitnessReminders.$inferSelect;
+export type FitnessPostureCheck = typeof fitnessPostureChecks.$inferSelect;

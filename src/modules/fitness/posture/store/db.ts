@@ -39,6 +39,13 @@ export type StoredCheck = {
   /** What happened on the way, in words: a plumb line not found, a view skipped. */
   notes: string[];
   version: 1;
+  /**
+   * When the account said it had the check's numbers (slice 3); missing or
+   * null until then. The photos are never sent.
+   */
+  sentAt?: string | null;
+  /** The account's last refusal, when it answered with one rather than not at all. */
+  refused?: string | null;
 };
 
 export type StoredPhoto = {

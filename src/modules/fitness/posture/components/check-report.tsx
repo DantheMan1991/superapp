@@ -33,6 +33,7 @@ export function CheckReport({
   const router = useRouter();
   // undefined while this phone's storage is read; null when it does not have the check.
   const [phone, setPhone] = useState<StoredCheck | null | undefined>(undefined);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,7 +44,12 @@ export function CheckReport({
         setPhone(c);
         // Here but not in the account yet: send it, and read the account again once it has it.
         if (c && !c.sentAt && !fromAccount) {
-          void sendPendingChecks(owner).then((r) => live && r === "sent" && router.refresh());
+          setSending(true);
+          void sendPendingChecks(owner).then((r) => {
+            if (!live) return;
+            setSending(false);
+            if (r === "sent") router.refresh();
+          });
         }
       })
       .catch((e: unknown) => {
@@ -97,8 +103,11 @@ export function CheckReport({
   }
   return (
     <div className="space-y-4">
-      <p className="rounded-xl bg-warning/15 p-3 text-sm">
-        {phone.refused ?? "This check is on this phone only for now. It goes to your account when the phone is online."}
+      <p className={sending ? "flex items-center gap-2 rounded-xl bg-muted p-3 text-sm" : "rounded-xl bg-warning/15 p-3 text-sm"}>
+        {sending && <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />}
+        {sending
+          ? "Sending this check's numbers to your account."
+          : (phone.refused ?? "This check is on this phone only for now. It goes to your account when the phone is online.")}
       </p>
       <PostureReport
         check={{ id: phone.id, at: phone.at, captures: phone.captures, notes: phone.notes, keepPhotos: phone.keepPhotos }}

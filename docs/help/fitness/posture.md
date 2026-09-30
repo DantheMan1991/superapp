@@ -1,22 +1,24 @@
 # The posture check
 
-> Measure how you stand with your phone's camera and small stickers on your bones. This page starts a check, lists the checks kept on this phone, says what you need, how to set up the room, and where each sticker goes, and it is where you check your setup.
+> Measure how you stand with your phone's camera and small stickers on your bones. This page starts a check, shows each measure across your checks and lists them, says what you need, how to set up the room, and where each sticker goes, and it is where you check your setup.
 > **Route:** /personal/m/fitness/posture
 > **Order:** 50
 
 Open **Workouts** {icon:dumbbell} and, on the `Posture check` card, click {button:Open|outline}. To measure yourself, click {button:Start a posture check|primary}. The first time, get ready with the lists below and click {button:Check your setup|outline} before your first check.
 
-Nothing the camera sees leaves your phone. Every picture is read on the phone and forgotten straight away. The check keeps numbers, and a photo of each view only if you turn that on. Both stay on the phone that took them.
+Nothing the camera sees leaves your phone. Every picture is read on the phone and forgotten straight away. The check keeps numbers, which go to your account so every device you sign in on shows them. A photo of each view is kept only if you turn that on, and it stays on the phone that took it.
 
 ## What you see
 
 - **`Posture check`**, the title, with {icon:scan-line} and the line `Measure how you stand, with your phone's camera and small stickers on your bones.`
 - **`Nothing the camera sees leaves your phone`**, a card saying what happens to the pictures, and what to wear: snug shorts or briefs pushed down below your front hip bones and the dimples above your buttocks. The check reads just as well that way.
 - **`Check your posture`**, a card saying the check takes about three minutes, turns you to all four sides twice, and opens its report when it is done. {button:Start a posture check|primary} opens the check. See [Doing a posture check](posture-check.md).
-- **`Your checks on this phone`**, the checks this phone has kept, newest first. Each row shows the day and time, how many of the four views were captured, and how many measures the report has. {icon:image} means the check kept photos. Click a row to open its report. See [Reading your posture report](posture-report.md).
-  - Before your first check it reads `No checks on this phone yet.`
-  - The checks are kept in this browser on this phone only. Your account does not have them yet, so another phone or browser does not show them.
-  - Opening this page also clears away a check that never finished, for example when the page was closed in the middle of one, with any photo it had kept.
+- **`Your checks`**, under the line `The numbers from each check are kept in your account, so every device you sign in on shows them. Photos stay on the phone that took them.` Before your first check it reads `No checks yet.`
+  - **Each measure across your checks**, from your second check on: a card for each measure, reliable ones first and then those marked {badge:Trend only|outline}. A card shows the measure's name, your latest result in words, and a small line with a dot for each check, oldest on the left. The shaded band is your first check, as wide as a real change must be. A dot outside the band is a real change from your first check; inside it, the checks cannot be told apart. Under the line it says either how it changed since your first check, for example `Left side dropped 4.6° against the right since your first check: more than the 3.6° a real change needs.`, or `Within your noise since your first check (a real change needs 3.6°).` Before your second check the cards' place reads `Your measures show here across your checks from your second check.`
+  - **The list of your checks**, newest first. Each row shows the day and time, how many of the four views were captured, and how many measures the report has. {icon:image} means this phone kept photos of that check. Click a row to open its report. See [Reading your posture report](posture-report.md).
+  - A row that says `On this phone only: it goes to your account when the phone is online.` is a check this phone has not sent yet. It goes by itself the next time this page opens with a connection. If your account refused it, the row says why instead.
+  - **{icon:download} `Download the numbers`** saves every check in your account as a spreadsheet file (CSV): one row for each check and measure, with the day, the value, each round's value, and the report's words. No picture is in it.
+  - Opening this page also tidies this phone. It sends any check your account does not have yet, forgets a check you deleted on another device (with any photo of it), and clears away a check that never finished, for example when the page was closed in the middle of one.
 - **`What you need`**, a list:
   - a tripod, or anything that holds the phone upright and still at hip height;
   - round matte stickers, 19 to 25 mm across: blue for your left side, green for your right. Office color-coding dots work. Glossy ones shine and hide their color;
@@ -46,9 +48,9 @@ Nothing the camera sees leaves your phone. Every picture is read on the phone an
 
 ## Not on this page
 
-- **Your checks on another phone, or in your account.** A check is kept only in the browser on the phone that took it, for now. A later update saves the numbers to your account, so every device shows your history.
-- **Comparing two checks.** Each report stands on its own for now. Comparing a check with your earlier ones comes with the history.
-- **A picture of you in your account.** None is ever kept there. A photo you choose to keep stays on the phone that took it.
+- **Comparing one check with another.** That is on each check's report, under `Compared with`. See [Reading your posture report](posture-report.md).
+- **A picture of you in your account.** None is ever kept there. A photo you choose to keep stays on the phone that took it, so another device shows the numbers but not the photos.
+- **Your own noise from a repeat check.** For now a change is held to the published figure, or to your own rounds when they vary more. A second check the same day with the stickers put back on, to learn your own figure, is being planned.
 
 ## Who can do what
 

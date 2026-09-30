@@ -340,7 +340,7 @@ function MeasureRow({
               comparison.beyond ? "bg-module-accent/10 text-module-accent" : "bg-muted text-muted-foreground",
             )}
           >
-            {comparison.beyond ? `${comparison.words} since ${otherDay}` : `Within your noise since ${otherDay}`}
+            {comparison.beyond ? comparison.words : "Within your noise"}
           </span>
           <p className="text-sm text-muted-foreground">
             Was: {comparison.then.words}.{" "}

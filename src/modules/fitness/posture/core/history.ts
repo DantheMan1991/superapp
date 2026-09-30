@@ -119,8 +119,8 @@ export function changeWords(key: MeasureKey, change: number, unit: "deg" | "mm")
     case "shoulder-level":
     case "front-hip-level":
     case "back-hip-level":
-      // Positive means the right side is the lower one.
-      return `${up ? "Right" : "Left"} side ${a} lower than before`;
+      // Positive means the right side is the lower one, so a rise in it is the right side dropping.
+      return `${up ? "Right" : "Left"} side dropped ${a} against the ${up ? "left" : "right"}`;
     case "head-tilt":
       return `Tilted ${a} more to your ${up ? "right" : "left"}`;
     case "trunk-lean":

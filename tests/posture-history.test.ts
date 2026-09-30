@@ -79,12 +79,12 @@ describe("a change between two checks", () => {
     expect(head.words).toBe("5.6° higher");
     const shoulders = compare("shoulder-level", third, first, history)!;
     expect(shoulders.beyond).toBe(false); // 0.8° against 3.6°
-    expect(shoulders.words).toBe("Left side 0.8° lower than before");
+    expect(shoulders.words).toBe("Left side dropped 0.8° against the right");
   });
 
   it("is said in each measure's own terms, never as better or worse", () => {
-    expect(changeWords("shoulder-level", 1.2, "deg")).toBe("Right side 1.2° lower than before");
-    expect(changeWords("back-hip-level", -12, "mm")).toBe("Left side 12 mm lower than before");
+    expect(changeWords("shoulder-level", 1.2, "deg")).toBe("Right side dropped 1.2° against the left");
+    expect(changeWords("back-hip-level", -12, "mm")).toBe("Left side dropped 12 mm against the right");
     expect(changeWords("head-tilt", -2, "deg")).toBe("Tilted 2.0° more to your left");
     expect(changeWords("knee-in-right", 1.5, "deg")).toBe("1.5° more inward");
     expect(changeWords("body-line", -1, "deg")).toBe("1.0° more back");

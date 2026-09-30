@@ -6,7 +6,7 @@
 
 Open the posture check and click {button:Start a posture check|primary}. The screen goes dark and fills the phone, because the phone will be on its tripod and you three meters away, listening to it. Run [Checking your setup](posture-setup.md) on this phone first: it finds the main lens and proves your stickers can be seen.
 
-Nothing the camera sees leaves your phone. Once you are in the picture, the screen covers the camera's image with a stick figure. The check keeps numbers: where each sticker was, and the angles from them. It keeps a photo of each view only if you turn that on, and only on this phone. In the Yosher app (version 1.0.8 or later), screenshots and screen recordings are blocked while the camera is on.
+Nothing the camera sees leaves your phone. Once you are in the picture, the screen covers the camera's image with a stick figure. The check keeps numbers: where each sticker was, and the angles from them. When it ends, the numbers go to your account, so every device you sign in on shows the check. It keeps a photo of each view only if you turn that on, and only on this phone. In the Yosher app (version 1.0.8 or later), screenshots and screen recordings are blocked while the camera is on.
 
 ## What you see
 
@@ -21,7 +21,7 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 - **The picture.** What the camera sees, with the check's drawing over it: the plumb line it found in teal, a stick figure of you, each sticker it found as a dot in the sticker's color, and a dashed circle where it looked for a sticker and found none. Once you are in the picture, the camera's image is covered by the drawing on a dark background. {button:Show the camera|outline|eye} shows the image again, and {button:Hide the camera|outline|eye-off} covers it.
 - **What the coach said**, in large type: the last thing the voice told you, so anyone looking at the phone knows what it is waiting for. Every line is in Messages below.
 - **The progress bar**, while a view is being read. Above it, the view's name and `Waiting for you to be framed and still` until you are in the picture, facing the right way and still. Then `Reading 1 of 12` up to `Reading 12 of 12` as it reads twelve still pictures. When it has twelve, the coach says `Got it.`
-- **What the phone is doing**, with a spinner, while it gets ready: `Starting the camera`, then `Letting the color settle`, and the first time on a phone `Loading the pose model: about 30 MB, the first time on this phone`. At the end, `Keeping the numbers on this phone`.
+- **What the phone is doing**, with a spinner, while it gets ready: `Starting the camera`, then `Letting the color settle`, and the first time on a phone `Loading the pose model: about 30 MB, the first time on this phone`. At the end, `Saving the numbers`, while the check is kept on this phone and sent to your account. With no connection it is sent later, by itself.
 - **Chips** under it:
   - `Level · turned 0.4° · tipped 1.2°`, or `Not level · turned 2.1° · tipped 0.3°`, only when the phone was not level at the start. Turn the phone on its tripod until it reads `Level`;
   - `Finding the plumb line`, while it looks for it;
@@ -76,7 +76,7 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 | `The phone has moved. Hold on while I find the plumb line again.` | The phone's level changed by more than a degree, so the tripod was probably knocked. The check finds the plumb line again before it goes on, and the report says so. |
 | `That's the check done. You can come back to the phone.` | The report is open on the phone. |
 | `No view was held still long enough, so there is nothing to report. Check your setup, then try again.` | Every view was skipped, or you were never framed and still for long enough. Run [Checking your setup](posture-setup.md) to see why. |
-| `This check could not be kept on this phone (...). Copy its numbers now: they are gone when you leave this page.` | The browser would not store the check, often in a private window. The report shows anyway: tap {button:Copy the numbers|primary|copy} before you leave. |
+| `This check could not be kept on this phone or in your account (...). Copy its numbers now: they are gone when you leave this page.` | The browser would not store the check (often a private window), and it could not reach your account either. The report shows anyway: tap {button:Copy the numbers|primary|copy} before you leave. When only this phone could not keep it, the check goes straight to your account instead and its report opens as usual. |
 | `The pose model could not start on this phone: ...` | The part of the check that finds you in the picture failed to load. Close the check and start again. If it happens again, run the setup check and send us its readout. |
 | `Reading a picture went wrong: ...` | One picture could not be read. The check carries on with the next. |
 | `The part of the check that reads the pictures stopped: ...` | The check cannot read pictures any more. Close it and start again. |

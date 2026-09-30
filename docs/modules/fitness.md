@@ -13,6 +13,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — Posture checks in the account (`claude/posture-history`)
+
+Workouts gains its eleventh table, `fitness_posture_checks` (0434, RLS 0435):
+a posture check's numbers, kept in the personal space so every device shows
+the history, with a comparison and a trend per measure. Everything about it is
+in [posture.md](posture.md) (slice 3a) and
+[ADR 0120](../decisions/0120-a-posture-check-is-kept-as-what-the-phone-measured-and-read-again-every-time.md).
+No workout table changed.
+
 ### 2026-09-30 — The posture check itself (`claude/posture-standing-check`)
 
 The posture page gains **Start a posture check** and **Your checks on this

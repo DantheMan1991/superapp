@@ -333,16 +333,23 @@ the worker (its one `send` throws on anything binary), only numbers reach the
 account, and a photo the person keeps stays in the browser's storage on that
 phone, never the gallery. The worker writes a kept photo into that storage
 itself, so no picture crosses to the page by message; the page reads it back
-only to draw it, behind a tap, with screenshots blocked in the app. Until the
-history slice saves them to the account, a check's numbers live in the same
-storage. Both are read back only for the personal space that took them: a
-filter, not a lock, since the storage belongs to the browser (a second person
-signed in there does not see them; code running on our origin could). The pose
+only to draw it, behind a tap, with screenshots blocked in the app. A check's
+numbers are kept in the same storage too, and read back only for the personal
+space that took them: a filter, not a lock, since the storage belongs to the
+browser (a second person signed in there does not see them; code running on
+our origin could). The numbers reach the account through one door
+(`store/sync.ts`, ADR
+[0120](decisions/0120-a-posture-check-is-kept-as-what-the-phone-measured-and-read-again-every-time.md)):
+a document whose schema is strict at every level and has no place for a
+picture, into `fitness_posture_checks` under the personal space's RLS. They
+describe a body's shape (the pose model's points and the stickers' places), so
+support view never opens the space that holds them (S14, ADR 0111). The pose
 model is served from this site. Unlike S15's
 "never", this one holds against us too: no server of ours ever has a picture to
 leak. `tests/posture-privacy.test.ts` fails on network, storage, recording or
-another site's URL anywhere in the posture code; an exception needs the ADR's
-argument first.
+another site's URL anywhere in the posture code, and on any caller of the
+posture's actions but the one door; an exception needs the ADR's argument
+first.
 
 ---
 

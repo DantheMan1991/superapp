@@ -13,6 +13,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — Workout mode's buzz and screen in the app (`claude/app-camera`)
+
+App 1.0.8, made for the posture check's camera ([mobile-app.md](mobile-app.md)),
+also carries what workout mode was waiting on: the VIBRATE permission, so the
+pacer's buzz can work inside the app, and the KeepAwake plugin, which
+`useWakeLock` now uses inside the app in place of the WebView's Screen Wake
+Lock (a browser still gets the Screen Wake Lock). Nothing else in workout mode
+changed. Neither has been felt or watched on a phone yet (Open items).
+
 ### 2026-09-30 — The posture check begins (`claude/posture-setup-check`)
 
 The Workouts page gains a **Posture check** card (between Today and Your
@@ -390,7 +399,8 @@ below is for that person.
   for him, which is the thing that keeps a person going in week two.
 - **The screen stays on.** Screen Wake Lock in the browser; in the app, a check
   that the WebView honours it, and the native keep-awake plugin if not (a new
-  plugin is a new app build, [mobile-app.md](mobile-app.md)).
+  plugin is a new app build, [mobile-app.md](mobile-app.md)). The plugin came
+  with app 1.0.8 and `useWakeLock` uses it inside the app.
 - **Split days are one tap.** "Morning: 1 of 2 sets" on the home card, and
   starting a session in the evening picks up where the morning stopped.
 - **A session survives a dropped signal.** Sets are held on the device and sent
@@ -890,17 +900,17 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
   many. Putting a program away (`archived_at`, already a column and already
   filtered by `listPrograms`) with its history kept is the better answer, and
   it needs a place to find put-away programs again.
-- **Workout mode in the Android app.** The pacer's buzz needs the VIBRATE
-  permission, which the app does not have: the phone's browser buzzes, the app
-  will not until a new build, best made together with the CAMERA permission
-  the posture check needs ([posture.md](posture.md), slice 6). Screen Wake Lock inside the app's WebView
-  has not been watched either.
+- **Workout mode in the Android app: built for, not yet watched.** App 1.0.8
+  (2026-09-30, with the posture check's camera; [mobile-app.md](mobile-app.md))
+  declares VIBRATE, so the pacer's buzz can work in the app, and carries the
+  KeepAwake plugin, which `useWakeLock` now uses inside the app instead of the
+  WebView's Screen Wake Lock. Neither has been felt or watched on a phone.
 - **Nobody has heard the pacer or the coach on a phone.** The drives ran in a
   browser pane. The tones, their volume, the buzz and the voice are unproven
   on a real phone. In the app the end of a line is estimated from its length,
-  so a long line may be cut off by the next one. The build that adds VIBRATE
-  and CAMERA can have the native voice report its end (`onDone`), and
-  `speakLine` would use it where it is there.
+  so a long line may be cut off by the next one. A later app build can have
+  the native voice report its end (`onDone`), and `speakLine` would use it
+  where it is there; 1.0.8 did not take it on.
 - **His production calf raise has no levels yet.** He names them in the
   editor from the video, after `0433` is on production and this is merged.
 - **His production program has no self-assessment yet**, unless he has read

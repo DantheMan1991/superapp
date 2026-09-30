@@ -16,6 +16,34 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — The check in the app (`claude/app-camera`)
+
+The founder asked for it the day slice 1 merged ("I want it to work in the app
+as well"), so slice 6 came forward. App **1.0.8** declares CAMERA (and VIBRATE)
+and carries the privacy screen and keep-awake plugins; the shell's side is in
+[mobile-app.md](mobile-app.md). On the web's side:
+
+- **No screenshots while the camera is on.** `useScreenPrivacy`
+  (`client/screen-privacy.ts`) turns on `FLAG_SECURE` for the setup check
+  while it runs, and off when it ends or the screen is left: no screenshot, no
+  screen recording, a blank card in the app switcher (ADR 0118). Nothing, in a
+  browser: the guide says so.
+- **The screen stays on through the shell.** `useWakeLock` uses the KeepAwake
+  plugin inside the app, for workout mode too.
+- **A refused camera, explained by app version.** An app older than 1.0.8 never
+  declared the camera and has no switch to allow it, so it is told to update
+  (`appCanUseCamera`); a newer one is told where to allow it.
+- **The camera goes off when the check ends**, not only when the screen is
+  left (`releaseCamera`).
+
+Tests: `tests/mobile-shell.test.ts` (the camera and vibrate lines, the plugins
+in the package and both Gradle files, the version against the web's camera
+version), `tests/native-app.test.ts` (the version rule, the two plugins'
+reads), and the privacy scan over the new file.
+
+Not verified on a phone: no Android SDK here, and the app shows the live
+site, so it is proved on the S25 with the workflow's APK once this merges.
+
 ### 2026-09-30 — Slice 1: check your setup (`claude/posture-setup-check`)
 
 The plan below, and the first slice of it: everything the check will lean on,
@@ -208,7 +236,7 @@ sites anywhere in the posture code.
 | 3 | **History** | Checks saved as numbers and sticker places only; compared with any earlier check; a change called only beyond the person's own noise; each sticker's place against last time checked before measuring; numbers exported; a retake nudged at each program phase |
 | 4 | **Movement** | Paced double-leg and single-leg squats, single-leg stance and arms overhead: a film held in memory, read after the set at the model's pace, never kept |
 | 5 | **During a workout** | Live cues in workout mode through the seams it left: the stage, `coachSay({ key: "posture" })`, the enrollment's side |
-| 6 | **The Android app** | CAMERA (with the VIBRATE build already planned), `@capacitor/privacy-screen` on the posture screens, keep-awake |
+| 6 | **The Android app** | Built with slice 1 (app 1.0.8): CAMERA and VIBRATE, `@capacitor/privacy-screen` while the camera is on, keep-awake. Done when watched on the S25 |
 | 7 | **Later** | Sharper models after a licence review, the back's outline, the feet close up |
 
 ## Data model
@@ -230,7 +258,11 @@ per check (numbers) for the placement check.
   `protocol.ts` (the messages; numbers only).
 - `src/modules/fitness/posture/client/` — `setup-session.ts` (the setup
   check's steps), `camera.ts`, `orientation.ts`, `frames.ts` (a track's
-  frames to the worker, or a video's), `device-settings.ts`, `voice.ts`.
+  frames to the worker, or a video's), `device-settings.ts`, `voice.ts`,
+  `screen-privacy.ts` (`FLAG_SECURE` in the app).
+- `src/lib/native-bridge.ts` (`privacy`, `keepAwake`) and
+  `src/lib/native-app-core.ts` (`APP_CAMERA_VERSION`, `appCanUseCamera`): the
+  app's side, which the web decides with.
 - `src/modules/fitness/posture/components/` — `setup-check.tsx`,
   `overlay.tsx`, `diagrams.tsx`, `last-readout.tsx`, `posture-card.tsx`.
 - `src/app/personal/(space)/m/fitness/posture/page.tsx` and `setup/page.tsx`.
@@ -279,8 +311,11 @@ per check (numbers) for the placement check.
 - **A content security policy on the posture routes**, as ADR 0118's second
   lock: it must allow the production Clerk domain, which only a preview
   deploy can confirm, so it waits for one.
-- **The Android app cannot use the camera** until a build declares CAMERA
-  (slice 6); the app's message says to use Chrome meanwhile.
+- **The check in the app (1.0.8) is unwatched**: the camera prompt, the
+  WebView delivering frames (`MediaStreamTrackProcessor`, or the `<video>`
+  path when a WebView lacks it), the orientation sensors in a WebView,
+  screenshots refused, the screen kept on. The readout's `frames.path` and
+  `level.sensor` will say which paths the app took.
 - **Self-placed stickers are unstudied**: the placement check (slice 3) is how
   their error will be measured.
 - The side figure in the sticker drawing is rough; worth a better drawing

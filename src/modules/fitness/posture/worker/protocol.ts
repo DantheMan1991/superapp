@@ -23,11 +23,20 @@ export type WorkerTask =
   | { kind: "stickers"; view: View; model: PoseModelName; delegate: Delegate; diameterPx: number | null }
   | { kind: "bench"; runs: { model: PoseModelName; delegate: Delegate }[]; framesEach: number };
 
+/**
+ * Keep the next frame as a photo, on this phone (ADR 0118): only when the
+ * person turned "Keep a photo of each view on this phone" on. The worker makes
+ * it a JPEG and writes it to the phone's own storage itself
+ * (`photo-writer.ts`); the page is told only that it was kept, and its size.
+ */
+export type PhotoRequest = { checkId: string; view: View; round: number; longSide: number; quality: number };
+
 export type ToWorker =
   | { type: "preload"; model: PoseModelName; delegate: Delegate }
   | { type: "stream"; readable: ReadableStream<VideoFrame> }
   | { type: "bitmap"; bitmap: ImageBitmap; t: number }
   | { type: "task"; task: WorkerTask; up: Point | null; classify?: ClassifyOptions }
+  | { type: "photo"; request: PhotoRequest }
   | { type: "stop" };
 
 export type PlumbResult = {
@@ -78,9 +87,22 @@ export type FrameResult = {
   colour: { luma: number; cb: number; cr: number };
 };
 
+/** A photo kept, or not: its size in numbers, never the picture. */
+export type PhotoResult = {
+  type: "photo";
+  view: View;
+  round: number;
+  ok: boolean;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  message: string | null;
+};
+
 export type FromWorker =
   | { type: "status"; message: string }
   | { type: "error"; where: string; message: string }
   | { type: "need" }
   | FrameResult
+  | PhotoResult
   | { type: "bench"; timings: ModelTiming[]; gpuVerdict: string };

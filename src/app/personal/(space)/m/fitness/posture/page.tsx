@@ -6,17 +6,17 @@ import { Button } from "@/components/ui/button";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { STICKERS, type Sticker } from "@/modules/fitness/posture/core/sticker-map";
+import { ChecksOnPhone } from "@/modules/fitness/posture/components/checks-on-phone";
 import { RoomDiagram, StickerDiagram } from "@/modules/fitness/posture/components/diagrams";
 import { LastReadout } from "@/modules/fitness/posture/components/last-readout";
 
 export const dynamic = "force-dynamic";
 
 /**
- * POSTURE CHECK (docs/help/fitness/posture.md; docs/modules/posture.md): what
- * the check is, what it needs (a room, a plumb line, stickers), where each
- * sticker goes and how to find the bone under it, and the way into checking
- * the setup on this phone. The check itself (four sides, the report) is the
- * next slice; this page is where it will start.
+ * POSTURE CHECK (docs/help/fitness/posture.md; docs/modules/posture.md): the
+ * way into the check itself and the checks this phone has kept, then what the
+ * check needs (a room, a plumb line, stickers), where each sticker goes and
+ * how to find the bone under it, and the way into checking the setup.
  */
 export default async function PosturePage() {
   const ctx = await requirePersonalSpace();
@@ -38,12 +38,32 @@ export default async function PosturePage() {
         <div className="space-y-1 text-sm">
           <h2 className="font-medium">Nothing the camera sees leaves your phone</h2>
           <p className="text-muted-foreground">
-            Every picture is read on the phone itself and forgotten straight away. What the check keeps is numbers:
-            angles and where each sticker was. Wear snug shorts or briefs pushed down below your front hip bones and
-            the dimples above your buttocks: the check reads just as well, and nothing more of you is ever in front of
-            the camera than it needs.
+            Every picture is read on the phone itself and forgotten straight away, unless you choose to keep a photo of
+            each view, which stays on this phone. What the check keeps is numbers: angles and where each sticker was.
+            Wear snug shorts or briefs pushed down below your front hip bones and the dimples above your buttocks: the
+            check reads just as well, and nothing more of you is ever in front of the camera than it needs.
           </p>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl bg-card p-4 shadow-elevation-1 sm:p-5">
+        <h2 className="font-medium">Check your posture</h2>
+        <p className="text-sm text-muted-foreground">
+          About three minutes: the voice turns you to all four sides, twice, and the report opens when it is done. It
+          describes how you stood that day, for fitness and body awareness, not as a medical assessment.
+        </p>
+        <Button asChild>
+          <Link href="/personal/m/fitness/posture/check">Start a posture check</Link>
+        </Button>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-heading font-medium tracking-heading">Your checks on this phone</h2>
+        <p className="text-sm text-muted-foreground">
+          Kept in this browser on this phone only, for now. Your account does not have them yet, so another phone or
+          browser will not show them.
+        </p>
+        <ChecksOnPhone owner={ctx.tenant.id} reportHref="/personal/m/fitness/posture/checks" />
       </section>
 
       <section className="space-y-2">
@@ -52,11 +72,11 @@ export default async function PosturePage() {
           <li>A tripod, or anything that holds the phone upright and still at hip height.</li>
           <li>
             Round matte stickers, 19 to 25 mm across: blue for your left side, green for your right. Office color-coding
-            dots work. Not glossy: shine hides the colour.
+            dots work. Not glossy: shine hides the color.
           </li>
           <li>
             A plumb line: a dark cord about 5 mm thick with a weight on the end, and two pieces of bright red or orange
-            tape round it exactly 1 m apart.
+            tape around it exactly 1 m apart.
           </li>
           <li>Painter&apos;s tape for a foot outline on the floor.</li>
           <li>Someone to put on the three stickers you cannot reach well: the base of your neck and the two low back dimples.</li>
@@ -99,16 +119,11 @@ export default async function PosturePage() {
           Before the first check, and whenever the phone, the room or the stickers change: it proves the camera, the
           level, the plumb line and the stickers on this phone, and gives you a readout of numbers to send.
         </p>
-        <Button asChild>
+        <Button asChild variant="outline">
           <Link href="/personal/m/fitness/posture/setup">Check your setup</Link>
         </Button>
         <LastReadout />
       </section>
-
-      <p className="text-sm text-muted-foreground">
-        The check itself, from all four sides with its report, comes next. It describes how you stood that day, for
-        fitness and body awareness, not as a medical assessment.
-      </p>
     </div>
   );
 }

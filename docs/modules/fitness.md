@@ -13,6 +13,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — The posture check itself (`claude/posture-standing-check`)
+
+The posture page gains **Start a posture check** and **Your checks on this
+phone**, and two screens under it: the check
+(`/personal/m/fitness/posture/check`) and a check's report
+(`/personal/m/fitness/posture/checks/[checkId]`). Everything about them is in
+[posture.md](posture.md) (slice 2). Nothing in workout mode or the database
+changed; a check and any photo it keeps live on the phone that took it.
+
 ### 2026-09-30 — Workout mode's buzz and screen in the app (`claude/app-camera`)
 
 App 1.0.8, made for the posture check's camera ([mobile-app.md](mobile-app.md)),

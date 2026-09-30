@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { BONES } from "../core/skeleton";
 import { LM } from "../core/sticker-map";
 import type { PosePoint } from "../core/views";
 import type { FrameResult } from "../worker/protocol";
@@ -17,25 +18,6 @@ import type { FrameResult } from "../worker/protocol";
  * Only numbers reach this component; the picture underneath is the `<video>`
  * the browser shows.
  */
-
-const BONES: [number, number][] = [
-  [LM.leftShoulder, LM.rightShoulder],
-  [LM.leftShoulder, LM.leftElbow],
-  [LM.leftElbow, LM.leftWrist],
-  [LM.rightShoulder, LM.rightElbow],
-  [LM.rightElbow, LM.rightWrist],
-  [LM.leftShoulder, LM.leftHip],
-  [LM.rightShoulder, LM.rightHip],
-  [LM.leftHip, LM.rightHip],
-  [LM.leftHip, LM.leftKnee],
-  [LM.leftKnee, LM.leftAnkle],
-  [LM.rightHip, LM.rightKnee],
-  [LM.rightKnee, LM.rightAnkle],
-  [LM.leftAnkle, LM.leftHeel],
-  [LM.leftHeel, LM.leftFootIndex],
-  [LM.rightAnkle, LM.rightHeel],
-  [LM.rightHeel, LM.rightFootIndex],
-];
 
 const STICKER_COLOUR = { blue: "#3b82f6", green: "#22c55e" } as const;
 

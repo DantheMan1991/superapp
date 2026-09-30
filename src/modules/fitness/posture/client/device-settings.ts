@@ -20,6 +20,8 @@ export type DeviceSettings = {
   /** The last setup readout, as copied (numbers and words only). */
   lastReadout?: string;
   lastReadoutAt?: string;
+  /** "Keep a photo of each view on this phone", as last set on this phone. Off until turned on. */
+  keepPhotos?: boolean;
 };
 
 export function readDeviceSettings(): DeviceSettings {

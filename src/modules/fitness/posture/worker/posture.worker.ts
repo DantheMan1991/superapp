@@ -14,15 +14,18 @@ import {
 import { stickersIn, type View } from "../core/sticker-map";
 import { assign, blobs, chromaOf, dedupe, DEFAULT_CLASSIFY, predict, type Blob, type ClassifyOptions } from "../core/stickers";
 import { torsoLength, viewOf, type PosePoint } from "../core/views";
-import type { Delegate, FromWorker, PlumbResult, PoseResult, StickerFrame, ToWorker, WorkerTask } from "./protocol";
+import type { Delegate, FromWorker, PhotoRequest, PlumbResult, PoseResult, StickerFrame, ToWorker, WorkerTask } from "./protocol";
 import type { ModelTiming } from "../core/readout";
+import { keepPhoto } from "./photo-writer";
 
 /**
  * THE POSTURE WORKER (docs/modules/posture.md, "How a frame is read"; ADR 0118).
  *
  * Every camera frame of a posture check is read HERE, off the page's thread,
- * and goes nowhere else: each frame is closed as soon as it has been read, no
- * pixel is written anywhere, and only numbers are posted back (`send` checks).
+ * and goes nowhere else: each frame is closed as soon as it has been read, and
+ * only numbers are posted back (`send` checks). The one exception is a photo
+ * the person chose to keep: one frame per view, written by `photo-writer.ts`
+ * straight into this phone's own storage for the site, never to the page.
  *
  * Per frame, depending on the task the page set:
  * - a small copy of the whole frame (960 px on its long side) for the pose
@@ -48,6 +51,8 @@ let task: WorkerTask = { kind: "idle" };
 let up: Point | null = null;
 let classifyOpts: ClassifyOptions = DEFAULT_CLASSIFY;
 let lastPoints: PosePoint[] | null = null;
+/** The next frame is to be kept as a photo (the person chose to keep them). */
+let pendingPhoto: PhotoRequest | null = null;
 let busy = false;
 let stopped = false;
 
@@ -426,6 +431,25 @@ async function benchStep(width: number, height: number): Promise<void> {
   }
 }
 
+/** Keep this frame as the photo asked for, and say so in numbers. */
+async function photograph(source: Source, width: number, height: number, request: PhotoRequest): Promise<void> {
+  try {
+    const kept = await keepPhoto(source, width, height, request);
+    send({ type: "photo", view: request.view, round: request.round, ok: true, ...kept, message: null });
+  } catch (error) {
+    send({
+      type: "photo",
+      view: request.view,
+      round: request.round,
+      ok: false,
+      width: null,
+      height: null,
+      bytes: null,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function readFrame(source: Source, t: number): Promise<void> {
   const t0 = performance.now();
   const { width, height } = sizeOf(source);
@@ -433,6 +457,12 @@ async function readFrame(source: Source, t: number): Promise<void> {
     typeof VideoFrame !== "undefined" && source instanceof VideoFrame
       ? ((source as VideoFrame & { rotation?: number }).rotation ?? null)
       : null;
+  if (pendingPhoto) {
+    const request = pendingPhoto;
+    pendingPhoto = null;
+    await photograph(source, width, height, request);
+    if (task.kind === "idle") return;
+  }
   const img = drawSmall(source, width, height);
   const colour = meanColour(img);
   const ms: { total: number; pose?: number; plumb?: number; stickers?: number } = { total: 0 };
@@ -469,7 +499,7 @@ async function pump(readable: ReadableStream<VideoFrame>): Promise<void> {
   while (!stopped) {
     const { value: frame, done } = await reader.read();
     if (done || !frame) break;
-    if (busy || task.kind === "idle") {
+    if (busy || (task.kind === "idle" && !pendingPhoto)) {
       frame.close();
       continue;
     }
@@ -500,7 +530,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
         break;
       case "bitmap": {
         const bitmap = message.bitmap;
-        if (busy || task.kind === "idle") {
+        if (busy || (task.kind === "idle" && !pendingPhoto)) {
           bitmap.close();
           send({ type: "need" });
           break;
@@ -528,8 +558,14 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
           send({ type: "status", message: "Pose model ready" });
         }
         break;
+      case "photo":
+        // Kept from the next frame read (`readFrame`), which is closed after
+        // like every other.
+        pendingPhoto = message.request;
+        break;
       case "stop":
         stopped = true;
+        pendingPhoto = null;
         for (const made of landmarkers.values()) void made.then((lm) => lm.close()).catch(() => undefined);
         landmarkers.clear();
         self.close();

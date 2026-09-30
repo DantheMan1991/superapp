@@ -1,33 +1,22 @@
 import { MEASURING_MODEL, type PoseModelName } from "../core/assets";
-import { rankCameras } from "../core/camera";
-import { levelFrame, median, rollOf, type Point } from "../core/geometry";
-import { framingLine, missingLine, moveLine, SETUP_LINES, turnLine, allSetupLines } from "../core/lines";
-import { upFromLine } from "../core/plumb";
+import { median } from "../core/geometry";
+import { missingLine, SETUP_LINES, turnLine, allSetupLines } from "../core/lines";
 import { emptyReadout, readoutText, type SetupReadout, type ViewReadout } from "../core/readout";
 import { stickerById, stickersIn, VIEWS, type View } from "../core/sticker-map";
 import { aggregate, type Assignment } from "../core/stickers";
-import { framingOf, midpoint, stillness, torsoLength, towardPersonSide, viewOf, type PosePoint } from "../core/views";
-import type { Delegate, FrameResult, FromWorker, StickerFrame, ToWorker, WorkerTask } from "../worker/protocol";
-import {
-  applyLocks,
-  askForCamera,
-  facingModeOpens,
-  frameStats,
-  listCameras,
-  openCamera,
-  settingsForReadout,
-  stopStream,
-} from "./camera";
-import { readDeviceSettings, writeDeviceSettings } from "./device-settings";
-import { feedWorker, startPostureWorker, type FramePath } from "./frames";
-import { watchOrientation, type OrientationWatch } from "./orientation";
-import { sayPosture, startPostureVoice, stopPostureVoice } from "./voice";
+import { midpoint } from "../core/views";
+import type { Delegate, FromWorker } from "../worker/protocol";
+import { frameStats, settingsForReadout } from "./camera";
+import { CaptureBase, sleep, type CaptureAction, type CaptureCallbacks } from "./capture-base";
+import { writeDeviceSettings } from "./device-settings";
+import { startPostureVoice } from "./voice";
 
 /**
  * THE SETUP CHECK, STEP BY STEP (docs/modules/posture.md, slice 1;
  * docs/help/fitness/posture-setup.md). Plain TypeScript so the screen only
- * draws: this opens the camera, runs the worker, listens to the sensors and
- * the voice, and reports each row's state through callbacks.
+ * draws: the camera, the worker, the sensors and the voice are the shared
+ * machinery (`capture-base.ts`); this reports each row's state through
+ * callbacks and writes the readout.
  *
  * The steps: the camera (the main lens, never the ultrawide), its locks, the
  * level, the plumb line, the person head to toe with their stickers from all
@@ -38,61 +27,29 @@ import { sayPosture, startPostureVoice, stopPostureVoice } from "./voice";
 export type RowKey = "camera" | "locks" | "level" | "plumb" | "person" | "stickers" | "model";
 export type RowStatus = "waiting" | "working" | "ready" | "check" | "skipped";
 export type RowState = { status: RowStatus; value: string };
-export type SetupAction = { id: string; label: string };
+export type SetupAction = CaptureAction;
 
-export type SetupCallbacks = {
+export type SetupCallbacks = CaptureCallbacks & {
   row(key: RowKey, state: RowState): void;
-  instruction(text: string): void;
-  actions(actions: SetupAction[]): void;
-  frame(result: FrameResult): void;
-  hideCamera(hide: boolean): void;
   done(readout: string): void;
   failed(message: string): void;
-  /** Something went wrong that the check carries on past (the worker's errors), for the screen to show. */
-  warning(message: string | null): void;
 };
-
-type Outcome<T> = { kind: "value"; value: T } | { kind: "action"; id: string } | { kind: "timeout" };
 
 const HOLD_FRAMES = 10;
 const VIEW_TIMEOUT_MS = 75_000;
-const STILL_INDICES = [11, 12, 23, 24, 25, 26, 27, 28];
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function fmt(n: number, places = 1): string {
   return Number.isFinite(n) ? n.toFixed(places) : "–";
 }
 
-export class SetupSession {
-  private worker: Worker | null = null;
-  private stream: MediaStream | null = null;
-  private track: MediaStreamTrack | null = null;
-  private feed: { path: FramePath; stop: () => void } | null = null;
-  private orientation: OrientationWatch | null = null;
-  private frameListeners = new Set<(r: FrameResult) => void>();
+export class SetupSession extends CaptureBase<SetupCallbacks> {
   private benchListener: ((m: Extract<FromWorker, { type: "bench" }>) => void) | null = null;
-  private actionWaiter: ((id: string) => void) | null = null;
-  private closed = false;
-  private up: Point | null = null;
-  private pxPerMetre: number | null = null;
-  private delegate: Delegate;
-  private colours: { at: number; luma: number; cb: number; cr: number }[] = [];
-  private personSeen = false;
-  private workerError: string | null = null;
   private stickerTally: Partial<Record<View, string>> = {};
   private stickerAllFound: Partial<Record<View, boolean>> = {};
   readonly readout: SetupReadout;
 
-  constructor(
-    private readonly video: HTMLVideoElement,
-    private readonly cb: SetupCallbacks,
-    private readonly naturalVoice: boolean,
-    /** A picture or film standing in for the camera (development only). */
-    private readonly testSource: MediaStream | null = null,
-  ) {
+  constructor(video: HTMLVideoElement, cb: SetupCallbacks, naturalVoice: boolean, testSource: MediaStream | null = null) {
+    super(video, cb, naturalVoice, testSource);
     const nav = navigator as Navigator & { deviceMemory?: number };
     this.readout = emptyReadout(new Date(), {
       userAgent: navigator.userAgent.slice(0, 280),
@@ -101,125 +58,16 @@ export class SetupSession {
       cores: navigator.hardwareConcurrency ?? null,
       memoryGb: nav.deviceMemory ?? null,
     });
-    this.delegate = readDeviceSettings().delegate ?? "CPU";
-  }
-
-  /** A button on the screen was pressed. */
-  act(id: string): void {
-    const waiter = this.actionWaiter;
-    this.actionWaiter = null;
-    waiter?.(id);
-  }
-
-  close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.act("closed");
-    this.releaseCamera();
-    stopPostureVoice();
-  }
-
-  /**
-   * The camera off and the worker gone: at the end of the check, and when the
-   * screen is left. The voice is not part of it, so the last line is still said.
-   */
-  private releaseCamera(): void {
-    this.feed?.stop();
-    this.feed = null;
-    if (this.worker) {
-      this.post({ type: "stop" });
-      this.worker.terminate();
-      this.worker = null;
-    }
-    this.orientation?.stop();
-    this.orientation = null;
-    stopStream(this.stream);
-    this.stream = null;
-    this.video.srcObject = null;
-  }
-
-  private post(message: ToWorker, transfer: Transferable[] = []): void {
-    this.worker?.postMessage(message, transfer);
-  }
-
-  private setTask(task: WorkerTask): void {
-    this.post({ type: "task", task, up: this.up });
   }
 
   /** A line for the readout: short, and at most twenty of them. */
-  private note(text: string): void {
+  protected override note(text: string): void {
     if (this.readout.notes.length < 20) this.readout.notes.push(text.slice(0, 280));
   }
 
-  private say(text: string, repeatAfterMs?: number): void {
-    sayPosture(text, { repeatAfterMs });
+  protected override onMessage(m: FromWorker): void {
+    if (m.type === "bench") this.benchListener?.(m);
   }
-
-  /** Wait for a frame to satisfy `check`, a button, a poll, or the time to run out. */
-  private wait<T>(opts: {
-    check?: (r: FrameResult) => T | null;
-    poll?: () => T | null;
-    actions?: SetupAction[];
-    timeoutMs?: number;
-  }): Promise<Outcome<T>> {
-    return new Promise((resolve) => {
-      let settled = false;
-      let timer = 0;
-      let poller = 0;
-      const finish = (outcome: Outcome<T>) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        window.clearInterval(poller);
-        if (listener) this.frameListeners.delete(listener);
-        this.actionWaiter = null;
-        this.cb.actions([]);
-        resolve(outcome);
-      };
-      const listener = opts.check
-        ? (r: FrameResult) => {
-            const v = opts.check!(r);
-            if (v !== null && v !== undefined) finish({ kind: "value", value: v });
-          }
-        : null;
-      if (listener) this.frameListeners.add(listener);
-      if (opts.poll) {
-        poller = window.setInterval(() => {
-          const v = opts.poll!();
-          if (v !== null && v !== undefined) finish({ kind: "value", value: v });
-        }, 200);
-      }
-      if (opts.timeoutMs) timer = window.setTimeout(() => finish({ kind: "timeout" }), opts.timeoutMs);
-      this.actionWaiter = (id) => finish({ kind: "action", id });
-      this.cb.actions(opts.actions ?? []);
-    });
-  }
-
-  private onWorker = (event: MessageEvent<FromWorker>) => {
-    const m = event.data;
-    if (m.type === "frame") {
-      if (m.colour) this.colours.push({ at: performance.now(), ...m.colour });
-      if (this.colours.length > 400) this.colours.splice(1, 1); // keep the first, drop the oldest after it
-      if (!this.personSeen && m.pose?.points) {
-        // A person has walked in: from now on the screen shows a stick
-        // figure, not them (ADR 0118).
-        this.personSeen = true;
-        this.cb.hideCamera(true);
-      }
-      this.cb.frame(m);
-      for (const listener of [...this.frameListeners]) listener(m);
-    } else if (m.type === "bench") {
-      this.benchListener?.(m);
-    } else if (m.type === "error") {
-      this.workerError = `${m.where}: ${m.message}`;
-      this.note(`worker ${this.workerError}`);
-      this.cb.warning(
-        m.where === "preload" || m.where === "task"
-          ? `The pose model could not start on this phone: ${m.message}`
-          : `Reading a picture went wrong: ${m.message}`,
-      );
-    }
-  };
 
   async run(): Promise<void> {
     try {
@@ -252,9 +100,8 @@ export class SetupSession {
   private async cameraStep(): Promise<void> {
     this.cb.row("camera", { status: "working", value: "Finding the main lens" });
     this.cb.instruction("Allow the camera when your phone asks.");
-    let chosenLabel = "test picture";
+    const opened = await this.openMainLens(true);
     if (this.testSource) {
-      this.stream = this.testSource;
       this.readout.camera = {
         list: [],
         chosen: "test source",
@@ -266,19 +113,8 @@ export class SetupSession {
         frames: { delivered: null, discarded: null, path: "" },
       };
     } else {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser cannot use the camera.");
-      await askForCamera();
-      const cameras = await listCameras();
-      const opens = await facingModeOpens(cameras);
-      const ranked = rankCameras(cameras);
-      const saved = readDeviceSettings();
-      const chosen = ranked.find((c) => c.deviceId === saved.cameraId) ?? ranked[0];
-      if (!chosen) throw new Error("No camera that faces away from the screen was found.");
-      this.stream = await openCamera(chosen.deviceId);
-      chosenLabel = chosen.label || "the back camera";
-      writeDeviceSettings({ cameraId: chosen.deviceId, cameraLabel: chosen.label });
       this.readout.camera = {
-        list: cameras.map((c) => ({
+        list: opened.cameras.map((c) => ({
           label: c.label.slice(0, 80),
           facing: c.facing,
           index: c.index,
@@ -286,53 +122,33 @@ export class SetupSession {
           torch: c.torch,
           zoomMax: c.zoomMax,
         })),
-        chosen: chosen.label.slice(0, 80),
-        why: chosen.why,
-        facingModeOpens: opens,
+        chosen: (opened.chosen?.label ?? opened.label).slice(0, 80),
+        why: opened.chosen?.why ?? [],
+        facingModeOpens: opened.facingModeOpens,
         settings: {},
         locks: { whiteBalance: "not tried", focus: "not tried", exposure: "not tried" },
         colourDrift: null,
         frames: { delivered: null, discarded: null, path: "" },
       };
     }
-    this.track = this.stream.getVideoTracks()[0] ?? null;
-    if (!this.track) throw new Error("The camera gave no picture.");
-    this.video.srcObject = this.stream;
-    this.video.muted = true;
-    await this.video.play().catch(() => undefined);
-    const settings = settingsForReadout(this.track);
+    const pipeline = await this.startPipeline();
+    const settings = settingsForReadout(this.track!);
     this.readout.camera!.settings = settings;
-    const w = Number(settings.width ?? this.video.videoWidth);
-    const h = Number(settings.height ?? this.video.videoHeight);
+    const w = Number(settings.width ?? pipeline.width);
+    const h = Number(settings.height ?? pipeline.height);
     if (w > h) this.note("the picture is wider than tall: the phone is on its side, or this is not a phone");
-
-    this.worker = startPostureWorker();
-    this.worker.addEventListener("message", this.onWorker);
-    this.worker.addEventListener("error", (e) => {
-      this.workerError = e.message || "the worker stopped";
-      this.note(`worker failed to start: ${this.workerError}`);
-      this.cb.warning(`The part of the check that reads the pictures stopped: ${this.workerError}`);
-    });
-    this.feed = feedWorker(this.worker, { track: this.track, video: this.video });
-    this.readout.camera!.frames.path = this.feed.path;
-    // The heavy model is 30 MB: it downloads while the phone is being set up.
-    this.post({ type: "preload", model: MEASURING_MODEL, delegate: this.delegate });
-    this.cb.row("camera", { status: "ready", value: `${chosenLabel} · ${w} × ${h}` });
+    this.readout.camera!.frames.path = pipeline.path;
+    this.cb.row("camera", { status: "ready", value: `${opened.label} · ${w} × ${h}` });
   }
 
   private async locksStep(): Promise<void> {
     this.cb.row("locks", { status: "working", value: "Letting the color settle" });
     this.cb.instruction("Point the phone at your foot outline. Hold on while the color settles.");
-    // Colour and brightness settle on their own first, then are held.
-    this.setTask({ kind: "plumb" });
-    await sleep(2500);
-    if (this.closed || !this.track || this.testSource) {
+    const locks = await this.settleAndLock();
+    if (!locks || !this.track) {
       this.cb.row("locks", { status: "skipped", value: "Not a camera" });
       return;
     }
-    const locks = await applyLocks(this.track);
-    // Colour drift is measured from the moment the locks are on.
-    this.colours = [];
     this.readout.camera!.locks = locks;
     this.readout.camera!.settings = settingsForReadout(this.track);
     const held = [locks.whiteBalance === "locked" ? "color" : null, locks.focus === "locked" ? "focus" : null, locks.exposure === "locked" ? "brightness" : null].filter(Boolean);
@@ -346,18 +162,13 @@ export class SetupSession {
 
   private async levelStep(): Promise<void> {
     this.cb.row("level", { status: "working", value: "Reading the tilt" });
-    this.orientation = watchOrientation();
-    const offset = readDeviceSettings().sensorRollOffset ?? 0;
-    const shown = () => {
-      const a = this.orientation?.latest();
-      if (!a) return null;
-      return { roll: a.roll - offset, pitch: a.pitch };
-    };
+    this.startLevel();
+    const orientation = this.orientation!;
     this.cb.instruction("Turn the phone on its tripod until it reads level: under a degree each way.");
     let steadySince = 0;
     const outcome = await this.wait({
       poll: () => {
-        const a = shown();
+        const a = this.sensorAttitude();
         if (!a) return null;
         const ok = Math.abs(a.roll) <= 1 && Math.abs(a.pitch) <= 2;
         this.cb.row("level", { status: ok ? "ready" : "working", value: `Roll ${fmt(a.roll)}° · tilt ${fmt(a.pitch)}°` });
@@ -371,13 +182,13 @@ export class SetupSession {
       actions: [{ id: "continue", label: "Continue anyway" }],
       timeoutMs: 120_000,
     });
-    const a = shown();
+    const a = this.sensorAttitude();
     this.readout.level = {
-      sensor: this.orientation.kind,
-      rateHz: this.orientation.rateHz(),
+      sensor: orientation.kind,
+      rateHz: orientation.rateHz(),
       roll: a?.roll ?? null,
       pitch: a?.pitch ?? null,
-      rollSpread: this.orientation.rollSpread(),
+      rollSpread: orientation.rollSpread(),
       offsetFromPlumb: null,
     };
     if (!a) {
@@ -386,11 +197,7 @@ export class SetupSession {
       this.cb.row("level", { status: "check", value: `Roll ${fmt(a.roll)}° · tilt ${fmt(a.pitch)}°` });
     }
     // Until the plumb line says better, the sensor's up (less its known offset).
-    const att = this.orientation.latest();
-    if (att) {
-      const r = ((att.roll - offset) * Math.PI) / 180;
-      this.up = { x: Math.sin(r), y: -Math.cos(r) };
-    }
+    this.useSensorUp();
   }
 
   /* ---- the plumb line ---------------------------------------------------- */
@@ -398,59 +205,34 @@ export class SetupSession {
   private async plumbStep(): Promise<void> {
     this.cb.row("plumb", { status: "working", value: "Looking for it" });
     this.cb.instruction("Hang the plumb line beside your foot outline, in the picture from top to bottom.");
-    this.setTask({ kind: "plumb" });
-    const recent: { roll: number; pxPerMetre: number | null; rms: number; coverage: number; marks: number }[] = [];
-    const outcome = await this.wait({
-      check: (r) => {
-        const p = r.plumb;
-        if (!p?.found || p.a === null) {
-          recent.length = 0;
-          this.cb.row("plumb", { status: "working", value: "Looking for it" });
-          return null;
-        }
-        const roll = rollOf(levelFrame(upFromLine({ a: p.a, b: p.b ?? 0 })));
-        recent.push({ roll, pxPerMetre: p.pxPerMetre, rms: p.rmsPx ?? Number.NaN, coverage: p.coverage ?? 0, marks: p.marks });
-        if (recent.length > 8) recent.shift();
-        this.cb.row("plumb", {
-          status: "working",
-          value: p.pxPerMetre ? `Found · 1 m = ${Math.round(p.pxPerMetre)} px` : "Found · no meter marks yet",
-        });
-        const rolls = recent.map((x) => x.roll);
-        return recent.length >= 5 && Math.max(...rolls) - Math.min(...rolls) <= 0.15 ? true : null;
-      },
+    const { outcome, found } = await this.findPlumb({
       actions: [{ id: "skip", label: "Skip the plumb line" }],
       timeoutMs: 90_000,
+      progress: (seen, pxPerMetre) =>
+        this.cb.row("plumb", {
+          status: "working",
+          value: !seen ? "Looking for it" : pxPerMetre ? `Found · 1 m = ${Math.round(pxPerMetre)} px` : "Found · no meter marks yet",
+        }),
     });
-    if (outcome.kind !== "value" || recent.length === 0) {
+    if (!found) {
       this.readout.plumb = { found: false, roll: null, rmsPx: null, coverage: null, pxPerMetre: null, marks: 0 };
       this.cb.row("plumb", { status: outcome.kind === "action" ? "skipped" : "check", value: "Not found: the phone's sensor stands in" });
       return;
     }
-    const roll = median(recent.map((x) => x.roll));
-    const scales = recent.map((x) => x.pxPerMetre).filter((x): x is number => x !== null);
-    this.pxPerMetre = scales.length >= 3 ? median(scales) : null;
-    const r = (roll * Math.PI) / 180;
-    this.up = { x: Math.sin(r), y: -Math.cos(r) };
     this.readout.plumb = {
       found: true,
-      roll,
-      rmsPx: median(recent.map((x) => x.rms)),
-      coverage: median(recent.map((x) => x.coverage)),
-      pxPerMetre: this.pxPerMetre,
-      marks: Math.max(...recent.map((x) => x.marks)),
+      roll: found.roll,
+      rmsPx: found.rmsPx,
+      coverage: found.coverage,
+      pxPerMetre: found.pxPerMetre,
+      marks: found.marks,
     };
-    // The sensor's own error against true vertical, kept for next time.
-    const sensor = this.orientation?.latest();
-    if (sensor && this.readout.level) {
-      const offset = sensor.roll - roll;
-      this.readout.level.offsetFromPlumb = offset;
-      writeDeviceSettings({ sensorRollOffset: offset });
-    }
+    if (found.sensorOffset !== null && this.readout.level) this.readout.level.offsetFromPlumb = found.sensorOffset;
     this.cb.row("plumb", {
-      status: this.pxPerMetre ? "ready" : "check",
-      value: this.pxPerMetre
-        ? `Found · picture turned ${fmt(roll, 2)}° · 1 m = ${Math.round(this.pxPerMetre)} px`
-        : `Found · picture turned ${fmt(roll, 2)}° · no meter marks`,
+      status: found.pxPerMetre ? "ready" : "check",
+      value: found.pxPerMetre
+        ? `Found · picture turned ${fmt(found.roll, 2)}° · 1 m = ${Math.round(found.pxPerMetre)} px`
+        : `Found · picture turned ${fmt(found.roll, 2)}° · no meter marks`,
     });
   }
 
@@ -477,62 +259,14 @@ export class SetupSession {
     const cue = first ? SETUP_LINES.walkIn : turnLine(view);
     this.say(cue, 0);
     this.cb.instruction(cue);
-    const diameterPx = this.pxPerMetre ? (this.pxPerMetre * 22) / 1000 : null;
-    this.setTask({ kind: "stickers", view, model: MEASURING_MODEL, delegate: this.delegate, diameterPx });
-    const frames: StickerFrame[] = [];
-    const history: PosePoint[][] = [];
-    let viewSeen: View | null = null;
-    let stillPx = Number.NaN;
-    let saidHold = false;
-    const outcome = await this.wait({
-      check: (r) => {
-        const pose = r.pose;
-        if (!pose || pose.people === 0 || !pose.points) {
-          frames.length = 0;
-          if (this.personSeen) this.say(SETUP_LINES.lostYou, 8000);
-          return null;
-        }
-        if (pose.people > 1) {
-          frames.length = 0;
-          this.say(SETUP_LINES.twoPeople, 8000);
-          return null;
-        }
-        const pts = pose.points;
-        const size = { width: r.width, height: r.height };
-        const framing = framingOf(pts, size, { margin: 0.03, minFill: 0.3, maxFill: 0.88 });
-        const frame = levelFrame(this.up ?? { x: 0, y: -1 });
-        const guess = viewOf(pts, frame);
-        viewSeen = guess.view;
+    const { outcome, frames, viewSeen, stillPx } = await this.holdView(view, {
+      holdFrames: HOLD_FRAMES,
+      timeoutMs: VIEW_TIMEOUT_MS,
+      actions: [{ id: "skip", label: `Skip the ${label.toLowerCase()}` }],
+      progress: (read, framing, pts) => {
         this.cb.row("person", { status: framing.whole ? "ready" : "working", value: `Fills ${Math.round(framing.fill * 100)}% of the picture` });
-        if (framing.advice) {
-          frames.length = 0;
-          const words =
-            framing.advice === "move-picture-left" || framing.advice === "move-picture-right"
-              ? moveLine(towardPersonSide(framing.advice === "move-picture-left" ? "picture-left" : "picture-right", view))
-              : framingLine(framing.advice);
-          if (words) this.say(words, 4000);
-          return null;
-        }
-        if (guess.view && guess.view !== view && guess.confidence >= 0.6) {
-          frames.length = 0;
-          this.say(SETUP_LINES.wrongWay, 6000);
-          return null;
-        }
-        history.push(pts);
-        if (history.length > 5) history.shift();
-        const torso = torsoLength(pts);
-        stillPx = stillness(history, STILL_INDICES);
-        if (history.length < 3 || !(stillPx <= 0.012 * torso)) {
-          frames.length = 0;
-          if (!saidHold && history.length >= 3) {
-            saidHold = true;
-            this.say(SETUP_LINES.holdStill, 0);
-          }
-          return null;
-        }
-        if (frames.length === 0) this.say(SETUP_LINES.holdStill, 6000);
-        if (r.stickers) frames.push(r.stickers);
-        this.showStickerTally(`${label}: reading ${frames.length} of ${HOLD_FRAMES}`);
+        if (read === 0) return;
+        this.showStickerTally(`${label}: reading ${read} of ${HOLD_FRAMES}`);
         if (!this.readout.person && this.pxPerMetre) {
           const nose = pts[0];
           const shoulders = midpoint(pts[11], pts[12]);
@@ -540,10 +274,7 @@ export class SetupSession {
           const bottom = Math.max(pts[29].y, pts[30].y, pts[31].y, pts[32].y);
           this.readout.person = { fill: framing.fill, heightFromScale: (bottom - top) / this.pxPerMetre };
         }
-        return frames.length >= HOLD_FRAMES ? true : null;
       },
-      actions: [{ id: "skip", label: `Skip the ${label.toLowerCase()}` }],
-      timeoutMs: VIEW_TIMEOUT_MS,
     });
     if (this.closed) return;
 

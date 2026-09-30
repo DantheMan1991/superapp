@@ -331,7 +331,14 @@ The posture check films a person in little or no clothing (ADR
 Every frame is read on the phone, in a worker, and closed; only numbers leave
 the worker (its one `send` throws on anything binary), only numbers reach the
 account, and a photo the person keeps stays in the browser's storage on that
-phone, never the gallery. The pose model is served from this site. Unlike S15's
+phone, never the gallery. The worker writes a kept photo into that storage
+itself, so no picture crosses to the page by message; the page reads it back
+only to draw it, behind a tap, with screenshots blocked in the app. Until the
+history slice saves them to the account, a check's numbers live in the same
+storage. Both are read back only for the personal space that took them: a
+filter, not a lock, since the storage belongs to the browser (a second person
+signed in there does not see them; code running on our origin could). The pose
+model is served from this site. Unlike S15's
 "never", this one holds against us too: no server of ours ever has a picture to
 leak. `tests/posture-privacy.test.ts` fails on network, storage, recording or
 another site's URL anywhere in the posture code; an exception needs the ADR's

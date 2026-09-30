@@ -82,3 +82,24 @@ export function allSetupLines(): string[] {
     ...STICKERS.map(missingLine),
   ];
 }
+
+/**
+ * What the check itself adds (slice 2). The person starts it at the phone,
+ * so it readies itself while they are there, then sends them to their
+ * outline; the second round starts from a fresh stance, so the gap between
+ * the rounds is the check's own noise, not one frozen stance measured twice.
+ */
+export const CHECK_LINES = {
+  stayByPhone: "Stay by the phone for a moment while I get ready.",
+  levelPhone: "The phone isn't level. Turn it on its tripod until the screen says it is.",
+  noPlumb: "I can't find the plumb line, so I'll use the phone's own level.",
+  phoneMoved: "The phone has moved. Hold on while I find the plumb line again.",
+  roundTwo: "Round two. Step off your outline and shake out, then step back on and face the phone.",
+  done: "That's the check done. You can come back to the phone.",
+} as const;
+
+/** Every line the check can say, for fetching the recordings ahead. */
+export function allCheckLines(): string[] {
+  const setupOnly: string[] = [SETUP_LINES.timing, SETUP_LINES.done, SETUP_LINES.allStickers, SETUP_LINES.seeYou];
+  return [...Object.values(CHECK_LINES), ...allSetupLines().filter((line) => !setupOnly.includes(line))];
+}

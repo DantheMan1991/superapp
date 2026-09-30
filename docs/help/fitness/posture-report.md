@@ -1,0 +1,88 @@
+# Reading your posture report
+
+> What one posture check found: each view drawn from your stickers, every measure in plain words with how much it can be trusted, what could not be measured and why, and your photos if you kept them.
+> **Route:** /personal/m/fitness/posture/checks/*
+> **Order:** 53
+
+The report opens by itself when a check ends. To open it later, click the check's row under `Your checks on this phone` on the posture check page. A check is kept in the browser on the phone that took it, so its report opens only there.
+
+The report describes how you stood during that check. It is not a medical assessment, and it never calls a result normal or not. Most people are a little uneven, and how you stand says little on its own about pain. What matters is how a measure changes between your own checks, and the report tells you how big a change has to be before it is real.
+
+## What you see
+
+- **`Posture report`**, the title, with {icon:scan-line} and the line `How you stood, from a check kept on this phone.`
+- **When the check was**, for example `Wednesday, Sep 30, 11:43 AM`. Under it, how many views it read (`All four views`, or `2 of 4 views`), how many rounds, and where true vertical came from: `Vertical from the plumb line, millimeters from its tape marks.` is the best there is.
+- **A yellow box** when the plumb line was not used: `Without the plumb line, the angles against level can be off by about a degree, the size of what is being measured. Hang it where the camera sees it next time.`
+- **The views**, a drawing of each view the check read, from the first round (or the second, when the first was skipped):
+  - the stick figure the pose model found, in gray;
+  - your stickers as dots: blue on your left side, green on your right, white on the middle;
+  - a dashed line for true vertical, through your feet;
+  - colored lines along which each measure was taken.
+  
+  Each drawing is as the camera saw you, so from the front your right side is on the left. It is turned so true vertical is straight up, even if the phone was a little crooked.
+- **`Measured reliably`**, the measures a photo can take well. Each row shows:
+  - the measure's name and {badge:Reliable|secondary};
+  - the result in words, in large type, for example `Left shoulder lower by 1.9° (14 mm)`. Millimeters show when the plumb line's tape marks gave the scale;
+  - how your two rounds agreed, for example `Your two rounds agreed within 0.4°. A change of more than 3.6° between checks would be real.` The second sentence is the smallest change between two checks that is more than measuring noise. When the rounds differ by more than that, the line is yellow: `Your two rounds differed by 5.0°, more than a real change: stand the same way each round.`;
+  - a line of context, when the measure has one;
+  - where it came from, for example `From the front and back, by your stickers.` `by the pose model's points (no sticker)` means a sticker was missing and the model stood in, which is less exact.
+
+  The reliable measures:
+  - `Shoulder level`, from the front and back: the two shoulder tip stickers against level. `Level`, or which shoulder is lower and by how much, for example `Right shoulder lower by 1.0° (6 mm)`. A real change is more than 3.6°. If a shoulder sticker is missing, the pose model's shoulder stands in and the measure moves to `Trend only`.
+  - `Head over shoulders`, from the sides: the angle up from the base of your neck to your ear, against level, for example `47.9°`. Healthy adults in studies average about 49°. A lower number means the head sits further forward. A real change is more than 5°.
+  - `Body line`, from the sides: your shoulder tip over your outer ankle bone, against vertical. `Upright`, `Leaning forward by 1.5°` or `Leaning back by 1.0°`. Healthy adults in studies lean about 1.5° forward. A real change is more than 2.9°.
+  - `Right knee, standing` and `Left knee, standing`, from the front: the front hip bone, kneecap and front of the ankle. `Straight`, `Turns in by 4.1°` when the knee sits inside the line from hip to ankle, or `Turns out by 2.0°` when it sits outside. A real change is more than 2.7°.
+- **`Trend only`**, measures that depend too much on exactly where a sticker went, or on the shape of your bones, to read as a value. Compare them only with your own earlier checks. Each row has the same parts, with {badge:Trend only|outline}:
+  - `Front hip bones`, from the front: `Level`, or which front hip bone is lower, for example `Right front hip bone lower by 0.8° (3 mm)`. A real change is more than 5.8°.
+  - `Low back dimples`, from the back, only with the plumb line's tape marks: `Level`, or which dimple is lower, for example `Left dimple lower by 4 mm`. Differences under about 2 cm cannot be told apart from where the stickers went.
+  - `Pelvis tilt`, from the sides: the front hip bone against the low back dimple. `Level`, `Tipped forward by 8.1°` or `Tipped back by 2.0°`. Bone shape alone varies this by up to 11° between people. A real change is more than 8°.
+  - `Head tilt`, from the front, by the pose model's ears: `Level`, or `Tilted to your left by 2.0°`. A real change is more than 3°.
+  - `Trunk over hips`, from the front (breastbone over the middle of the front hip bones) and the back (base of the neck over the middle of the low back dimples): `Straight over your hips`, or `Shifted to your right by 2.7°`. A real change is more than 6.5°.
+  - `Right shoulder, from the side` and `Left shoulder, from the side`: the shoulder tip against the line from the side hip bone up to the ear. `On the line`, `Ahead of the line by 6.0°` or `Behind the line by 2.0°`. A real change is more than 8°.
+  - `Right knee, from the side` and `Left knee, from the side`: the side hip bone, outer knee and outer ankle bone. `Straight`, `Bends back 3.0°` when the knee sits behind the line from hip to ankle, or `Stays bent 2.0°`. A real change is more than 12.7°.
+- **`Not measured this time`**, each measure the check could not take, with why. For example `The right side or left side view was not captured.` when those views were skipped, or `Needs both shoulder tip stickers, from the front or the back.` when stickers were missing. Put the sticker back on, or check it in [Checking your setup](posture-setup.md), before the next check.
+- **`Along the way`**, what happened during the check that affects the report, when anything did:
+  - `This phone reports no tilt, so the level was not checked.`;
+  - `The phone was not level: turned 2.1°, tipped 0.3°.`, when you tapped {button:Continue anyway|outline};
+  - `The plumb line's tape marks were not seen, so there are no millimeters.`;
+  - `No plumb line: true vertical came from the phone's own level, and there are no millimeters.`;
+  - `The phone moved during the check; the plumb line was found again.`, or `The phone moved during the check and the plumb line was not found again: later views use the phone's own level.`;
+  - a view that was not read, for example `Back, round 2: skipped.`, `Left side, round 1: no steady picture in time.` or `Right side, round 2: not taken, the check was finished early.`;
+  - a photo that was not kept, for example `The front photo was not kept: the phone took too long.`, or `Photos could not be kept on this phone: ...`;
+  - `Something went wrong reading the pictures: ...`, when the pose model reported a problem.
+- **`Photos on this phone`**, only when the check kept photos and they are still on this phone. It says how many, kept only in this browser on this phone, never uploaded.
+  - {button:Show the photos|outline|eye} shows them, one for each view. In the Yosher app, screenshots are blocked while they show. {button:Hide the photos|outline|eye-off} hides them again.
+  - `Show the lines`, a switch, on at first: draws true vertical through your feet as a dashed white line, the measures' lines in orange, and a dot on each sticker the check found. Turn it off to see the photo on its own.
+  - Tap a photo to make it bigger, and again to make it smaller.
+  - {button:Delete the photos|ghost|trash} asks `Delete this check's photos?` and says `They are gone from this phone for good. The check's numbers and its report stay.` Click {button:Delete the photos|destructive} to delete them, or {button:Keep them|ghost}.
+- **A note**: `This describes how you stood during this check, for fitness and body awareness. It is not a medical assessment. Most people are a little uneven, and how you stand says little on its own about pain.`
+- **{button:Copy the numbers|primary|copy}** copies the report as text, and reads `Copied`. The text has each measure's words and each round's value, what was not measured, what happened along the way, and a list of each view's numbers for tuning: which stickers were found, how still you were, and the scale. No picture of you is in it. Paste it to a trainer or a physiotherapist, or send it to us.
+- **{button:Back to the posture check|outline}** goes back to the posture check page.
+- **{button:Delete this check|ghost|trash}** asks `Delete this check?` and says `Its numbers and its photos are gone from this phone for good. It is kept nowhere else.` Click {button:Delete this check|destructive} to delete it and go back to the posture check page, or {button:Keep it|ghost}.
+
+## How to read a change
+
+1. Open two reports from `Your checks on this phone`.
+2. Find the same measure in each.
+3. Take the difference. If it is bigger than the change the row calls real, it is more than measuring noise.
+4. If it is smaller, the two checks cannot be told apart. That is the honest answer, and it is common for weeks at a time.
+
+Put the stickers on the same way each time, and stand in the same outline with the phone at the same height and distance. Most of the noise is where a sticker went.
+
+## Messages
+
+| Message | What it means |
+| --- | --- |
+| `This check is not on this phone` | The check was taken on another phone or in another browser, or it was deleted, or the site's data was cleared. A check is kept only where it was taken. Open the page on that phone. |
+| `Opening the check` | The report is being read from the phone's storage. |
+| `Copied` | The numbers are on your clipboard. Paste them where you like. |
+
+## Not on this page
+
+- **Comparing checks side by side.** Each report stands on its own for now. The history, with changes worked out for you against your own noise, comes in a later update.
+- **This check on your other devices.** It is kept only on the phone that took it until a later update saves the numbers to your account. The photos stay on the phone for good.
+- **A score or a verdict.** The report never adds measures into one number, and never says a result is good or bad.
+
+## Who can do what
+
+Only you. The posture check is part of Workouts, in your personal space, and nobody else can open it. If someone else signs in to Yosher in the same browser on your phone, they do not see your checks or photos.

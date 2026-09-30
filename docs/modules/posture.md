@@ -2,7 +2,8 @@
 
 > Measure how a person stands and moves with their phone's camera: stickers on
 > the bones, a plumb line beside them, the phone on a tripod reading every
-> picture itself and keeping only numbers. Part of [Workouts](fitness.md) in the
+> picture itself and keeping numbers (and a photo of each view only when the
+> person asks, on that phone). Part of [Workouts](fitness.md) in the
 > [personal space](personal-space.md). The decisions are
 > [ADR 0118](../decisions/0118-a-posture-checks-pictures-never-leave-the-phone.md)
 > (the pictures never leave the phone) and
@@ -15,6 +16,82 @@
 
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
+
+### 2026-09-30 — Slice 2: the standing check (`claude/posture-standing-check`)
+
+The founder's "go for it", built while he buys the cord, the tape and the blue
+dots: his setup readout tunes this slice rather than gates it.
+
+- **The check** (`/personal/m/fitness/posture/check`; `client/check-session.ts`,
+  `components/posture-check.tsx`). The person taps Start at the phone and
+  stays there while it opens the saved main lens, lets the color settle and
+  locks it, checks the level (and asks only when it is off), and finds the
+  plumb line (20 s, else the sensor's up and a note). Then front, right, back,
+  left, each held for twelve still frames, twice. Round two starts with "step
+  off your outline and shake out" and waits up to 10 s for the hips to move
+  0.3 torso lengths or leave the picture, so the gap between the rounds
+  includes a fresh stance, not one frozen stance read twice. A tripod knocked
+  mid-check (the sensor's roll moving over 1° from where it was when the plumb
+  line was found) finds the plumb line again. Skip a view, or "Finish with
+  what's done". After a first-round view the coach names up to two missing
+  stickers, so one can be pressed back on before round two. The screen shows
+  what the coach last said.
+- **The measures and the report** (`core/measures.ts`, `core/report.ts`; ADR
+  0119). Fourteen measures in the level frame, stickers wherever a bone is
+  involved; the pose model's points only for the ears (head tilt from the
+  front, the ear from the side when its sticker is missing) and for shoulders
+  whose stickers are missing, which drops that measure to trend-only. A
+  measure's readings are averaged within a round, then across rounds; the gap
+  between the rounds is shown against the published smallest real change
+  (`noiseWords`) and flagged when bigger. The report
+  (`/personal/m/fitness/posture/checks/[checkId]`, `components/posture-report.tsx`)
+  draws each view from its points, turned to true vertical, with the lines
+  each measure was taken along (`report-figure.tsx`); then reliable, trend
+  only, not measured and why, "Along the way", photos, "Copy the numbers" (the
+  report plus each hold's numbers for tuning, `detailsText`) and delete. It is
+  rebuilt from the check's numbers each time it opens, so a fix to the
+  arithmetic reaches old checks.
+- **Kept on the phone** (`store/db.ts`, `store/checks.ts`). IndexedDB
+  `yosher-posture`: `checks` (the numbers) and `photos`. Every read is filtered
+  to the personal space that took it. Leaving mid-check deletes the check and
+  its photos. A check that never finished because the page went (a reload,
+  the tab closed) is swept the next time the posture page or the check opens:
+  a running check holds a Web Lock (`holdCheckLock`) that the browser lets go
+  when the page goes, so one nobody holds is abandoned (after two hours where
+  the browser has no Web Locks), with any photo whose check is gone.
+- **Photos, the founder's choice** (ADR 0118). Off until "Keep a photo of each
+  view on this phone" is turned on, then remembered per phone. One per view,
+  from the first round (the second when the first was skipped), made a JPEG
+  (2400 px on the long side at most, quality 0.85) and written into IndexedDB
+  by the worker itself (`worker/photo-writer.ts`): the page learns only that
+  it was kept and its size, so "only numbers leave the worker" still holds.
+  The report reads them back behind "Show the photos" into a canvas (no object
+  URL), with `FLAG_SECURE` on in the app while they show, the lines over them
+  on a switch, and a delete.
+- **The shared machinery** (`client/capture-base.ts`): the lens, the worker,
+  the locks, the level, the plumb line and the hold, moved out of
+  `setup-session.ts`, whose steps and readout are unchanged.
+
+Tests: `tests/posture-measures.test.ts` (21: each measure's sign in the
+person's own terms on drawn stickers, a crooked phone undone, two rounds into a
+value and a noise, why a measure is missing, trend-only when the model stood
+in, no diagnostic word, the text and the tuning details) and
+`tests/posture-privacy.test.ts` (the three storage files allowed with their
+reasons, `.objectStore(` added to the storage tokens, a photo only behind the
+person's switch and only from the worker, a photo read back only for its
+owner).
+
+Driven in the browser pane on the slice-1 test picture: the front read in both
+rounds (the drawn −0.8° plumb undone, 730 px/m), the other views skipped (the
+picture faces front); the report matching the drawn stickers (left shoulder
+lower 1.9°, 14 mm; right knee in 4.1°); the photo written by the worker
+(1280 × 1920, 168 KB) and drawn with its lines on the stickers; closing
+mid-check deleting the check and its photo, by the X and by a full page load
+(the lock let go, the sweep at once); the sweep removing an unfinished check
+nobody held, with its photo, and an orphan photo, but keeping one whose lock
+another page held and a finished one; both deletes; the
+not-on-this-phone page; 375 px without sideways scroll. **The side and back
+views have met no real picture**, only the unit fixtures.
 
 ### 2026-09-30 — The check in the app (`claude/app-camera`)
 
@@ -221,18 +298,22 @@ weights unclear; COCO-WholeBody, BEDLAM and Sapiens non-commercial).
 
 [ADR 0118](../decisions/0118-a-posture-checks-pictures-never-leave-the-phone.md).
 Frames are read in the worker and closed; only numbers leave it (`send`
-refuses binary); the account keeps numbers; kept photos stay on the phone,
-never the gallery. The camera's own picture is covered by the stick figure
+refuses binary); the account keeps numbers (from slice 3; until then the
+phone does); kept photos stay on the phone, never the gallery, written into
+IndexedDB by the worker itself (`photo-writer.ts`) and read back by the report
+behind a tap. Everything kept on the phone is read back only for the personal
+space that took it. The camera's own picture is covered by the stick figure
 once a person is in view. `tests/posture-privacy.test.ts` refuses network,
-storage (but the phone's own settings), recording, photographs and other
-sites anywhere in the posture code.
+storage, recording, photographs and other sites anywhere in the posture code,
+but for the files it lists with their reasons: the phone's settings, the
+check store and the photo writer.
 
 ## The slices
 
 | # | Slice | Done when |
 | --- | --- | --- |
 | 1 | **Check your setup** | Built (the build log). The founder runs it on his S25 and sends the readout |
-| 2 | **The standing check** | The coach leads four views, twice; each view is captured when framed, facing the right way and still; the report shows every measure above with its noise, the figure drawn from the points; kept photos (his choice) stored on the phone behind a tap |
+| 2 | **The standing check** | Built (the build log): the coach leads four views, twice; each view is captured when framed, facing the right way and still; the report shows every measure above with its noise, the figure drawn from the points; kept photos (his choice) stored on the phone behind a tap. Done when the founder has run it on his S25 |
 | 3 | **History** | Checks saved as numbers and sticker places only; compared with any earlier check; a change called only beyond the person's own noise; each sticker's place against last time checked before measuring; numbers exported; a retake nudged at each program phase |
 | 4 | **Movement** | Paced double-leg and single-leg squats, single-leg stance and arms overhead: a film held in memory, read after the set at the model's pace, never kept |
 | 5 | **During a workout** | Live cues in workout mode through the seams it left: the stage, `coachSay({ key: "posture" })`, the enrollment's side |
@@ -241,9 +322,22 @@ sites anywhere in the posture code.
 
 ## Data model
 
-None yet: slice 1 keeps nothing in the database. The phone keeps its own
-settings (`yosher.posture.device.v1` in localStorage: the chosen camera, the
-delegate, the sensor's offset, the last readout; never a picture).
+Nothing in the database yet. The phone keeps:
+
+- its own settings (`yosher.posture.device.v1` in localStorage: the chosen
+  camera, the delegate, the sensor's offset, the last readout, the photo
+  switch; never a picture);
+- the checks (slice 2), in IndexedDB `yosher-posture` version 1
+  (`store/db.ts`):
+  - `checks`, key `id` (a UUID made on the phone, so slice 3 can keep it as
+    the account's id), index `owner` (the personal tenant's id): `at`,
+    `status` (`running` while photos are being kept, then `done`),
+    `keepPhotos`, `captures` (per view and round: true up and where it came
+    from, px per metre, the frame's size, each sticker's median place, the 33
+    pose points' medians, frames held, stillness), `notes`, `version`;
+  - `photos`, key `[checkId, view, round]`, index `checkId`: the JPEG `blob`,
+    its size, `scale` (photo pixels per frame pixel, so the check's points land
+    on it), `at`.
 
 Planned for slice 3, every table with `tenant_id`, FORCE RLS and composite
 keys, like fitness's: `fitness_posture_checks` (when, the setup: camera
@@ -253,22 +347,37 @@ per check (numbers) for the placement check.
 
 ## Key files & seams
 
-- `src/modules/fitness/posture/core/` — the pure half (above), tested.
-- `src/modules/fitness/posture/worker/` — `posture.worker.ts` and
-  `protocol.ts` (the messages; numbers only).
-- `src/modules/fitness/posture/client/` — `setup-session.ts` (the setup
-  check's steps), `camera.ts`, `orientation.ts`, `frames.ts` (a track's
+- `src/modules/fitness/posture/core/` — the pure half (above), tested:
+  `measures.ts` (`readView`, `wordsFor`, the definitions and their noise),
+  `report.ts` (`captureFrom`, `buildReport`, `noiseWords`, `reportText`,
+  `detailsText`, `linesOf`), `skeleton.ts` (the figure's bones), `lines.ts`
+  (every spoken line, `CHECK_LINES` for the check).
+- `src/modules/fitness/posture/worker/` — `posture.worker.ts`, `protocol.ts`
+  (the messages; numbers only) and `photo-writer.ts` (a kept photo, straight
+  into IndexedDB).
+- `src/modules/fitness/posture/client/` — `capture-base.ts` (what both
+  captures share: the lens, the worker, the locks, the level, the plumb line,
+  the hold), `setup-session.ts` (the setup check's steps), `check-session.ts`
+  (the check's), `camera.ts`, `orientation.ts`, `frames.ts` (a track's
   frames to the worker, or a video's), `device-settings.ts`, `voice.ts`,
   `screen-privacy.ts` (`FLAG_SECURE` in the app).
+- `src/modules/fitness/posture/store/` — `db.ts` (the IndexedDB schema,
+  opened the same way by the page and the worker) and `checks.ts` (the page's
+  reads, deletes and the sweep, all by owner).
 - `src/lib/native-bridge.ts` (`privacy`, `keepAwake`) and
   `src/lib/native-app-core.ts` (`APP_CAMERA_VERSION`, `appCanUseCamera`): the
   app's side, which the web decides with.
 - `src/modules/fitness/posture/components/` — `setup-check.tsx`,
-  `overlay.tsx`, `diagrams.tsx`, `last-readout.tsx`, `posture-card.tsx`.
-- `src/app/personal/(space)/m/fitness/posture/page.tsx` and `setup/page.tsx`.
+  `posture-check.tsx`, `posture-report.tsx`, `report-figure.tsx`,
+  `check-photos.tsx`, `saved-report.tsx`, `checks-on-phone.tsx`,
+  `camera-message.ts`, `overlay.tsx`, `diagrams.tsx`, `last-readout.tsx`,
+  `posture-card.tsx`.
+- `src/app/personal/(space)/m/fitness/posture/page.tsx`, `setup/page.tsx`,
+  `check/page.tsx` and `checks/[checkId]/page.tsx`.
 - `scripts/copy-pose-assets.ts`, `public/pose/` (gitignored), the `/pose/`
   headers in `next.config.ts`, and the matcher in `src/proxy.ts`.
-- `docs/help/fitness/posture.md`, `posture-setup.md`.
+- `docs/help/fitness/posture.md`, `posture-setup.md`, `posture-check.md`,
+  `posture-report.md`.
 
 ## Decisions & gotchas
 
@@ -298,6 +407,36 @@ per check (numbers) for the placement check.
   says where it was looked for (`lookedFor`) and whether it was looked for at
   all (`unsearched`). The first drive's "missing" ankle was a test picture's
   dot drawn on the shoe.
+- **A kept photo is written by the worker, not the page.** The page asks for
+  one (`photo`) and hears back numbers (`ok`, the size); the JPEG goes from the
+  frame to IndexedDB inside the worker. So ADR 0118's "only numbers leave the
+  worker" still holds, and no page code ever holds a frame.
+- **`takePhoto` is a banned token** (the ImageCapture API, which stops the
+  stream): a method first named that failed the privacy scan, and is
+  `keepViewPhoto`. Rename, never allow-list, a false hit.
+- **The storage is the browser's, not the person's.** Every read of a check or
+  a photo is filtered by `owner` (the personal tenant's id), so a second person
+  signed in on the same browser does not see them. A filter, not a lock: code
+  on our origin could read them, which ADR 0118 accepted with the storage.
+- **Round two starts from a fresh stance.** Read twice without moving, the
+  rounds would agree to a tenth of a degree and the "noise" would be the
+  camera's alone; stepping off and back on puts the person's own stance
+  variation into it, which is what a next-week check will have.
+- **A finished check lets its last line play.** The report opening unmounts
+  the check, and `close()` would silence the voice queue mid-sentence;
+  `CheckSession.close` skips that once the check is saved.
+- **The report is rebuilt from the numbers every time it opens**, never
+  stored as words, so a fix to a measure reaches every check already taken.
+- **A check with photos exists from its start** (`status: "running"`), so a
+  photo is never kept for a check the phone does not have. Storage that will
+  not open turns the photos off for that check, with a note, instead of
+  failing it.
+- **React's clean-up never runs when the page goes.** Closing with the X
+  deletes an unfinished check; a reload or a closed tab did not, and the first
+  drive found its photo still on the phone. A Web Lock held for the check's
+  life is let go by the browser itself, so the sweep can tell an abandoned
+  check from one running in another tab at once. The sweep never touches a
+  check that started after it began.
 
 ## Open items
 
@@ -318,5 +457,14 @@ per check (numbers) for the placement check.
   `level.sensor` will say which paths the app took.
 - **Self-placed stickers are unstudied**: the placement check (slice 3) is how
   their error will be measured.
-- The side figure in the sticker drawing is rough; worth a better drawing
-  when slice 2's report draws the figure properly.
+- The side figure in the sticker drawing is rough; the report's figures are
+  drawn from the points, so only the setup page's drawing is left to improve.
+- **The check has not met a real person.** Side and back views have been read
+  only from unit fixtures; the first check on the S25 is the test of the view
+  guessing, the side stickers' predictions and the 12-frame hold at the
+  phone's frame rate.
+- **Whether the phone keeps the storage.** "Keep a photo" asks
+  `navigator.storage.persist()`; Chrome decides for itself, and nobody has
+  seen its answer on the S25, or IndexedDB in the app's WebView.
+- **Slice 3 carries phone checks into the account**: the ids are UUIDs made on
+  the phone for that; the photos stay where they are.

@@ -92,12 +92,40 @@ export interface NativeBridge {
    * the handset's own engine inside the app, the browser's outside it.
    */
   speak: SpeakPlugin | null;
+  /**
+   * Null in a browser, and on any app build before 1.0.8.
+   *
+   * `FLAG_SECURE` for a screen that shows the camera or a kept photo (the
+   * posture check, ADR 0118): no screenshot, no screen recording, a blank
+   * thumbnail in the app switcher. A page cannot do this for itself; only the
+   * shell can, and only while it is asked to.
+   */
+  privacy: PrivacyScreenPlugin | null;
+  /**
+   * Null in a browser, and on any app build before 1.0.8.
+   *
+   * The screen kept on (`FLAG_KEEP_SCREEN_ON`) while a workout or a posture
+   * check runs, where a WebView's own Screen Wake Lock is not to be relied on.
+   */
+  keepAwake: KeepAwakePlugin | null;
 }
 
 /** What the shell offers for saying something out loud. */
 export interface SpeakPlugin {
   speak(options: { text: string }): Promise<void>;
   hush(): Promise<void>;
+}
+
+/** The subset of @capacitor/privacy-screen the page uses. */
+export interface PrivacyScreenPlugin {
+  enable(config?: { android?: { dimBackground?: boolean; privacyModeOnActivityHidden?: "none" | "dim" | "splash" } }): Promise<unknown>;
+  disable(): Promise<unknown>;
+}
+
+/** The subset of @capacitor-community/keep-awake the page uses. */
+export interface KeepAwakePlugin {
+  keepAwake(): Promise<void>;
+  allowSleep(): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -140,6 +168,12 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
   // rather than calling one that is not there.
   const voiceUsable =
     voice !== null && typeof voice.speak === "function" && typeof voice.hush === "function";
+  const privacy = plugins && isRecord(plugins.PrivacyScreen) ? plugins.PrivacyScreen : null;
+  const privacyUsable =
+    privacy !== null && typeof privacy.enable === "function" && typeof privacy.disable === "function";
+  const awake = plugins && isRecord(plugins.KeepAwake) ? plugins.KeepAwake : null;
+  const awakeUsable =
+    awake !== null && typeof awake.keepAwake === "function" && typeof awake.allowSleep === "function";
 
   return {
     platform,
@@ -147,6 +181,8 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
     app: appUsable ? (appPlugin as unknown as AppPlugin) : null,
     tell: tellUsable ? (tell as unknown as TellPlugin) : null,
     speak: voiceUsable ? (voice as unknown as SpeakPlugin) : null,
+    privacy: privacyUsable ? (privacy as unknown as PrivacyScreenPlugin) : null,
+    keepAwake: awakeUsable ? (awake as unknown as KeepAwakePlugin) : null,
   };
 }
 

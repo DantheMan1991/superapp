@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  appCanUseCamera,
+  APP_CAMERA_VERSION,
+  compareVersions,
   isNativeAppRequest,
   isNativeAppUserAgent,
   nativeAppEntryRedirect,
   nativeAppInfo,
 } from "@/lib/native-app-core";
+import { readNativeBridge } from "@/lib/native-bridge";
 
 /**
  * The one question the web asks about the mobile app: am I inside it? The
@@ -63,5 +67,47 @@ describe("isNativeAppRequest", () => {
     expect(isNativeAppRequest({ userAgent: "Mozilla/5.0", cookie: "" })).toBe(false);
     expect(isNativeAppRequest({ userAgent: "Mozilla/5.0", cookie: "true" })).toBe(false);
     expect(isNativeAppRequest({})).toBe(false);
+  });
+});
+
+/**
+ * WHICH APP CAN USE THE CAMERA (docs/modules/mobile-app.md, 1.0.8): an older
+ * build never declared it, so Android refuses it with no dialog, and the
+ * posture check must tell that person to update rather than to allow.
+ */
+describe("the camera in the app", () => {
+  it("compares versions as numbers, part by part", () => {
+    expect(compareVersions("1.0.8", "1.0.8")).toBe(0);
+    expect(compareVersions("1.0.10", "1.0.8")).toBeGreaterThan(0);
+    expect(compareVersions("1.0.7", "1.0.8")).toBeLessThan(0);
+    expect(compareVersions("1.1", "1.0.9")).toBeGreaterThan(0);
+    expect(compareVersions("2", "1.9.9")).toBeGreaterThan(0);
+  });
+
+  it("knows a build before 1.0.8 cannot, and a browser is not the question", () => {
+    expect(APP_CAMERA_VERSION).toBe("1.0.8");
+    expect(appCanUseCamera(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.7 (android)"))).toBe(false);
+    expect(appCanUseCamera(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.8 (android)"))).toBe(true);
+    expect(appCanUseCamera(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.12 (android)"))).toBe(true);
+    expect(appCanUseCamera({ version: null, platform: "android" })).toBe(false);
+    expect(appCanUseCamera(null)).toBe(true);
+  });
+});
+
+describe("the shell's privacy screen and keep-awake", () => {
+  const nativeWindow = (plugins: Record<string, unknown>) => ({
+    Capacitor: { isNativePlatform: () => true, getPlatform: () => "android", Plugins: plugins },
+  });
+
+  it("finds each only when the shell carries all of its methods", () => {
+    const privacy = { enable: async () => ({}), disable: async () => ({}) };
+    const keepAwake = { keepAwake: async () => {}, allowSleep: async () => {} };
+    const bridge = readNativeBridge(nativeWindow({ PrivacyScreen: privacy, KeepAwake: keepAwake }));
+    expect(bridge?.privacy).toBe(privacy);
+    expect(bridge?.keepAwake).toBe(keepAwake);
+    // A build before 1.0.8, or a half-built shell: nothing to call.
+    expect(readNativeBridge(nativeWindow({}))?.privacy).toBeNull();
+    expect(readNativeBridge(nativeWindow({ PrivacyScreen: { enable: async () => ({}) } }))?.privacy).toBeNull();
+    expect(readNativeBridge(nativeWindow({ KeepAwake: { keepAwake: async () => {} } }))?.keepAwake).toBeNull();
   });
 });

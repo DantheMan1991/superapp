@@ -1,6 +1,6 @@
 {
   "name": "yosher-mobile",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "The Yosher mobile app: a native shell around yosherapp.com. See docs/modules/mobile-app.md.",
   "scripts": {
@@ -13,10 +13,12 @@
     "doctor": "cap doctor"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/android": "^8.5.1",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/ios": "^8.5.1",
+    "@capacitor/privacy-screen": "^2.0.1",
     "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3"

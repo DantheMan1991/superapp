@@ -6,7 +6,7 @@
 
 Open the posture check and click {button:Check your setup|primary}. The screen goes dark and fills the phone, because the phone will be on its tripod and you three meters away, listening to it. Run it before your first check, and again whenever the phone, the room or the stickers change.
 
-Nothing the camera sees leaves your phone. Once you are in the picture, the screen covers the camera's image with a stick figure, so anyone who picks up the phone sees the figure, not you.
+Nothing the camera sees leaves your phone. Once you are in the picture, the screen covers the camera's image with a stick figure, so anyone who picks up the phone sees the figure, not you. In the Yosher app (version 1.0.8 or later), screenshots and screen recordings are blocked while the camera is on, and the app switcher shows a blank card. In Chrome, nothing a page can do blocks a screenshot. The camera switches off as soon as the check is done.
 
 ## What you see
 
@@ -50,7 +50,8 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 | Message | What it means |
 | --- | --- |
 | `Allow the camera when your phone asks.` | The check is asking for the camera. Tap Allow. |
-| `This version of the app cannot use the camera yet. Open yosherapp.com in Chrome for the posture check.` | The Yosher app on your phone cannot use the camera until an update. Use Chrome on the phone meanwhile. |
+| `This version of the app cannot use the camera. Update the app, or open yosherapp.com in Chrome.` | Your Yosher app is older than version 1.0.8, which is the first that can use the camera. Install the newer app, or use Chrome on the phone meanwhile. |
+| `The camera was not allowed. Allow it for Yosher in your phone's settings, under Apps, Yosher, Permissions, then try again.` | In the Yosher app, you said no to the camera. Open your phone's Settings, then Apps, Yosher, Permissions, allow Camera, and start again. |
 | `The camera was not allowed. Allow it for this site in Chrome's settings, then try again.` | You said no to the camera, or Chrome has it blocked. Allow it in Chrome's site settings and start again. |
 | `This browser cannot use the camera.` | The browser has no camera support. Use Chrome. |
 | `No camera that faces away from the screen was found.` | The phone reported no camera on its back. |

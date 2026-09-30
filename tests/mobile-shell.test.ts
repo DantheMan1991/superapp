@@ -3,6 +3,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import app from "../mobile/app.json";
 import {
+  APP_CAMERA_VERSION,
+  compareVersions,
   isNativeAppUserAgent,
   nativeAppInfo,
   NATIVE_APP_UA_MARKER,
@@ -80,5 +82,44 @@ describe("the shell and the web agree", () => {
   it("keeps one version in one place", () => {
     const pkg = JSON.parse(readFileSync(shell("package.json"), "utf8")) as { version: string };
     expect(pkg.version).toBe(app.version);
+    // The native numbers too: a build whose versionName lags app.json would
+    // report one version to the web and another to Android.
+    const gradle = readFileSync(shell(path.join("android", "app", "build.gradle")), "utf8");
+    expect(gradle).toContain(`versionName "${app.version}"`);
+  });
+
+  /**
+   * THE CAMERA, for the posture check (docs/modules/posture.md; ADR 0118).
+   * The same trap as the microphone above, so the same guard: Capacitor asks
+   * Android for CAMERA when the WebView wants video, and an undeclared
+   * permission is refused without a dialog. And the web tells an app older
+   * than APP_CAMERA_VERSION to update rather than allow, so the build that
+   * declares the camera must report a version the web counts as able.
+   */
+  it("declares the camera, and reports a version the web knows can use it", () => {
+    const manifest = readFileSync(
+      shell(path.join("android", "app", "src", "main", "AndroidManifest.xml")),
+      "utf8",
+    );
+    expect(manifest).toContain("android.permission.CAMERA");
+    // Never REQUIRED: the posture check is one screen, and the Play listing
+    // must not be filtered off a device without a camera.
+    expect(manifest).toMatch(/android\.hardware\.camera"\s+android:required="false"/);
+    // Workout mode's buzz: navigator.vibrate is silent in a WebView without it.
+    expect(manifest).toContain("android.permission.VIBRATE");
+    expect(compareVersions(app.version, APP_CAMERA_VERSION)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("carries the privacy screen and keep-awake plugins, wired into the Android build", () => {
+    const pkg = JSON.parse(readFileSync(shell("package.json"), "utf8")) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies["@capacitor/privacy-screen"]).toBeTruthy();
+    expect(pkg.dependencies["@capacitor-community/keep-awake"]).toBeTruthy();
+    // `cap sync` writes these; a plugin missing from them is not in the APK.
+    const settings = readFileSync(shell(path.join("android", "capacitor.settings.gradle")), "utf8");
+    expect(settings).toContain(":capacitor-privacy-screen");
+    expect(settings).toContain(":capacitor-community-keep-awake");
+    const build = readFileSync(shell(path.join("android", "app", "capacitor.build.gradle")), "utf8");
+    expect(build).toContain("project(':capacitor-privacy-screen')");
+    expect(build).toContain("project(':capacitor-community-keep-awake')");
   });
 });

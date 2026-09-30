@@ -10,6 +10,46 @@
 
 ## Build log
 
+### 2026-09-30 — 1.0.8: the camera, a privacy screen and keep-awake (`claude/app-camera`)
+
+The founder wants the posture check ([posture.md](posture.md)) to work in the
+app as well as in Chrome. It opens the camera with `getUserMedia` inside the
+WebView, the same road as the microphone took, so the same three things:
+
+- **`android.permission.CAMERA` declared**, with `android.hardware.camera`
+  NOT required (the Play listing is never filtered by it). Capacitor's
+  `BridgeWebChromeClient` turns the WebView's VIDEO_CAPTURE request into the
+  runtime CAMERA prompt; without the declaration Android refuses silently, as
+  it did the microphone. **VIBRATE** declared with it, for workout mode's
+  buzz ([fitness.md](fitness.md) had it waiting on this build).
+- **`@capacitor/privacy-screen` 2.0.1** (MIT). While the posture check's
+  camera is on, the web calls `PrivacyScreen.enable()`: `FLAG_SECURE`, so no
+  screenshot, no screen recording, no picture in the app switcher (ADR 0118),
+  and `disable()` when the screen is left. Kotlin; it brings its own Kotlin
+  Gradle plugin.
+- **`@capacitor-community/keep-awake` 8.0.1** (MIT): `FLAG_KEEP_SCREEN_ON`.
+  `useWakeLock` (workout mode and the posture check) uses it inside the app
+  instead of the WebView's Screen Wake Lock, which was never watched working.
+- **The web decides, by version.** `readNativeBridge` finds `privacy` and
+  `keepAwake` only when the shell carries all of their methods, so an older
+  build calls nothing. `APP_CAMERA_VERSION = "1.0.8"` and `appCanUseCamera`
+  (`native-app-core.ts`) let the posture check tell an older build's person to
+  update rather than to allow a permission it has no switch for.
+- Version **1.0.8**, `versionCode` 9, across `app.json`, `package.json`,
+  `package-lock.json` and `build.gradle`; `cap sync android` wrote the two
+  plugins into `capacitor.settings.gradle` and `capacitor.build.gradle`.
+
+`tests/mobile-shell.test.ts` asserts the camera and vibrate lines, the plugins
+in the package and in both Gradle files, `versionName` against `app.json`, and
+that the version is one the web counts as camera-able.
+`tests/native-app.test.ts` covers the version rule and the two plugins' reads.
+
+**Not verified on a handset by me.** This machine has no Android SDK; the
+workflow's debug APK is what proves it. On the phone: the camera prompt on the
+posture check's first Start; Settings, Apps, Yosher, Permissions then lists
+Camera; a screenshot during the check is refused; the screen stays on through
+a check and a workout; the pacer buzzes.
+
 ### 2026-09-13 — The shell gets a voice (`claude/the-phone-listens-on-one-tap`)
 
 `SpeakPlugin` joins `TellPlugin`: the page hands it an answer and Android's
@@ -542,13 +582,16 @@ from `/admin` — the same as any other departure.
 
 ## Open items
 
-- **iOS will need `NSMicrophoneUsageDescription` the day `mobile/ios/` is
-  generated.** There is no iOS project yet, so there is nothing to edit — but
-  the same failure is waiting there in a different costume: a WKWebView asking
-  for the microphone with no usage string in `Info.plist` does not prompt, it
-  **crashes the app**. Worse than Android's silent denial, and the fix is one
-  key. Written down here because `cap add ios` will generate a plist that does
-  not have it.
+- **iOS will need `NSMicrophoneUsageDescription` AND
+  `NSCameraUsageDescription` the day `mobile/ios/` is generated.** There is no
+  iOS project yet, so there is nothing to edit — but the same failure is
+  waiting there in a different costume: a WKWebView asking for the microphone
+  or the camera (the posture check, 1.0.8) with no usage string in
+  `Info.plist` does not prompt, it **crashes the app**. Worse than Android's
+  silent denial, and the fix is one key each. Written down here because
+  `cap add ios` will generate a plist that has neither. The privacy screen
+  plugin on iOS blurs the app switcher's picture but cannot stop a screenshot:
+  iOS has no `FLAG_SECURE`.
 
 - **Slice 1 shipped without signing.** What remains of the shell itself: a
   signed Android release build (an upload key in GitHub secrets, once the
@@ -568,7 +611,9 @@ from `/admin` — the same as any other departure.
   Clerk's sign-out has no hook the page owns yet.
 - **Slice 3 — camera, Face ID, universal links, PDF share.** Each a plugin on
   the native side and a small seam here (`/.well-known/apple-app-site-association`
-  and `assetlinks.json` as route handlers, driven by env).
+  and `assetlinks.json` as route handlers, driven by env). The camera, for
+  what the web itself films, is done in 1.0.8 (the WebView's `getUserMedia`,
+  no camera plugin); a native photo picker is not.
 - **Slice 4 — the store submissions.** A demo account with password sign-in
   and no MFA in a seeded tenant, kept alive for every future review; privacy
   labels; Play's data-safety form; screenshots per device.

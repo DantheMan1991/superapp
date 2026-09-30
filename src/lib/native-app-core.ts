@@ -42,6 +42,36 @@ export function nativeAppInfo(userAgent: string | null | undefined): NativeAppIn
 }
 
 /**
+ * The first app build that declares CAMERA (docs/modules/mobile-app.md,
+ * 2026-09-30). An older build asks Android for the camera and is refused
+ * without a dialog, so the web must not tell its user to "allow" something
+ * with no switch anywhere: it tells them to update instead.
+ */
+export const APP_CAMERA_VERSION = "1.0.8";
+
+/** Dotted versions compared part by part as numbers: below zero when `a` is older. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((p) => Number.parseInt(p, 10) || 0);
+  const pb = b.split(".").map((p) => Number.parseInt(p, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * Can this app build be given the camera at all? A browser is not an app
+ * build (`null`), so yes; an app that does not say its version is taken to be
+ * an old one.
+ */
+export function appCanUseCamera(info: NativeAppInfo | null): boolean {
+  if (!info) return true;
+  if (!info.version) return false;
+  return compareVersions(info.version, APP_CAMERA_VERSION) >= 0;
+}
+
+/**
  * Where the app lands when it asks for the site's front page. The marketing
  * landing page is for browsers; the app opens on the dashboard, which is the
  * sign-in card when signed out and the business when signed in. Decided

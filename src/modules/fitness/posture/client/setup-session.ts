@@ -115,15 +115,27 @@ export class SetupSession {
     if (this.closed) return;
     this.closed = true;
     this.act("closed");
+    this.releaseCamera();
+    stopPostureVoice();
+  }
+
+  /**
+   * The camera off and the worker gone: at the end of the check, and when the
+   * screen is left. The voice is not part of it, so the last line is still said.
+   */
+  private releaseCamera(): void {
     this.feed?.stop();
+    this.feed = null;
     if (this.worker) {
       this.post({ type: "stop" });
       this.worker.terminate();
+      this.worker = null;
     }
     this.orientation?.stop();
+    this.orientation = null;
     stopStream(this.stream);
+    this.stream = null;
     this.video.srcObject = null;
-    stopPostureVoice();
   }
 
   private post(message: ToWorker, transfer: Transferable[] = []): void {
@@ -638,6 +650,8 @@ export class SetupSession {
 
   private finish(): void {
     this.setTask({ kind: "idle" });
+    // Nothing more to look at: the camera goes off now, not when the screen is left.
+    this.cb.hideCamera(true);
     if (this.track && this.readout.camera) {
       const stats = frameStats(this.track);
       this.readout.camera.frames.delivered = stats.delivered;
@@ -658,6 +672,7 @@ export class SetupSession {
     const text = readoutText(this.readout);
     writeDeviceSettings({ lastReadout: text, lastReadoutAt: new Date().toISOString() });
     this.cb.instruction("Done. Copy the readout and send it over, then come back for the check itself.");
+    this.releaseCamera();
     this.cb.done(text);
   }
 }

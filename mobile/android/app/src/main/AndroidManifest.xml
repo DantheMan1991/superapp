@@ -88,4 +88,27 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!--
+        THE POSTURE CHECK'S CAMERA (docs/modules/posture.md; ADR 0118). The site
+        opens the camera with `getUserMedia` inside the WebView, exactly as it
+        opens the microphone above, and it fails exactly the same way without
+        this line: BridgeWebChromeClient catches the WebView's VIDEO_CAPTURE
+        request and asks Android for CAMERA at runtime, and a runtime request
+        for a permission never declared is denied instantly, with no dialog and
+        no switch in Settings to turn on. Every frame is read on the phone and
+        never leaves it.
+
+        NOT required, so the Play listing is not filtered off a device without
+        a camera: the posture check is one screen of one tool.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!--
+        WORKOUT MODE'S BUZZ (docs/modules/fitness.md, F2): `navigator.vibrate`
+        at the end of a set does nothing in a WebView whose app does not hold
+        VIBRATE. A normal permission, granted at install without asking.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

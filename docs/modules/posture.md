@@ -63,8 +63,10 @@ compared with its original and left out of trends, the CSV column),
 dropped for a check the space does not have), `isolation/posture` (a repeat
 cannot point across the wall).
 
-0436 on the **dev** branch only; **production waits for the founder's word**,
-before the merge (ADR 0014).
+0436 on dev and on **production** (the founder's word, 2026-09-30), before
+the merge (ADR 0014): the prod ledger had exactly it pending, `verify-rls`
+green on both (256 tables), and the FK read back from `pg_constraint` on
+production as `ON DELETE SET NULL (repeat_of)`.
 
 Driven in the browser pane on dev: a check, then the shoulder-moved picture,
 which stopped after the front view (`Left shoulder tip 3.5 cm lower`, the
@@ -652,7 +654,5 @@ check and its report opens offline.
   from his checks. The notes and the report carry every distance to tune them.
 - **Three repeat pairs is a rough figure** (ADR 0121, his call "higher or
   lower"): the report names the count, and each further repeat steadies it.
-- **Migration 0436 on production** waits for the founder's word, and goes
-  before the merge (ADR 0014); dev has it.
 - **Slice 3c**: a nudge to take a check when a workout program moves to its
   next phase.

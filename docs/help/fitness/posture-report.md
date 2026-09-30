@@ -17,7 +17,10 @@ The report describes how you stood during that check. It is not a medical assess
   - or your account's reason, if it refused the check.
 - **When the check was**, for example `Wednesday, Sep 30, 11:43 AM`. Under it, how many views it read (`All four views`, or `2 of 4 views`), how many rounds, and where true vertical came from: `Vertical from the plumb line, millimeters from its tape marks.` is the best there is.
 - **A yellow box** when the plumb line was not used: `Without the plumb line, the angles against level can be off by about a degree, the size of what is being measured. Hang it where the camera sees it next time.`
-- **`Compared with`**, a list of your checks taken before this one. It starts on the check just before, marked `The check before`, and your very first is marked `Your first check`. Choose `No comparison` to see this check on its own. The line under it says `A change is called real only when it is bigger than the measure's noise: the published figure, or your own once your checks show it is bigger.`
+- **On a repeat check**, a line saying which check it repeats: `A repeat of your check from 2:23 PM, with the stickers put back on. The differences between the two are your own measuring noise.`
+- **`Repeat this check`**, a card, on a check taken today that is not itself a repeat and has not been repeated yet. It says what a repeat is: take every sticker off, put them back on, and check again today; the difference between the two is your own measuring noise, and after three repeats your own figures replace the published ones, higher or lower. Under it, `Repeats so far: 1 of 3.`, or once you have three, `Your own figures are in use, from 3 repeats. Another one makes them steadier.` {button:Start the repeat|outline} opens the check as a repeat of this one. See [Doing a posture check](posture-check.md).
+- **`Compared with`**, a list of your checks taken before this one (repeats are left out). It starts on the check just before, marked `The check before`, and your very first is marked `Your first check`. A repeat starts on the check it repeats. Choose `No comparison` to see this check on its own. The line under it says `A change is called real only when it is bigger than the measure's noise: the published figure, your own from three repeat checks, or your rounds when they vary more.`
+  - **`Stickers against`** the compared check's day, for example `Stickers against Wed, Sep 30`: each sticker that sits 2 cm or more from its place on that check, with how far and which way, for example `Left shoulder tip` `3.5 cm lower`. Under the list, `The other 7 are within 2 cm of where they were.`, or `Every sticker is within 2 cm of where it was.` The small print says it is read against the pose model's points, so only a slip of 2 to 3 cm or more shows.
   - On your first check there is nothing to compare with, and the report says `This is your first check. Your next checks are compared with it, a measure at a time.`
 - **The views**, a drawing of each view the check read, from the first round (or the second, when the first was skipped):
   - the stick figure the pose model found, in gray;
@@ -29,8 +32,12 @@ The report describes how you stood during that check. It is not a medical assess
 - **`Measured reliably`**, the measures a photo can take well. Each row shows:
   - the measure's name and {badge:Reliable|secondary};
   - the result in words, in large type, for example `Left shoulder lower by 1.9° (14 mm)`. Millimeters show when the plumb line's tape marks gave the scale;
-  - when you are comparing, how it changed since the check chosen under `Compared with`. A tinted label says the change in the measure's own words when it is more than the noise, for example `Left side dropped 4.6° against the right`, or `Within your noise` when it is not. Under it, what that check said and what the change amounts to, for example `Was: Left shoulder lower by 1.9° (14 mm). More than the 3.6° a real change needs.` A change is never called better or worse: it is a change;
-  - how your two rounds agreed, for example `Your two rounds agreed within 0.4°. A change of more than 3.6° between checks would be real.` The second sentence is the smallest change between two checks that is more than measuring noise. It is the published figure until your own checks show that your rounds vary by more; then it is your own, and the sentence ends `(your own figure, from your checks)`. It never goes below the published figure. When the rounds differ by more than a real change, the line is yellow: `Your two rounds differed by 5.0°, more than a real change: stand the same way each round.`;
+  - when you are comparing, how it changed since the check chosen under `Compared with`. A tinted label says the change in the measure's own words when it is more than the noise, for example `Left side dropped 4.6° against the right`, or `Within your noise` when it is not. Under it, what that check said and what the change amounts to, for example `Was: Left shoulder lower by 1.9° (14 mm). More than the 3.6° a real change needs.` A change is never called better or worse: it is a change. When a sticker this measure is read from sat 2 cm or more from its place on that check, a yellow line says so, for example `The left shoulder tip sticker sat 3.5 cm lower than on Wed, Sep 30, so this change may be the sticker rather than you.`;
+  - how your two rounds agreed, for example `Your two rounds agreed within 0.4°. A change of more than 3.6° between checks would be real.` The second sentence is the smallest change between two checks that is more than measuring noise. It is the published figure until your own checks give a better one:
+    - after three repeat checks, the figure from your repeats, higher or lower than published, and the sentence ends `(your own figure, from 3 repeat checks)`;
+    - before that, the figure from your rounds, but only when it is bigger than published, ending `(your own figure, from your rounds)`.
+    
+    When the rounds differ by more than a real change, the line is yellow: `Your two rounds differed by 5.0°, more than a real change: stand the same way each round.`;
   - a line of context, when the measure has one;
   - where it came from, for example `From the front and back, by your stickers.` `by the pose model's points (no sticker)` means a sticker was missing and the model stood in, which is less exact.
 
@@ -56,7 +63,8 @@ The report describes how you stood during that check. It is not a medical assess
   - `The phone moved during the check; the plumb line was found again.`, or `The phone moved during the check and the plumb line was not found again: later views use the phone's own level.`;
   - a view that was not read, for example `Back, round 2: skipped.`, `Left side, round 1: no steady picture in time.` or `Right side, round 2: not taken, the check was finished early.`;
   - a photo that was not kept, for example `The front photo was not kept: the phone took too long.`, or `Photos could not be kept on this phone: ...`;
-  - `Something went wrong reading the pictures: ...`, when the pose model reported a problem.
+  - `Something went wrong reading the pictures: ...`, when the pose model reported a problem;
+  - a sticker the check stopped for, and what happened: `Not where last time's were: Left shoulder tip (3.5 cm lower). Kept as they were, as you said.` when you tapped {button:It's where it should be|outline}, `... Nobody moved to them, so they were kept as they were.` when nobody did, or `Still not where last time's were after a second look: ...` when it read the view again and the sticker was still off.
 - **`Photos on this phone`**, only on the phone that took the check, when it kept photos and they are still there. It says how many, kept only in this browser on this phone, never uploaded.
   - {button:Show the photos|outline|eye} shows them, one for each view. In the Yosher app, screenshots are blocked while they show. {button:Hide the photos|outline|eye-off} hides them again.
   - `Show the lines`, a switch, on at first: draws true vertical through your feet as a dashed white line, the measures' lines in orange, and a dot on each sticker the check found. Turn it off to see the photo on its own.
@@ -76,6 +84,15 @@ The report describes how you stood during that check. It is not a medical assess
 
 Put the stickers on the same way each time, and stand in the same outline with the phone at the same height and distance. Most of the noise is where a sticker went.
 
+## How to learn your own noise
+
+1. Take a check as usual.
+2. On its report, the same day, click {button:Start the repeat|outline} under `Repeat this check`.
+3. Take every sticker off, then put them back on the way you usually do.
+4. Tap {button:Start|primary} and do the check again.
+5. The repeat's report opens, compared with the check it repeats. The differences are your own measuring noise.
+6. After three repeats, every report holds a change to your own figures instead of the published ones. Repeats on different days give a truer figure, and each further one makes it steadier.
+
 ## Messages
 
 | Message | What it means |
@@ -90,7 +107,7 @@ Put the stickers on the same way each time, and stand in the same outline with t
 
 ## Not on this page
 
-- **Your own noise from a repeat check.** For now a change is held to the published figure, or to your own rounds when they vary more. A second check the same day with the stickers put back on, to learn your own figure, is being planned.
+- **A repeat of a check from another day.** A repeat has to be the same day, so the only difference is where the stickers went.
 - **Photos on another device.** They stay on the phone that took them.
 - **A score or a verdict.** The report never adds measures into one number, and never says a result is good or bad.
 

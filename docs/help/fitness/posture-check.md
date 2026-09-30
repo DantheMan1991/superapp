@@ -13,6 +13,7 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 - **`Posture check`**, the title, and {icon:x} at the top right, which closes the check and takes you back to the posture check page. Closing it before the end keeps nothing: the numbers so far and any photo it took are deleted.
 - **Before you start:**
   - a short dark box reading `The camera starts when you tap Start.`;
+  - for a repeat check, `A repeat of your check from 2:23 PM`, with what to do first: take every sticker off, then put them back on the way you usually do. The difference between the two checks is your own measuring noise, and after three repeats it replaces the published figures. See [Reading your posture report](posture-report.md) for where a repeat starts;
   - `This phone has not run the setup check yet. Check your setup first: it finds the main lens and proves the stickers can be seen.`, only on a phone that has never run the setup check. The words `Check your setup` open it;
   - four steps: the phone on its tripod at hip height, 3 to 3.5 m from your foot outline, with the plumb line beside the outline; your stickers on and the sound up; tap Start and stay by the phone until the voice sends you to your outline; then face the phone and turn when you are told, front, right side, back, left side, twice;
   - **`Keep a photo of each view on this phone`**, a switch. It is off until you turn it on, and the phone remembers your choice for next time. When it is on, the check keeps one photo from each side, from the first round, in this browser on this phone only. They are never uploaded and never put in your gallery. Clearing the site's data in your browser removes them, and the phone may too if it runs short of space;
@@ -20,6 +21,7 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 - **The four views**, `Front`, `Right`, `Back` and `Left`, with `Round 1 of 2` or `Round 2 of 2` beside them. The view being read now is highlighted. A view that is done shows {icon:check}. A view you skipped is crossed out.
 - **The picture.** What the camera sees, with the check's drawing over it: the plumb line it found in teal, a stick figure of you, each sticker it found as a dot in the sticker's color, and a dashed circle where it looked for a sticker and found none. Once you are in the picture, the camera's image is covered by the drawing on a dark background. {button:Show the camera|outline|eye} shows the image again, and {button:Hide the camera|outline|eye-off} covers it.
 - **What the coach said**, in large type: the last thing the voice told you, so anyone looking at the phone knows what it is waiting for. Every line is in Messages below.
+- **A sticker that is not where it was last time**, in the first round: a yellow list under the coach's words, each sticker with how far it sits from last time's place, for example `Left shoulder tip` `3.5 cm lower`. The check compares where each sticker sits on your body with where it sat on your last check (for a repeat, the check you are repeating), and stops when one moved 3 cm or more. Put it back, then face the phone again: the check reads the view again and says `Thanks. That matches last time.` when it does. {button:It's where it should be|outline} goes on without changing it. If you do not move to it in half a minute, the check goes on as it is. Either way the report says so. It only notices a slip of 2 to 3 cm or more, because it reads your body from the pose model's points.
 - **The progress bar**, while a view is being read. Above it, the view's name and `Waiting for you to be framed and still` until you are in the picture, facing the right way and still. Then `Reading 1 of 12` up to `Reading 12 of 12` as it reads twelve still pictures. When it has twelve, the coach says `Got it.`
 - **What the phone is doing**, with a spinner, while it gets ready: `Starting the camera`, then `Letting the color settle`, and the first time on a phone `Loading the pose model: about 30 MB, the first time on this phone`. At the end, `Saving the numbers`, while the check is kept on this phone and sent to your account. With no connection it is sent later, by itself.
 - **Chips** under it:
@@ -32,7 +34,8 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
   - {button:Continue anyway|outline}, while the phone is not level. The check goes on, and the report says the phone was not level;
   - {button:Go on without it|outline}, while it looks for the plumb line. The phone's own level stands in, which is less exact: the report says so;
   - {button:Skip the front|outline}, and the same for each side, while a view is waiting for you. That view is not measured in this round;
-  - {button:Finish with what's done|outline}, once at least one view is done. The check stops and the report opens with what it has.
+  - {button:Finish with what's done|outline}, once at least one view is done. The check stops and the report opens with what it has;
+  - {button:It's where it should be|outline}, while the check waits for you to put a sticker back. It keeps the sticker where it is.
 - **A yellow box**, when something went wrong that the check carries on past. See Messages.
 - **A red box**, when the check cannot go on, with {button:Back to the posture check|outline}. See Messages.
 
@@ -43,7 +46,7 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 3. Tap {button:Start|primary}. Allow the camera the first time your phone asks.
 4. Stay by the phone. The voice says `Stay by the phone for a moment while I get ready.` while it settles the color, checks the level and finds the plumb line. The first time on a phone it also downloads the pose model, about 30 MB, so use Wi-Fi. If it says `The phone isn't level. Turn it on its tripod until the screen says it is.`, turn the phone until the chip reads `Level`.
 5. When the voice says `Walk to your foot outline and face the phone.`, stand in the outline. Arms relaxed at your sides, weight on both feet, looking straight ahead.
-6. Stand still when it says `Hold still.` It reads twelve still pictures, a few seconds, then says `Got it.`
+6. Stand still when it says `Hold still.` It reads twelve still pictures, a few seconds, then says `Got it.` If it names a sticker that is not where it was last time, press it back where it belongs and face the phone again, or tap {button:It's where it should be|outline} if you placed it that way on purpose.
 7. Turn when it tells you: `Now turn so your right side faces the phone.`, then your back, then your left side. Stay in the outline as you turn.
 8. After the left side it says `Round two. Step off your outline and shake out, then step back on and face the phone.` Step off, shake out your arms and legs, and step back on. The four views are read again. The difference between the two rounds tells you how much your own stance varies.
 9. When it says `That's the check done. You can come back to the phone.`, your report is open. See [Reading your posture report](posture-report.md).
@@ -68,6 +71,9 @@ Nothing the camera sees leaves your phone. Once you are in the picture, the scre
 | `I've lost you. Come back into the picture.` | The check cannot see anyone. |
 | `I can see more than one person. Only you in the picture.` | Someone else is in the picture. The check waits until they leave it. |
 | `Not quite. Check which way you're facing.` | You are facing a different way from the view it wants. Turn as the last instruction said. |
+| `Your left shoulder tip sticker isn't where it was last time.` | Said by name, for up to two stickers, when one sits 3 cm or more from its place on your last check. The screen lists how far and which way. |
+| `If it slipped, put it back, then face the phone again.` | Move the sticker back to its bone, then stand in your outline facing the phone. The view is read again. |
+| `Thanks. That matches last time.` | After the second look, every sticker is back within 3 cm of last time's place. |
 | `Hold still.` | You are in place: stay still while it reads. It starts again if you move. |
 | `Got it.` | This view is done. |
 | `I can't find the right kneecap sticker.` | Said after a first-round view, by name, for up to two stickers it could not see, so you can press one back on before the second round. The report shows which measures a missing sticker stopped. |

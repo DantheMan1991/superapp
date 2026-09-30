@@ -124,6 +124,23 @@ d("posture checks (RLS)", () => {
     ).not.toBe("");
   });
 
+  it("B cannot hang a repeat of its own off A's check: the composite key refuses it", async () => {
+    expect(
+      await names(
+        withTenant(b, (tx) =>
+          tx.insert(schema.fitnessPostureChecks).values({
+            id: crypto.randomUUID(),
+            tenantId: b,
+            takenAt: new Date(),
+            localDay: "2026-10-01",
+            captures: CAPTURES,
+            repeatOf: aCheck,
+          }),
+        ),
+      ),
+    ).toContain("fitness_posture_checks_repeat_fk");
+  });
+
   it("nobody sees a check without a tenant context (FORCE RLS)", async () => {
     // The core suite's way: a transaction whose context is wiped, as a forgotten wrapper would leave it.
     const seen = await withSystem(async (tx) => {

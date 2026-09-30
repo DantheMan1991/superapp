@@ -17,6 +17,65 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — Slice 3b: a slipped sticker, and the person's own noise (`claude/posture-3b`)
+
+The founder's calls from a mockup, the same day
+([ADR 0121](../decisions/0121-a-persons-own-noise-comes-from-repeat-checks-and-a-slipped-sticker-is-put-back-before-it-is-measured.md)):
+the check STOPS for a sticker that moved since last time, and the report
+OFFERS a repeat check whose figures, after three, replace the published ones,
+higher or lower.
+
+- **Where a sticker went** (`core/placement.ts`, pure): each sticker's offset
+  from where its bone's landmark says it belongs (`predict`), in torso lengths
+  and the level frame, per view (`placesOf`); two checks' offsets give how far
+  each moved on the skin (`shiftsBetween`), in the plumb line's millimetres,
+  with the way in the person's terms ("3.5 cm lower", "toward your left",
+  "further forward"). `CheckSummary.places` carries them, so the report and
+  the check page never need another check's captures.
+- **During the check** (`CheckSession.fixStickers`): after each first-round
+  view, a sticker 30 mm or more from the last check's place (for a repeat, the
+  check being repeated) is named by the coach (`slippedLine`, fixed text per
+  sticker, fetched ahead), up to two; `If it slipped, put it back, then face
+  the phone again.` The check waits for the wrists or hips to move (30 s),
+  reads the view again and says `Thanks. That matches last time.` when it
+  does. `It's where it should be` keeps it; the notes say which happened.
+- **In the report**: under `Compared with`, `Stickers against` the compared
+  check lists those 20 mm or more away; a measure read from one of them says
+  its change may be the sticker rather than the person (`movedFor`).
+- **Repeat checks**: `repeat_of` on `fitness_posture_checks` (0436, a
+  self-referencing composite key, `ON DELETE SET NULL ("repeat_of")`, read
+  back from `pg_constraint`); `Repeat this check` on the report of a check
+  taken today (not a repeat, not repeated yet), with the count toward three;
+  the check page takes `?repeatOf=`; a repeat is labelled in the list, left
+  out of trends and default comparisons, compared with its original, and its
+  report says so. The account keeps the link only to a check the space has.
+- **The noise** (`noiseFor`): three repeat pairs set it, lower or higher
+  (`from: "repeats"`); before that, rounds may only raise it. The report's
+  noise line says which (`your own figure, from 3 repeat checks`). The CSV
+  gains `repeat_of`.
+
+Tests: `tests/posture-placement.test.ts` (6: a sticker 30 px higher reads
+3.3 cm higher, sideways in the person's terms, the same body moved and a
+crooked phone read as no move, "about" without a scale, the measures a moved
+sticker feeds), `posture-history` (repeats set the noise both ways, a repeat
+compared with its original and left out of trends, the CSV column),
+`posture-ops` (a repeat's link kept, released by the column-list SET NULL,
+dropped for a check the space does not have), `isolation/posture` (a repeat
+cannot point across the wall).
+
+0436 on the **dev** branch only; **production waits for the founder's word**,
+before the merge (ADR 0014).
+
+Driven in the browser pane on dev: a check, then the shoulder-moved picture,
+which stopped after the front view (`Left shoulder tip 3.5 cm lower`, the
+coach's two lines, `It's where it should be`), with the report's sticker
+panel and the shoulder measure's note; then `Start the repeat` from the first
+check's report, the repeat's intro and report (compared with its original,
+labelled in the list, `repeat_of` in the CSV). The drive found that "last
+time" for a repeat must be the check being repeated, not simply the latest,
+and that a production build left in the worktree made the dev server 404
+every Workouts route until `.next` was deleted.
+
 ### 2026-09-30 — Slice 3a: the history in the account (`claude/posture-history`)
 
 The founder's "yes, keep going" after slice 2 merged; a mockup of the history
@@ -383,7 +442,7 @@ posture's actions, always with `toCheckDoc`'s output, never near a photo.
 | 1 | **Check your setup** | Built (the build log). The founder runs it on his S25 and sends the readout |
 | 2 | **The standing check** | Built (the build log): the coach leads four views, twice; each view is captured when framed, facing the right way and still; the report shows every measure above with its noise, the figure drawn from the points; kept photos (his choice) stored on the phone behind a tap. Done when the founder has run it on his S25 |
 | 3a | **History** | Built (the build log): checks saved to the account as numbers and sticker places only; compared with any earlier check; a change called only beyond the noise (the person's own when bigger); numbers exported |
-| 3b | **Placement and own noise** | Each sticker's place against last time checked before measuring; a personal noise from a repeat check with the stickers put back on. His calls first, from a mockup |
+| 3b | **Placement and own noise** | Built (the build log): a sticker that moved 3 cm or more since last time stops the check by name; the report lists stickers against the compared check; repeat checks set the person's own noise after three (his calls, ADR 0121) |
 | 3c | **Retake at each phase** | A nudge to take a check when a workout program moves to its next phase |
 | 4 | **Movement** | Paced double-leg and single-leg squats, single-leg stance and arms overhead: a film held in memory, read after the set at the model's pace, never kept |
 | 5 | **During a workout** | Live cues in workout mode through the seams it left: the stage, `coachSay({ key: "posture" })`, the enrollment's side |
@@ -400,7 +459,10 @@ time, believed backwards and two minutes forwards), `local_day`, `captures`
 `ViewCapture`, which `check-ops.ts` holds to it), `notes` (JSON array of
 strings), `version` (1 only), timestamps. Unique `(tenant_id, id)`, index
 `(tenant_id, taken_at)`, CHECKs that both JSON columns are arrays. No results
-are stored: `core/history.ts` works them out on every read.
+are stored: `core/history.ts` works them out on every read. Since 3b,
+`repeat_of` (0436): the check a repeat repeats, a composite key to the same
+space's checks with `ON DELETE SET NULL ("repeat_of")` (hand-edited, as every
+composite SET NULL here), and a CHECK that it is not the check itself.
 
 The phone keeps:
 
@@ -429,7 +491,8 @@ check and its report opens offline.
 - `src/modules/fitness/posture/core/` — the pure half (above), tested:
   `measures.ts` (`readView`, `wordsFor`, the definitions and their noise),
   `report.ts` (`captureFrom`, `buildReport`, `noiseWords`, `reportText`,
-  `detailsText`, `linesOf`), `history.ts` (`summarize`, `noiseFor`,
+  `detailsText`, `linesOf`), `placement.ts` (`placesOf`, `shiftsBetween`,
+  `movedFor`, `SLIPPED_MM`, `LISTED_MM`), `history.ts` (`summarize`, `noiseFor`,
   `compare`, `changeWords`, `trends`, `historyCsv`), `check-doc.ts` (the
   strict document a phone sends, `toCheckDoc`), `skeleton.ts` (the figure's
   bones), `lines.ts` (every spoken line, `CHECK_LINES` for the check).
@@ -539,6 +602,16 @@ check and its report opens offline.
 - **The level measures' change words say which side dropped** ("Left side
   dropped 4.6° against the right"): "lower than before" read as the state, not
   the change, and doubled up with "since" in the label.
+- **A sticker's place is an offset from its landmark, not a pixel.** The same
+  body standing a little elsewhere, or a crooked phone, moves sticker and
+  landmark together; only a sticker put on elsewhere changes the offset
+  (`tests/posture-placement.test.ts` holds both).
+- **For a repeat, "last time" is the check being repeated.** The first drive
+  compared a repeat's stickers with the LATEST check (the one before it had a
+  sticker moved on purpose) and would have stopped a correct repeat.
+- **The fix-a-sticker wait needs movement first.** Re-reading the view at once
+  would catch the person still standing as they were, before the coach's lines
+  end; it waits for the wrists or hips to move, 30 s at most.
 
 ## Open items
 
@@ -574,5 +647,12 @@ check and its report opens offline.
 - **How long a send takes in production** is unmeasured: the check's end
   waits 4 s for it, then opens the report from the phone and re-reads the
   account when it lands. The dev server took longer than 4 s.
-- **A lower, personal noise** needs a proper re-test (slice 3b): rounds can
-  only raise the bar (ADR 0120).
+- **The placement thresholds are guesses until his first month**: `SLIPPED_MM`
+  30 and `LISTED_MM` 20 were set from the pose model's published wander, not
+  from his checks. The notes and the report carry every distance to tune them.
+- **Three repeat pairs is a rough figure** (ADR 0121, his call "higher or
+  lower"): the report names the count, and each further repeat steadies it.
+- **Migration 0436 on production** waits for the founder's word, and goes
+  before the merge (ADR 0014); dev has it.
+- **Slice 3c**: a nudge to take a check when a workout program moves to its
+  next phase.

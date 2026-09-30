@@ -71,6 +71,7 @@ export function CheckReport({
           captures: fromAccount.captures,
           notes: fromAccount.notes,
           keepPhotos: phone?.keepPhotos === true,
+          repeatOf: fromAccount.repeatOf ?? null,
         }}
         owner={owner}
         backHref={backHref}
@@ -110,7 +111,7 @@ export function CheckReport({
           : (phone.refused ?? "This check is on this phone only for now. It goes to your account when the phone is online.")}
       </p>
       <PostureReport
-        check={{ id: phone.id, at: phone.at, captures: phone.captures, notes: phone.notes, keepPhotos: phone.keepPhotos }}
+        check={{ id: phone.id, at: phone.at, captures: phone.captures, notes: phone.notes, keepPhotos: phone.keepPhotos, repeatOf: phone.repeatOf ?? null }}
         owner={owner}
         backHref={backHref}
         history={history}

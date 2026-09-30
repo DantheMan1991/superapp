@@ -3053,6 +3053,13 @@
       "when": 1790788364930,
       "tag": "0435_fitness_posture_checks_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 436,
+      "version": "7",
+      "when": 1790791530669,
+      "tag": "0436_fitness_posture_repeat",
+      "breakpoints": true
     }
   ]
 }

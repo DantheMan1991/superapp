@@ -13,6 +13,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — Posture repeat checks and slipped stickers (`claude/posture-3b`)
+
+`fitness_posture_checks` gains `repeat_of` (0436): a posture check can repeat
+another with the stickers put back on, to learn the person's own noise, and a
+check stops for a sticker that moved since last time. Everything about it is in
+[posture.md](posture.md) (slice 3b) and
+[ADR 0121](../decisions/0121-a-persons-own-noise-comes-from-repeat-checks-and-a-slipped-sticker-is-put-back-before-it-is-measured.md).
+No workout table changed.
+
 ### 2026-09-30 — Posture checks in the account (`claude/posture-history`)
 
 Workouts gains its eleventh table, `fitness_posture_checks` (0434, RLS 0435):

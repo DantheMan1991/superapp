@@ -15,13 +15,15 @@ import { dayItemsOf, listPrograms, loadProgram, type LoadedProgram } from "./pro
 import { latestFollowed, programSessions } from "./session-ops";
 import { DiscardImportButton } from "./components/discard-import-button";
 import { TodayCard } from "./components/today-card";
+import { PostureCard } from "./posture/components/posture-card";
 
 /**
  * WORKOUTS — the tool's front page (docs/help/fitness/overview.md).
  *
  * Today's workout on the program last followed (F2c: the day so far, what is
- * left, one tap to do it), the programs the person has, and any draft still
- * waiting for them: one being drafted, one ready to review, one that failed.
+ * left, one tap to do it), the way into the posture check (docs/modules/
+ * posture.md), the programs the person has, and any draft still waiting for
+ * them: one being drafted, one ready to review, one that failed.
  * A personal tool: this
  * only ever renders inside a personal space, behind `requirePersonalSpace`
  * and a module gate that refuses it anywhere else (ADR 0111).
@@ -76,6 +78,8 @@ export async function FitnessModule({ ctx }: { ctx: TenantContext }) {
       {followed && followed.program.phases[followed.phaseIndex].items.length > 0 && (
         <FollowedToday followed={followed} today={today} timeZone={ctx.tenant.timezone} />
       )}
+
+      <PostureCard />
 
       {imports.length > 0 && (
         <section className="space-y-2">

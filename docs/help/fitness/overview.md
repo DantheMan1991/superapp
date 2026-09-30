@@ -4,7 +4,7 @@
 > **Route:** /personal/m/fitness/**
 > **Order:** 0
 
-Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This page shows today's workout, your programs, and any draft still waiting for you. To start, click {button:Import a program|primary|upload} and choose the PDF you were given, or click {button:Build one by hand|outline|plus}.
+Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This page shows today's workout, the way into the posture check, your programs, and any draft still waiting for you. To start, click {button:Import a program|primary|upload} and choose the PDF you were given, or click {button:Build one by hand|outline|plus}.
 
 ## What you see
 
@@ -21,6 +21,7 @@ Open **Workouts** {icon:dumbbell} in the sidebar of your personal space. This pa
   - **{button:Start today's session|primary|play}**, or {button:Do the rest|primary|play} once the day has started, or {button:Resume|primary|play} while a session is open on this phone, with `A session is open on this phone for Phase 1: Weeks 1-2.` Each opens the session on that phase. See [Doing a session](workout.md).
   - **`Every set done today.`** once every exercise has had its sets, with no button.
   - It counts workouts on this phone that have not reached us yet, and sends them while the page is open.
+- **`Posture check`** {icon:scan-line}, a card: `Measure how you stand with your phone's camera and small stickers on your bones. Nothing the camera sees leaves your phone.` Click {button:Open|outline} to get ready for it. See [The posture check](posture.md).
 - **`Drafts`.** Appears only while an import is waiting for you. Each row shows the file's name and where it stands:
   - `Drafting, started just now` (or `2 minutes ago`) while Claude is reading it. This takes about a minute.
   - `Ready to review · 59 pages` with {button:Review|primary}, which opens the draft to check and save.

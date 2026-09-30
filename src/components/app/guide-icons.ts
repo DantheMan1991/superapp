@@ -32,6 +32,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  EyeOff,
   FileDown,
   FileText,
   FileUp,
@@ -71,6 +72,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ScanLine,
   Search,
   MessageSquarePlus,
   Mic,
@@ -148,6 +150,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   download: Download,
   "external-link": ExternalLink,
   eye: Eye,
+  // The posture check's camera, shown and hidden again (posture.md, slice 1).
+  "eye-off": EyeOff,
   "file-down": FileDown,
   "file-text": FileText,
   "file-up": FileUp,
@@ -187,6 +191,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   refresh: RefreshCw,
   "rotate-ccw": RotateCcw,
   save: Save,
+  // The Posture check card on the Workouts page (posture.md, slice 1).
+  "scan-line": ScanLine,
   search: Search,
   send: Send,
   // The advisor's New thread (livestock, slice 11).

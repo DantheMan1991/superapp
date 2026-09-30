@@ -1,10 +1,11 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { FitnessPostureCapture } from "@/db/schema";
 import { FitnessError } from "../core/errors";
 import type { PostureCheckDoc } from "./core/check-doc";
 import type { HistoryCheck } from "./core/history";
+import type { MarkCheck } from "./core/marks";
 import type { ViewCapture } from "./core/measures";
 
 /**
@@ -103,6 +104,20 @@ export async function listPostureChecks(tx: Tx, tenantId: string): Promise<(Hist
     .where(eq(schema.fitnessPostureChecks.tenantId, tenantId))
     .orderBy(desc(schema.fitnessPostureChecks.takenAt));
   return rows.map((r) => ({ ...toHistory(r), notes: r.notes }));
+}
+
+/**
+ * Every check's day, oldest first, without its numbers: all a program's
+ * posture marks need (slice 3c, core/marks.ts).
+ */
+export async function postureCheckDays(tx: Tx, tenantId: string): Promise<MarkCheck[]> {
+  const t = schema.fitnessPostureChecks;
+  const rows = await tx
+    .select({ id: t.id, takenAt: t.takenAt, localDay: t.localDay, repeatOf: t.repeatOf })
+    .from(t)
+    .where(eq(t.tenantId, tenantId))
+    .orderBy(asc(t.takenAt));
+  return rows.map((r) => ({ id: r.id, takenAt: r.takenAt.toISOString(), localDay: r.localDay, repeatOf: r.repeatOf }));
 }
 
 export async function getPostureCheck(

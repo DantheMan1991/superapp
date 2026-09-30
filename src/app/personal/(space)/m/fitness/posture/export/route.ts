@@ -1,8 +1,11 @@
 import { withTenant } from "@/db";
 import { resolvePersonalContext } from "@/lib/auth";
 import { routeGate } from "@/lib/modules";
+import { localDayIn } from "@/modules/fitness/core/day";
 import { listPostureChecks } from "@/modules/fitness/posture/check-ops";
 import { historyCsv, summarize } from "@/modules/fitness/posture/core/history";
+import { markLabels } from "@/modules/fitness/posture/core/marks";
+import { marksOfPrograms } from "@/modules/fitness/posture/marks-ops";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +15,7 @@ export const dynamic = "force-dynamic";
  * posture.md, slice 3): every posture check in the account, each measure a
  * row, as a CSV file for a spreadsheet, a trainer or a physiotherapist.
  * Numbers and the report's words only: the account has no pictures to give.
+ * And what each check marked in a workout program (slice 3c).
  *
  * The personal space's own door for a route (`resolvePersonalContext`, which
  * answers 401 rather than redirecting), then Workouts' gate, then the space's
@@ -22,8 +26,17 @@ export async function GET(): Promise<Response> {
   if (!ctx) return new Response("Sign in first.", { status: 401 });
   const refused = await routeGate(ctx.tenant.id, "fitness");
   if (refused) return refused;
-  const checks = await withTenant(ctx.tenant.id, (tx) => listPostureChecks(tx, ctx.tenant.id), { role: ctx.role });
-  const csv = historyCsv(checks.map(summarize));
+  const today = localDayIn(ctx.tenant.timezone, new Date());
+  const { checks, labels } = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const checks = await listPostureChecks(tx, ctx.tenant.id);
+      const { marks } = await marksOfPrograms(tx, ctx.tenant.id, checks, today);
+      return { checks, labels: markLabels(marks) };
+    },
+    { role: ctx.role },
+  );
+  const csv = historyCsv(checks.map(summarize), labels);
   const day = new Date().toISOString().slice(0, 10);
   return new Response(csv, {
     headers: {

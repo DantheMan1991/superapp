@@ -1,4 +1,5 @@
 import { MEASURE_ORDER, MEASURES, type MeasureKey, type Tier, type ViewCapture } from "./measures";
+import type { MarkLabel } from "./marks";
 import { placesOf, type Place } from "./placement";
 import { buildReport, type Report } from "./report";
 
@@ -278,11 +279,12 @@ function cell(value: string | number | null): string {
 
 /**
  * Every check's measures, one row each, oldest first: what "Download the
- * numbers" gives. Numbers and the report's words only.
+ * numbers" gives. Numbers and the report's words only, and what a check
+ * marked in a workout program (slice 3c, core/marks.ts).
  */
-export function historyCsv(history: readonly CheckSummary[]): string {
+export function historyCsv(history: readonly CheckSummary[], labels: Readonly<Record<string, readonly MarkLabel[]>> = {}): string {
   const rows: (string | number | null)[][] = [
-    ["taken_at", "day", "measure", "value", "unit", "round_1", "round_2", "tier", "words", "repeat_of"],
+    ["taken_at", "day", "measure", "value", "unit", "round_1", "round_2", "tier", "words", "repeat_of", "mark"],
   ];
   const byId = new Map(history.map((c) => [c.id, c]));
   for (const c of chronological(history)) {
@@ -302,6 +304,7 @@ export function historyCsv(history: readonly CheckSummary[]): string {
         m.words,
         // A repeat names the check it repeats by when that was taken.
         c.repeatOf ? (byId.get(c.repeatOf)?.takenAt ?? "") : "",
+        (labels[c.id] ?? []).map((l) => l.full).join("; "),
       ]);
     }
   }

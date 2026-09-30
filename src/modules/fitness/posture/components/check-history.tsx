@@ -7,6 +7,7 @@ import { ChevronRight, Download, ImageIcon } from "lucide-react";
 import { MEASURE_ORDER } from "../core/measures";
 import { localDayOf } from "../core/check-doc";
 import { summarize, trends, type CheckSummary } from "../core/history";
+import type { MarkLabel } from "../core/marks";
 import { listChecks, sweepAbandoned } from "../store/checks";
 import type { StoredCheck } from "../store/db";
 import { forgetDeletedElsewhere, sendPendingChecks } from "../store/sync";
@@ -20,6 +21,9 @@ import { TrendCard } from "./trend-card";
  * Opening it also does this phone's housekeeping: sends a check the account
  * does not have yet, forgets one deleted on another device, and clears away a
  * check that never finished.
+ *
+ * A check that marked a workout program's start or a phase's end says so
+ * (slice 3c).
  */
 
 type Row = CheckSummary & { phone: StoredCheck | null };
@@ -27,12 +31,15 @@ type Row = CheckSummary & { phone: StoredCheck | null };
 export function CheckHistory({
   owner,
   account,
+  labels = {},
   reportHref,
   exportHref,
 }: {
   owner: string;
   /** The account's checks, newest first, summarized on the server. */
   account: CheckSummary[];
+  /** What each check marked in a workout program, by check id (slice 3c, core/marks.ts). */
+  labels?: Record<string, MarkLabel[]>;
   reportHref: string;
   exportHref: string;
 }) {
@@ -124,6 +131,9 @@ export function CheckHistory({
                     {when.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
+                    {labels[r.id] && (
+                      <span className="font-medium text-foreground">{`${labels[r.id].map((l) => l.label).join(" · ")} · `}</span>
+                    )}
                     {r.repeatOf ? "Repeat, stickers put back on · " : ""}
                     {r.views === 4 ? "All four views" : `${r.views} of 4 views`} · {measures} {measures === 1 ? "measure" : "measures"}
                   </div>

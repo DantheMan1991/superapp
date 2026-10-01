@@ -68,6 +68,10 @@ const ALLOWED: Record<string, string[]> = {
   // A kept photo: one frame per view, made a JPEG and written into that
   // database by the worker itself, so no picture crosses to the page by message.
   "src/modules/fitness/posture/worker/photo-writer.ts": ["storage", "a picture made into a file"],
+  // Not a picture: the worker's own bootstrap, a single import line, made a
+  // blob URL so the page's lock holds the worker (ADR 0122). "starts its
+  // worker from a blob" below holds the file to that.
+  "src/modules/fitness/posture/client/blob-worker.ts": ["a picture made into a URL"],
 };
 
 describe("the posture check's code", () => {
@@ -160,5 +164,23 @@ describe("the posture check's code", () => {
     const assets = all.find((f) => f.path.endsWith("core/assets.ts"))!.text;
     expect(assets).toMatch(/POSE_BASE = `\/pose\//);
     expect(assets).toMatch(/path: `\/pose\/models\//);
+  });
+
+  it("starts its worker from a blob, so the page's lock holds it (ADR 0122)", () => {
+    // A worker started from an address takes that response's policy, none;
+    // one started from a blob takes the locked page's.
+    const starts = all.filter((f) => /new Worker\s*\(/.test(f.text));
+    expect(starts.map((f) => f.path)).toEqual(["src/modules/fitness/posture/client/frames.ts"]);
+    expect(starts[0].text).toMatch(/startedFromBlob\(\s*\(\) => new Worker\(new URL\("\.\.\/worker\/posture\.worker\.ts"/);
+    // The blob holds the bootstrap's import line and nothing of a picture.
+    const blob = all.find((f) => f.path.endsWith("client/blob-worker.ts"))!.text;
+    expect(blob).not.toMatch(/VideoFrame|ImageBitmap|canvas|drawImage|getImageData|captureStream|MediaStream|postMessage/i);
+    expect(blob).toMatch(/new Blob\(\[boot\]/);
+    // Inside a blob, a path from the site's root means nothing: the worker
+    // loads the pose model's files by their full address on this site.
+    const worker = all.find((f) => f.path.endsWith("worker/posture.worker.ts"))!.text;
+    for (const asset of ["POSE_BUNDLE_URL", "POSE_WASM_BASE", "POSE_MODELS[model].path"]) {
+      expect(worker).toContain(`onThisSite(${asset})`);
+    }
   });
 });

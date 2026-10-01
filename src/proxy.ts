@@ -4,6 +4,14 @@ import { authorizedPartiesFromEnv } from "@/lib/authorized-parties";
 import { MAINTENANCE_HTML, shouldServeMaintenance } from "@/lib/maintenance";
 import { nativeAppEntryRedirect } from "@/lib/native-app-core";
 import {
+  clerkFrontendApi,
+  fetchedByScript,
+  newNonce,
+  postureCrossing,
+  postureCsp,
+  sameSitePath,
+} from "@/lib/posture-lock";
+import {
   classifyHost,
   platformHostsFromEnv,
   siteDomainFromEnv,
@@ -43,6 +51,12 @@ import {
  * on exactly that: a live session is honoured for a GET and refused for a
  * server action or any other method. The stamp is the only way the resolver
  * can tell, and this is the only place that may set it.
+ *
+ * And one page group gets a LOCK: the posture check's pages carry a content
+ * security policy that lets them reach this site and Clerk and nothing else,
+ * and the router's requests across their edge are turned into full page loads
+ * so the policy is on every posture page and on no other (src/lib/
+ * posture-lock.ts, ADR 0122).
  *
  * Two environment switches ride on the same per-request read:
  *
@@ -84,9 +98,48 @@ export default clerkMiddleware(
     const stamped = new Headers(req.headers);
     stamped.set("x-yosher-method", req.method);
     stamped.set("x-yosher-path", req.nextUrl.pathname);
+    // The posture pages' lock (src/lib/posture-lock.ts, ADR 0122): a page
+    // load gets the policy and its nonce, which Next reads off the request
+    // and puts on its own scripts; the router crossing the pages' edge gets a
+    // full page load instead.
+    const posture =
+      kind.kind === "platform"
+        ? postureCrossing({
+            pathname: req.nextUrl.pathname,
+            method: req.method,
+            fetched: fetchedByScript(req.headers.get("sec-fetch-dest"), req.headers.get("rsc")),
+            fromPath: sameSitePath(req.headers.get("referer"), req.headers.get("host") ?? req.nextUrl.host),
+          })
+        : "pass";
+    if (posture === "full-load") {
+      return new NextResponse("This page loads whole.", {
+        status: 200,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+          "x-yosher-full-load": "posture",
+        },
+      });
+    }
+    let csp: string | null = null;
+    if (posture === "lock") {
+      const nonce = newNonce();
+      csp = postureCsp({
+        nonce,
+        clerk: clerkFrontendApi(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
+        devSocket:
+          process.env.NODE_ENV === "development"
+            ? `ws://${req.headers.get("host") ?? "localhost"}`
+            : null,
+      });
+      stamped.set("content-security-policy", csp);
+      stamped.set("x-nonce", nonce);
+    }
     const target = siteRewrite(kind, req.nextUrl.pathname);
     if (target === null) {
-      return NextResponse.next({ request: { headers: stamped } });
+      const res = NextResponse.next({ request: { headers: stamped } });
+      if (csp) res.headers.set("Content-Security-Policy", csp);
+      return res;
     }
     const url = req.nextUrl.clone();
     url.pathname = target;

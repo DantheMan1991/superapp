@@ -344,7 +344,15 @@ a document whose schema is strict at every level and has no place for a
 picture, into `fitness_posture_checks` under the personal space's RLS. They
 describe a body's shape (the pose model's points and the stickers' places), so
 support view never opens the space that holds them (S14, ADR 0111). The pose
-model is served from this site. Unlike S15's
+model is served from this site. A second lock holds against code we did not
+write (ADR
+[0122](decisions/0122-the-posture-pages-are-locked-to-this-site-and-loaded-whole.md)):
+every posture page carries a content security policy that lets it reach only
+this site and Clerk, its worker starts from a blob so the policy holds the
+worker too, and the pages are loaded whole so the policy is on every posture
+page and on no other. It cannot stop an upload to our own site (the first lock
+does), and the browser's storage for this site stays readable by the site's
+other pages. Unlike S15's
 "never", this one holds against us too: no server of ours ever has a picture to
 leak. `tests/posture-privacy.test.ts` fails on network, storage, recording or
 another site's URL anywhere in the posture code, and on any caller of the

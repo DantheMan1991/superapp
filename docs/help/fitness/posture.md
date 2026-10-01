@@ -8,10 +8,12 @@ Open **Workouts** {icon:dumbbell} and, on the `Posture check` card, click {butto
 
 Nothing the camera sees leaves your phone. Every picture is read on the phone and forgotten straight away. The check keeps numbers, which go to your account so every device you sign in on shows them. A photo of each view is kept only if you turn that on, and it stays on the phone that took it.
 
+The posture check's pages are also locked: they can reach Yosher and its sign-in service, and no other website, so nothing on them can send anything anywhere else. The lock is set as a page loads, so opening a posture page from elsewhere in Yosher, or leaving one, loads the page fresh. That takes a moment longer than moving between other pages.
+
 ## What you see
 
 - **`Posture check`**, the title, with {icon:scan-line} and the line `Measure how you stand, with your phone's camera and small stickers on your bones.`
-- **`Nothing the camera sees leaves your phone`**, a card saying what happens to the pictures, and what to wear: snug shorts or briefs pushed down below your front hip bones and the dimples above your buttocks. The check reads just as well that way.
+- **`Nothing the camera sees leaves your phone`**, a card saying what happens to the pictures, that these pages can reach Yosher and no other website, and what to wear: snug shorts or briefs pushed down below your front hip bones and the dimples above your buttocks. The check reads just as well that way.
 - **`Check your posture`**, a card saying the check takes about three minutes, turns you to all four sides twice, and opens its report when it is done. {button:Start a posture check|primary} opens the check. See [Doing a posture check](posture-check.md).
   - When your workout program is asking for a check, a line with {icon:flag} says what this one will mark, for example `A check now marks the end of Phase 1: Weeks 1-2, in Starter Mobility.` or `A check now marks the start of Starter Mobility.` See [Following a program](program.md#posture-checks-along-the-way).
 - **`Your checks`**, under the line `The numbers from each check are kept in your account, so every device you sign in on shows them. Photos stay on the phone that took them.` Before your first check it reads `No checks yet.`

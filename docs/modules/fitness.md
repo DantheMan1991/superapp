@@ -13,6 +13,16 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — The posture pages locked to this site (`claude/posture-lockdown`)
+
+Every page under `/personal/m/fitness/posture` now carries a content security
+policy that lets it, and the pose worker, reach only this site and Clerk, and
+moving into or out of those pages from the rest of Workouts is a full page
+load, so the policy never follows the person to a program page and its
+videos. Nothing else in Workouts changed. All of it is in
+[posture.md](posture.md) and
+[ADR 0122](../decisions/0122-the-posture-pages-are-locked-to-this-site-and-loaded-whole.md).
+
 ### 2026-09-30 — A posture check at a program's start and each phase's end (`claude/posture-3c`)
 
 The program page asks for a posture check, for a person who has taken one

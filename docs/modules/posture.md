@@ -17,6 +17,59 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-09-30 — The lockdown: the posture pages locked to this site (`claude/posture-lockdown`)
+
+The founder's "yes, do the lockdown": ADR 0118's second lock, open since
+slice 1. [ADR 0122](../decisions/0122-the-posture-pages-are-locked-to-this-site-and-loaded-whole.md).
+
+- **The policy** (`src/lib/posture-lock.ts`, pure; applied in
+  `src/proxy.ts`): every page load under `/personal/m/fitness/posture` gets a
+  content security policy with a fresh nonce, which Next reads off the request
+  and puts on its own scripts. It reaches this site and Clerk only, Clerk's
+  host read from the publishable key (`clerkFrontendApi`; production's is
+  `clerk.yosherapp.com`, confirmed from the live sign-in page, which is what
+  the open item waited on a preview for). `'wasm-unsafe-eval'` for the pose
+  model; no frames, no plugins; development adds eval, the dev socket and
+  Clerk's telemetry.
+- **Loaded whole** (`postureCrossing`): the router's requests across the
+  pages' edge, navigations and prefetches, get a plain answer Next takes as
+  "load this page whole". A router request is a script's fetch of a page, told
+  by the browser's own `Sec-Fetch-Dest: empty` (`fetchedByScript`), on the
+  other side of the edge from the Referer, judged by the request's own `Host`;
+  an API fetch never counts (the coach's voice). The posture pages' new
+  `layout.tsx` carries the guard (`posture-lock-guard.tsx`) for what the proxy
+  cannot see: a page load that began elsewhere reloads; leaving in the app
+  reloads where the person went.
+- **The worker from a blob** (`client/blob-worker.ts`): the drive found the
+  pose worker unlocked on a locked page. Next starts it from its bootstrap's
+  address, and a worker started from an address takes that response's policy,
+  which has none; a probe worker started that way reached example.com, the same
+  code from a blob was refused. `startedFromBlob` hands Next's start a stand-in
+  that runs the same bootstrap inside a blob, keeping its `#params=`; the
+  worker now loads the pose model's files by full address (`onThisSite`),
+  since a root path means nothing against a blob.
+
+Tests: `tests/posture-lock.test.ts` (which pages, the policy's every
+directive in production and development, Clerk's host from real and bad keys,
+the edge's three answers, an API fetch or a post never a crossing, the
+browser's word over Next's header, the referrer by host, the nonce),
+`posture-privacy` (the worker's only start goes through the blob, the blob
+holds nothing of a picture, the model's files by full address; the blob file
+is the one allowance for an object URL, held to that by the test).
+
+Driven in the browser pane on dev, then on local production builds (the test
+picture's input switched on for the drive and back off): a posture page load
+carries the policy, Next's scripts the nonce, and a fetch, an image and a
+beacon to other sites are refused while this site and Clerk answer; the
+sidebar out and the posture card in are full loads, the card's prefetch too;
+moving between posture pages stays in the app; the guard reloads both ways
+when the Referer is switched off; the setup check and a full check with a kept
+photo run under the lock (the pose model without `'unsafe-eval'`, the
+stickers, the plumb line, the photo drawn on the report), with no violation.
+The first production build found Next hiding its `rsc` header from the proxy
+(a debug header showed `rsc: null`), so every crossing had fallen to the
+guard's reload; `Sec-Fetch-Dest` made both edges direct (load type `navigate`).
+
 ### 2026-09-30 — Slice 3c: a check at a program's start and each phase's end (`claude/posture-3c`)
 
 The founder's "build 3c", the same day 3b went up. He was offered it as "a
@@ -579,8 +632,9 @@ check and its report opens offline.
   captures share: the lens, the worker, the locks, the level, the plumb line,
   the hold), `setup-session.ts` (the setup check's steps), `check-session.ts`
   (the check's), `camera.ts`, `orientation.ts`, `frames.ts` (a track's
-  frames to the worker, or a video's), `device-settings.ts`, `voice.ts`,
-  `screen-privacy.ts` (`FLAG_SECURE` in the app).
+  frames to the worker, or a video's), `blob-worker.ts` (the worker started
+  from a blob, so the page's lock holds it, ADR 0122), `device-settings.ts`,
+  `voice.ts`, `screen-privacy.ts` (`FLAG_SECURE` in the app).
 - `src/modules/fitness/posture/store/` — `db.ts` (the IndexedDB schema,
   opened the same way by the page and the worker), `checks.ts` (the page's
   reads, deletes and the sweep, all by owner) and `sync.ts` (the one door to
@@ -596,7 +650,9 @@ check and its report opens offline.
   `last-readout.tsx`, `posture-card.tsx`.
 - `src/app/personal/(space)/m/fitness/posture/page.tsx`, `setup/page.tsx`,
   `check/page.tsx`, `checks/[checkId]/page.tsx` and `export/route.ts` (the
-  CSV).
+  CSV), under `layout.tsx` (the lock's guard, `components/posture-lock-guard.tsx`).
+- The lock (ADR 0122): `src/lib/posture-lock.ts` (pure: the policy, Clerk's
+  host from the key, `postureCrossing`) and `src/proxy.ts`, which applies it.
 - `scripts/copy-pose-assets.ts`, `public/pose/` (gitignored), the `/pose/`
   headers in `next.config.ts`, and the matcher in `src/proxy.ts`.
 - `docs/help/fitness/posture.md`, `posture-setup.md`, `posture-check.md`,
@@ -698,6 +754,26 @@ check and its report opens offline.
   check.** An older mark whose days passed is left behind rather than nagged
   about, and a person who never set the check up (stickers, cord, tripod) is
   never asked: the Posture check card is their way in.
+- **A page's policy does not reach a worker started from an address** (ADR
+  0122). The worker's own response sets its policy; only a blob worker takes
+  the page's. Next starts every `new Worker(new URL(…))` from its bootstrap's
+  address, so the posture worker goes through `startedFromBlob`, and a path
+  from the site's root fails inside it ("The URL '/pose/…' is invalid"):
+  `onThisSite` makes them full addresses.
+- **A policy belongs to the page load, not the screen.** Without the full
+  loads at the edge, a posture page reached from Workouts would run unlocked,
+  and the lock would follow the person out. The proxy's answer to the router is
+  plain text on purpose: Next loads the page whole for anything not its own
+  kind.
+- **In production the proxy never sees Next's `rsc` header** (nor its `_rsc`
+  parameter): Next's adapter strips them "so users only see page requests".
+  Development shows them, so a rule built on them passes every dev drive and
+  does nothing in production. The browser's `Sec-Fetch-Dest` is the honest
+  signal, and a production build is the only proof.
+- **Driving the check in a background tab hangs on the test picture's
+  decode**: front the pane's tab first. And a test file set by script needs
+  the input's React `onChange` called directly; a synthetic `change` event did
+  not reach it.
 
 ## Open items
 
@@ -708,9 +784,13 @@ check and its report opens offline.
   graphics chip's verdict; the stickers' colours as the camera sees them
   (`hue`, `chroma`) and how much each wanders (`jitterPx`); frames dropped;
   colour drift over the check.
-- **A content security policy on the posture routes**, as ADR 0118's second
-  lock: it must allow the production Clerk domain, which only a preview
-  deploy can confirm, so it waits for one.
+- **The lock on the S25 is unwatched** (ADR 0122): Chrome on his phone, and
+  the app's WebView, where Capacitor's bridge should sit outside the policy.
+  Every page load in and out of the posture pages is a full one; the first
+  check on the phone shows whether that is noticeable.
+- **A site-wide policy** would also cover the kept photos from the site's
+  other pages, which can read this site's storage (ADR 0122); a far bigger
+  job, with the business workspace's maps, payments and videos to allow.
 - **The check in the app (1.0.8) is unwatched**: the camera prompt, the
   WebView delivering frames (`MediaStreamTrackProcessor`, or the `<video>`
   path when a WebView lacks it), the orientation sensors in a WebView,

@@ -40,6 +40,16 @@ import { keepPhoto } from "./photo-writer";
 
 declare const self: DedicatedWorkerGlobalScope;
 
+/**
+ * A path on this site as a full address. The worker starts from a blob, to be
+ * held to the page's lock (ADR 0122, client/frames.ts), and a path like
+ * `/pose/…` means nothing against a blob's address; its origin is still this
+ * site's.
+ */
+function onThisSite(path: string): string {
+  return new URL(path, self.location.origin).href;
+}
+
 type Vision = typeof import("@mediapipe/tasks-vision");
 
 const SMALL_LONG_SIDE = 960;
@@ -115,8 +125,8 @@ function isClassicWorker(): boolean {
 function loadVision() {
   visionLoad ??= (async () => {
     send({ type: "status", message: "Loading the pose model" });
-    const vision = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ POSE_BUNDLE_URL)) as Vision;
-    const fileset = await vision.FilesetResolver.forVisionTasks(POSE_WASM_BASE, !isClassicWorker());
+    const vision = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ onThisSite(POSE_BUNDLE_URL))) as Vision;
+    const fileset = await vision.FilesetResolver.forVisionTasks(onThisSite(POSE_WASM_BASE), !isClassicWorker());
     return { vision, fileset };
   })();
   // A failed load is forgotten, so the next ask tries again rather than
@@ -133,7 +143,7 @@ function landmarker(model: PoseModelName, delegate: Delegate): Promise<PoseLandm
   if (!made) {
     made = loadVision().then(({ vision, fileset }) =>
       vision.PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: POSE_MODELS[model].path, delegate },
+        baseOptions: { modelAssetPath: onThisSite(POSE_MODELS[model].path), delegate },
         runningMode: "IMAGE",
         // Two, so a second person in the picture is noticed rather than measured.
         numPoses: 2,

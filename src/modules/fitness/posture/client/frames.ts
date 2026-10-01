@@ -1,4 +1,5 @@
 import type { FromWorker, ToWorker } from "../worker/protocol";
+import { startedFromBlob } from "./blob-worker";
 
 /**
  * HOW FRAMES REACH THE WORKER (docs/modules/posture.md, "How a frame is read").
@@ -83,7 +84,12 @@ export function feedWorker(worker: Worker, source: { track?: MediaStreamTrack; v
   };
 }
 
-/** The worker, from its own module (bundled by Next as a module worker). */
+/**
+ * The worker, from its own module, started from a blob so the page's lock
+ * holds it too: the frames are read in the worker (ADR 0122, blob-worker.ts).
+ */
 export function startPostureWorker(): Worker {
-  return new Worker(new URL("../worker/posture.worker.ts", import.meta.url), { type: "module", name: "posture" });
+  return startedFromBlob(
+    () => new Worker(new URL("../worker/posture.worker.ts", import.meta.url), { type: "module", name: "posture" }),
+  );
 }

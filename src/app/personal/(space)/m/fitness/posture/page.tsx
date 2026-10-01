@@ -61,6 +61,7 @@ export default async function PosturePage() {
           <p className="text-muted-foreground">
             Every picture is read on the phone itself and forgotten straight away, unless you choose to keep a photo of
             each view, which stays on this phone. What the check keeps is numbers: angles and where each sticker was.
+            These pages are locked as well: they can reach Yosher and no other website.
             Wear snug shorts or briefs pushed down below your front hip bones and the dimples above your buttocks: the
             check reads just as well, and nothing more of you is ever in front of the camera than it needs.
           </p>

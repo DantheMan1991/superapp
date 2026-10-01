@@ -4,6 +4,7 @@ import { CrmModule } from "./crm/CrmModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { FitnessModule } from "./fitness/FitnessModule";
+import { FoodModule } from "./food/FoodModule";
 import { HelloModule } from "./hello/HelloModule";
 import { MarketingModule } from "./marketing/MarketingModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
@@ -243,6 +244,15 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Workouts",
     icon: "dumbbell",
     Component: FitnessModule,
+  },
+  // THE SECOND PERSONAL TOOL (docs/modules/food.md): recipes first (D1), then
+  // the week, the shopping list and nutrition. A personal tool exactly as
+  // Workouts is, at `/personal/m/food`, and `coming_soon` for the same reason.
+  food: {
+    slug: "food",
+    name: "Food",
+    icon: "utensils",
+    Component: FoodModule,
   },
 };
 

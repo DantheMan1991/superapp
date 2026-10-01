@@ -327,4 +327,16 @@ export const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "coming_soon",
     sortOrder: 300,
   },
+  {
+    id: "food",
+    name: "Food",
+    description:
+      "Your recipes in one place: from a link, a photo of a page, pasted text, or typed in, and scaled to any number of servings.",
+    category: "personal",
+    // `coming_soon` from D1 (2026-10-01), as Workouts is and for the same
+    // reasons: the founder's own space previews it, and nobody else's personal
+    // door opens before a health-data privacy policy. See docs/modules/food.md.
+    status: "coming_soon",
+    sortOrder: 310,
+  },
 ];

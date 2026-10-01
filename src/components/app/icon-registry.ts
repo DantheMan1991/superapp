@@ -33,6 +33,7 @@ import {
   SquareCheck,
   Store,
   Users,
+  UtensilsCrossed,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -114,6 +115,9 @@ export const ICONS: Record<string, LucideIcon> = {
   sprout: Sprout,
   store: Store,
   users: Users,
+  // Food, the second personal tool (docs/modules/food.md). Added WITH the
+  // tool, per the header above.
+  utensils: UtensilsCrossed,
   wrench: Wrench,
 };
 

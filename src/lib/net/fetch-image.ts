@@ -1,8 +1,8 @@
 import "server-only";
 import http from "node:http";
 import https from "node:https";
-import { lookup as dnsLookup } from "node:dns";
-import { isPublicAddress, validateHopUrl } from "./ssrf";
+import { guardedLookup } from "./guarded-lookup";
+import { validateHopUrl } from "./ssrf";
 
 /**
  * Fetch a remote image on the server's behalf, safely.
@@ -55,43 +55,6 @@ function sniff(head: Buffer): string | null {
 export type ImageFetchResult =
   | { ok: true; body: Buffer; contentType: string }
   | { ok: false; reason: string };
-
-/**
- * A resolver that refuses to hand back a private address.
- *
- * Returning an error here aborts the connection before a packet is sent, and
- * because the agent connects to the address this callback returned, there is no
- * window in which the name could resolve to something else.
- */
-function guardedLookup(
-  hostname: string,
-  options: Parameters<typeof dnsLookup>[1],
-  callback: (
-    err: NodeJS.ErrnoException | null,
-    address: string,
-    family: number,
-  ) => void,
-): void {
-  dnsLookup(hostname, options as never, (err, address, family) => {
-    if (err) return callback(err, "", 0);
-    const addresses = Array.isArray(address)
-      ? (address as unknown as Array<{ address: string; family: number }>)
-      : [{ address: address as string, family: family as number }];
-    for (const entry of addresses) {
-      if (!isPublicAddress(entry.address)) {
-        return callback(
-          Object.assign(new Error("blocked private address"), {
-            code: "EBLOCKED",
-          }),
-          "",
-          0,
-        );
-      }
-    }
-    const first = addresses[0];
-    callback(null, first.address, first.family);
-  });
-}
 
 function requestOnce(target: URL): Promise<{
   status: number;

@@ -369,14 +369,18 @@ d("paste targets", () => {
     );
 
     const market = await asOwner((tx) => createChannel(tx, ctx(), { name: "Saturday market" }));
+    // A price change ahead of today, whenever the suite runs. A fixed date was
+    // today on that day, and a price set twice for one day replaces that day's
+    // row by design (setPrice), so the test failed all of 2026-10-01 (UTC).
+    const later = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
     const proposal = await propose("retail.prices", [
       { item: "Eggs", price: "6", per: "Each" },
-      { item: "eggs", price: "$5.50", from: "2026-10-01" },
+      { item: "eggs", price: "$5.50", from: later },
       { item: "Goat milk soap", price: "7" },
     ]);
     expect(proposal.fields.find((f) => f.key === "channel")!.required).toBe(false);
     expect(proposal.rows[0].values).toMatchObject({ price: 6, per: "unit", channel: null });
-    expect(proposal.rows[1].values).toMatchObject({ price: 5.5, from: "2026-10-01" });
+    expect(proposal.rows[1].values).toMatchObject({ price: 5.5, from: later });
     expect(proposal.rows[0].values.item).toBe(proposal.rows[1].values.item);
     // Not something the farm holds: the words stay, the cell is empty.
     expect(proposal.rows[2].values.item).toBeNull();
@@ -392,7 +396,7 @@ d("paste targets", () => {
     const prices = await asOwner((tx) => pricesForChannel(tx, tenantId, market.id));
     expect(prices.map((p) => [p.priceCents, p.effectiveFrom, p.priceBasis]).sort()).toEqual(
       [
-        [550, "2026-10-01", "unit"],
+        [550, later, "unit"],
         [600, today, "unit"],
       ].sort(),
     );

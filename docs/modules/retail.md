@@ -38,6 +38,15 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-10-01 — A test's future date ran out (`claude/posture-lockdown`)
+
+`tests/paste-targets-db.test.ts` pasted a price change "from 2026-10-01" beside
+one from today, and expected two rows. On 2026-10-01 (UTC) the two were the same
+day, and a price set twice for one day replaces that day's row by design
+(`setPrice`), so the test failed all that day, on every branch. The later price
+is now 30 days after whenever the suite runs. No code changed: the pack did what
+its header says.
+
 ### 2026-09-09 — The price list, pasted (`claude/paste-the-rest`)
 
 Onboarding slice 2, the last three targets ([onboarding.md](onboarding.md),

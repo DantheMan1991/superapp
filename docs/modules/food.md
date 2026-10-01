@@ -37,8 +37,8 @@ draft, a recipe scaled, and cook mode):
 ledger read first: exactly these two were pending). `verify-rls` passed on both
 (258 tables), and the tables, their forced RLS, two policies each and the enums
 were read back by name. **A catalogue row** (`food`, `personal`,
-`coming_soon`, sort 310): `db:seed` on dev; production's is a separate write,
-asked of him (`verify-modules` names it as the one thing missing there).
+`coming_soon`, sort 310): `db:seed` on dev, and on production on his word
+once asked for it separately; `verify-modules` matched on both (21 modules).
 
 - **What scales** (`core/amounts.ts`, pure, ADR 0123): an ingredient is kept as
   the line it was given. `readLine` finds the amount at its start (whole,
@@ -252,9 +252,6 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   pane at 375 px; a phone's camera, its photo picker and a real Android
   keyboard are unwatched.
 - **Cook mode (D1b)** is next, his call.
-- **Production's catalogue row**: `npm run db:seed` (then `db:verify-modules`)
-  on his word. Until it runs, Food is not in his production space, though
-  its tables are there.
 - **A pasted list of several recipes** reads as the first (or the main) one.
 - **A recipe in another language** is copied in its language; nothing
   translates.

@@ -1,11 +1,11 @@
 # Personal space
 
 > A private workspace of one, beside the business: the person's own tools
-> (workouts first, then diet) in a tenant nobody else can join and the
+> (Workouts, then Food) in a tenant nobody else can join and the
 > platform's support view can never open. Also sold on its own, to people who
 > have no business on Yosher at all. The decision is
 > [ADR 0111](../decisions/0111-a-personal-space-is-a-workspace-of-one-and-support-view-never-opens-it.md);
-> the first tool in it is [fitness](fitness.md).
+> the tools in it are [fitness](fitness.md) and [food](food.md).
 > Status: `coming_soon` · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -13,6 +13,24 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-01 — The second tool: Food, and a health goal (`claude/food-d1`)
+
+With Workouts' F1–F4 merged, the founder switched to the food side. D1, recipes,
+is built as **Food** ([food.md](food.md); his name for it, over Meals, Recipes
+and Kitchen, since it will hold the week, the shopping list and what he eats):
+a second personal tool exactly as Workouts is, `category: "personal"`,
+`coming_soon`, at `/personal/m/food`, its own two tables under the same RLS.
+Nothing in the container changed: the catalogue row is what puts it in his
+space (`ensurePersonalToolsFor`, the preview a superadmin gets). The space's
+home and the door now name Food instead of promising "recipes and meal
+planning"; so does `docs/help/personal/overview.md`, which still said
+Workouts was next.
+
+He also set a goal for the space as a whole: **to track his progress from
+what he does: workouts, eating, cold plunges, sleep and more.** The slice
+table below gains it as a row of its own (H), not designed: it is a layer over
+the tools, and it waits for his calls.
 
 ### 2026-09-28 — The door can go on to a page (`claude/fitness-f4`)
 
@@ -168,10 +186,8 @@ No code yet. This entry is the plan; the slices are below and in
 | P0 | The container | A person has one personal space, can switch to it and back, nobody can be invited into it, support view refuses it, and the isolation suite says so |
 | P1 | The consumer door | A new sign-up is asked "for my business, or just for me", and "just for me" never sees the business setup |
 | F1–F6 | Fitness | See [fitness.md](fitness.md) |
-| D1 | Recipes | A recipe by hand or pasted from a link (ingredients, steps, servings, tags, photo), scaled to a serving count |
-| D2 | The week | A meal plan: recipes on days and meals, dragged about, repeated from a past week |
-| D3 | The shopping list | Built from the week, ingredients merged across recipes, ticked off in the shop on a phone |
-| D4 | Nutrition | Per-recipe calories and macros, and a day's total. Later, and only if asked |
+| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, next), the week, the shopping list, nutrition. See [food.md](food.md) |
+| H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. Habits logged beside what Workouts and Food already know, and progress shown across them. Not designed; ask him first |
 
 ### P0 — the container, as built
 
@@ -341,4 +357,3 @@ certifies it like any pair.
 - A personal space shared with a partner (a household meal plan) is a real ask
   waiting to happen. It would be a second member, which P0 forbids on purpose;
   it needs its own decision, not a raised cap.
-- Diet dossier (`docs/modules/diet.md`) when D1 starts.

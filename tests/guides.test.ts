@@ -800,6 +800,18 @@ describe("docs/help on disk", () => {
     expect(at("/dashboard/m/assets/abc/anything")).toBe("assets/overview");
   });
 
+  it("resolves every Food screen to its own guide", async () => {
+    const guides = await listGuides();
+    const at = (pathname: string) => matchGuide(guides, pathname, "")?.slug ?? null;
+    expect(at("/personal/m/food")).toBe("food/overview");
+    expect(at("/personal/m/food/add")).toBe("food/add");
+    expect(at("/personal/m/food/new")).toBe("food/editor");
+    expect(at("/personal/m/food/drafts/abc")).toBe("food/editor");
+    expect(at("/personal/m/food/recipes/abc/edit")).toBe("food/editor");
+    expect(at("/personal/m/food/recipes/abc")).toBe("food/recipe");
+    expect(at("/personal/m/food/no-such-screen")).toBe("food/overview");
+  });
+
   it("reads a Land guide as paddocks for a homestead farm and zones for nobody in particular", async () => {
     const zone = await getGuide("land/zone");
     expect(zone).not.toBeNull();

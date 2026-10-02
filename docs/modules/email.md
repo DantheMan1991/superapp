@@ -10,6 +10,28 @@
 
 ## Build log
 
+### 2026-10-01 — Remote images load again: the guarded resolver answers in the shape it is asked (`claude/food-d1`)
+
+Found by Food's recipe reader (D1, [food.md](food.md)), which fetches pages
+through the same guarded resolver as the image proxy (`/api/mail/img`,
+`fetch-image.ts`). Its first real fetch failed in a few milliseconds with
+`Invalid IP address: undefined`. Since Node 20 a socket connects with
+`autoSelectFamily`, which asks the resolver for every address
+(`all: true`) and expects a list back; `guardedLookup` answered with one
+address, so **every guarded connection failed before a packet was sent**, the
+proxy's included. A refused remote image looks like one the sender took down,
+so nothing said so. CI runs Node 24, and every Node Vercel still offers is 20
+or later, so the "Remote images work too" claim below has been false in
+production for as long as that has been true; it is true again now.
+
+`guardedLookup` moved to `src/lib/net/guarded-lookup.ts` (the recipe reader's
+`fetch-page.ts` uses it too) and now always resolves every address, refuses
+the name if any one is private, and answers a list when asked for a list and
+one address otherwise. `tests/guarded-lookup.test.ts` covers both shapes and
+the refusals with IP literals and localhost (no network); with the old
+function its first test fails, which is how it was proved to bite. Unwatched
+in Mail itself: no message with a remote image was opened.
+
 ### 2026-09-03 — Thirteen tenant guides, and what writing them found (`claude/mail-guides`)
 
 Mail now has a guide per screen in `docs/help/email/` (see

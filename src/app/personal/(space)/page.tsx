@@ -82,8 +82,9 @@ export default async function PersonalHomePage() {
                 own, with the exercise videos playing right here.
               </p>
               <p>
-                Recipes and meal planning come after that. Each tool appears on this
-                page and in the sidebar as soon as it is ready.
+                Food comes with it: your recipes from a link, a photo of a page or
+                typed in, then the week&apos;s meals and the shopping list. Each tool
+                appears on this page and in the sidebar as soon as it is ready.
               </p>
             </>
           ) : (
@@ -107,7 +108,7 @@ export default async function PersonalHomePage() {
                   );
                 })}
               </ul>
-              <p className="text-muted-foreground">Recipes and meal planning come next.</p>
+              <p className="text-muted-foreground">The week&apos;s meals and the shopping list come next.</p>
             </>
           )}
         </CardContent>

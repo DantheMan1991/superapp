@@ -91,6 +91,15 @@ export function feedbackPathPrefix(tenantId: string): string {
 }
 
 /**
+ * A recipe's photo in a personal space's Food tool (docs/modules/food.md, D1):
+ * the one derivative `preparePhoto` made, never the upload or the page's own
+ * file. Written only by the server, so no upload door validates against it.
+ */
+export function foodPhotoPathPrefix(tenantId: string): string {
+  return `food/${tenantId}/photos/`;
+}
+
+/**
  * Every prefix a tenant is allowed to own, across modules. Used to validate
  * any client-supplied pathname before it is trusted as a blob location.
  *
@@ -110,6 +119,7 @@ export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
     pathname.startsWith(brandPathPrefix(tenantId)) ||
     pathname.startsWith(sitePhotoPathPrefix(tenantId)) ||
     pathname.startsWith(feedbackPathPrefix(tenantId)) ||
-    pathname.startsWith(sheetThumbPathPrefix(tenantId))
+    pathname.startsWith(sheetThumbPathPrefix(tenantId)) ||
+    pathname.startsWith(foodPhotoPathPrefix(tenantId))
   );
 }

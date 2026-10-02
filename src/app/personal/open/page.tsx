@@ -65,8 +65,8 @@ export default async function OpenPersonalSpacePage({
           <>
             <p className="text-sm text-muted-foreground">
               Your personal space sits beside your business. It is where your
-              own things go: your workouts first, then recipes and meal
-              planning.
+              own things go: your workouts, and your food, from recipes to the
+              week&apos;s meals.
             </p>
             <p className="text-sm text-muted-foreground">
               Only you can open it. Nobody from your business can see into it,

@@ -21,6 +21,25 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-10-01 — Accent hues are spaced rail by rail (`claude/food-d1`)
+
+Food, the second personal tool ([food.md](food.md)), took hue 45, and
+`tests/module-accents.test.ts` failed in CI: *35° and 45° are too close to tell
+apart in the rail*. The test put every `--accent-*` on one wheel, but no rail
+ever shows both: a business's rail never holds a personal tool, and a personal
+space's never holds a business module (`moduleFitsTenant`, ADR 0111), which is
+what `globals.css` already said above `--accent-fitness`. Workouts had fitted at
+185 by luck. And the business wheel has no gap of 30° left (the widest is 27°,
+268 to 295), so no new hue could have passed it.
+
+The test now spaces each rail on its own: the business modules and packs, and
+the personal tools, read from the catalogue by the same `moduleFitsTenant` the
+gate uses, not from a list in the test. `--accent-brand` counts in both, since
+both rails draw it for pages that belong to no tool. Each keeps the 15° rule.
+The personal rail reads 45 (Food) · 170 (brand) · 185 (Workouts). Proven to
+bite: Food moved to 180 failed it (*170° and 180°*). A personal tool's hue may
+still sit near a business module's; nobody sees the two together.
+
 ### 2026-09-18 — The page column is 100rem, and a sentence is 80ch (`claude/wide-screens`, ADR 0088)
 
 The founder, looking at the app on a 3,440px monitor: *"On a wide screen there

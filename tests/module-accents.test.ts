@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ICONS } from "@/components/app/icon-registry";
+import { moduleFitsTenant } from "@/lib/personal-space-core";
 import { moduleRegistry } from "@/modules";
 import { packRegistry } from "@/packs";
+import { MODULES } from "../scripts/seed-catalogue";
 
 /**
  * THE TWO SEAMS A NEW MODULE HAS TO TOUCH THAT FAIL SILENTLY.
@@ -86,23 +88,54 @@ describe("every registered module has an accent, in all three blocks", () => {
   });
 });
 
-describe("the pack accents stay spread around the wheel", () => {
-  it("keeps every pair of module hues at least 15° apart", () => {
-    const body = blockBody(":root");
-    const hues = [...body.matchAll(/--accent-[a-z-]+: oklch\([\d.]+ [\d.]+ ([\d.]+)\)/g)]
-      .map((m) => Number(m[1]))
-      // `--accent-brand` is the fallback every untokened module shares, and
-      // `--accent-accounting` deliberately matches it. Counting both would
-      // report a 0° gap that is not a clash.
-      .filter((h, i, all) => all.indexOf(h) === i)
-      .sort((a, b) => a - b);
+/**
+ * The slugs drawn in a personal space's rail: its tools, by the same rule that
+ * keeps them out of a business (`moduleFitsTenant`, ADR 0111). A business's
+ * rail never shows one, and a personal space's never shows a business module,
+ * so the two rails are spaced on their own. Both draw the shell's own
+ * `--accent-brand` (the pages that belong to no tool), so it counts in both.
+ */
+const PERSONAL_SLUGS = new Set(
+  MODULES.filter((m) => moduleFitsTenant(m.category ?? "", "personal")).map((m) => m.id),
+);
 
+function railHues(rail: "business" | "personal"): number[] {
+  return [...blockBody(":root").matchAll(/--accent-([a-z-]+): oklch\([\d.]+ [\d.]+ ([\d.]+)\)/g)]
+    .filter((m) => m[1] === "brand" || PERSONAL_SLUGS.has(m[1]) === (rail === "personal"))
+    .map((m) => Number(m[2]))
+    // `--accent-brand` is the fallback every untokened module shares, and
+    // `--accent-accounting` deliberately matches it. Counting both would
+    // report a 0° gap that is not a clash.
+    .filter((h, i, all) => all.indexOf(h) === i)
+    .sort((a, b) => a - b);
+}
+
+function expectSpread(hues: number[]) {
+  for (let i = 1; i < hues.length; i++) {
+    expect(
+      hues[i] - hues[i - 1],
+      `${hues[i - 1]}° and ${hues[i]}° are too close to tell apart in the rail`,
+    ).toBeGreaterThanOrEqual(15);
+  }
+}
+
+describe("the pack accents stay spread around the wheel", () => {
+  it("keeps every pair of module hues at least 15° apart in a business's rail", () => {
+    const hues = railHues("business");
     expect(hues.length).toBeGreaterThan(10);
-    for (let i = 1; i < hues.length; i++) {
-      expect(
-        hues[i] - hues[i - 1],
-        `${hues[i - 1]}° and ${hues[i]}° are too close to tell apart in the rail`,
-      ).toBeGreaterThanOrEqual(15);
-    }
+    expectSpread(hues);
+  });
+
+  it("keeps every pair of tool hues at least 15° apart in a personal space's rail", () => {
+    const hues = railHues("personal");
+    // The brand and at least Workouts and Food.
+    expect(hues.length).toBeGreaterThanOrEqual(3);
+    expectSpread(hues);
+  });
+
+  it("knows the personal tools from the catalogue, not from a list here", () => {
+    expect(PERSONAL_SLUGS.has("fitness")).toBe(true);
+    expect(PERSONAL_SLUGS.has("food")).toBe(true);
+    expect(PERSONAL_SLUGS.has("accounting")).toBe(false);
   });
 });

@@ -276,6 +276,19 @@ arrival, and it never lets a database error escape — inside a transaction
 that poisons everything after it — so anything that could meet a constraint
 is looked up before it is written.
 
+**Used a ninth time on 2026-10-02, and for the first time between PERSONAL
+tools: progress across them.** Health shows a person's progress week by week
+across what they do, their workouts included, yet must not read Workouts'
+tables, and Workouts must not learn Health exists.
+[src/lib/progress-sources/](../src/lib/progress-sources/types.ts) holds the
+slot (types only), `registry.ts` names the sources, and Health calls
+`resolve.ts`; `src/modules/fitness/progress-source.ts` fills it. A source
+answers NUMBERS per window and a few lines for today, and Health draws them
+all alike, so a tool ships no component. Each source is asked in a
+transaction of its own, because a failed query aborts the transaction it ran
+in, and a failure costs only that tool's rows
+([ADR 0125](decisions/0125-health-reads-progress-from-the-tools-through-a-slot-a-week-at-a-time.md)).
+
 ---
 
 ## 4b. Work is raised and worked where it lives

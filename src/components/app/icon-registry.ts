@@ -34,6 +34,7 @@ import {
   Store,
   Users,
   UtensilsCrossed,
+  HeartPulse,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -118,6 +119,7 @@ export const ICONS: Record<string, LucideIcon> = {
   // Food, the second personal tool (docs/modules/food.md). Added WITH the
   // tool, per the header above.
   utensils: UtensilsCrossed,
+  "heart-pulse": HeartPulse,
   wrench: Wrench,
 };
 

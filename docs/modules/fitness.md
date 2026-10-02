@@ -13,6 +13,22 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — Workouts in Health's progress (`claude/health-h1`)
+
+Health (H1, [health.md](health.md)) shows the founder's progress week by week
+across what he does, his workouts included, and puts today's workout on its
+Today. Workouts tells it through the progress slot (ADR 0125) without learning
+Health exists: `progress-source.ts` reads the sessions in a run of days that
+logged at least one set, in any program (one query, the sets joined, the last
+set's time mapped through the column so it comes back a Date), and
+`core/progress-rows.ts` adds them up: **workout days** a week (two sessions on
+one day are one day), the **average feel after a workout**, and a card for
+today (`Worked out · 4 exercises · 22 min`, and how the last session of the
+day left him). A workout day here is NOT the program's done day
+(`core/progress.ts`, every exercise's minimum, the phase gate): Health shows
+what he did, the program page how the program is going. Nothing else in
+Workouts changed.
+
 ### 2026-10-02 — F6: hands-free in workout mode (`claude/fitness-f6`)
 
 The founder chose it right after Food's hands-free merged (#691). The phrases

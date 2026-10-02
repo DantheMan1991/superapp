@@ -84,6 +84,10 @@ const MODULE_SLUGS = [
   // sold separately, and neither may reach into the other.
   "fitness",
   "food",
+  // Added 2026-10-02 in the slice that made its directory (H1), on time for
+  // once. Its Progress page reads Workouts through `src/lib/progress-sources`,
+  // the slot Workouts fills, never by importing it.
+  "health",
 ];
 
 const CROSS_MODULE_MESSAGE =
@@ -122,6 +126,15 @@ function pathsToModule(slug) {
 
 /** The module that DECLARES the mail extension point, and therefore runs it. */
 const EXTENSION_HOST = "email";
+
+/**
+ * The module that DECLARES the progress slot (Health, H1), and therefore runs
+ * it: its Today and Progress pages show what other personal tools contribute
+ * (Workouts' workout days and feel) through `src/lib/progress-sources`. A
+ * contributor (Workouts) imports only `types.ts`; only the host may reach the
+ * wiring, which names every contributor.
+ */
+const PROGRESS_HOST = "health";
 
 /**
  * Modules that declare an "attach this to a record" surface, and therefore have
@@ -182,6 +195,16 @@ const ATTENTION_REGISTRY_MESSAGE =
   "A module may import only src/lib/attention-sources/types. The registry and resolver are " +
   "platform wiring — importing either pulls in every other module's source and defeats the " +
   "isolation rule by one level of indirection.";
+
+/**
+ * The progress slot (Health H1, ADR 0125) is the same shape again, with a
+ * host: Health runs it, so `PROGRESS_HOST` is let through, and every other
+ * tool is a filler that imports `types.ts` alone.
+ */
+const PROGRESS_REGISTRY_MESSAGE =
+  "A module may import only src/lib/progress-sources/types (Health, the host, may run it). The " +
+  "registry and resolver are platform wiring: importing either pulls in every other tool's " +
+  "source and defeats the isolation rule by one level of indirection.";
 
 /**
  * Setup steps (the Overview's "Getting set up" card, ADR 0033) are the same
@@ -249,6 +272,15 @@ function isolationPatterns(slug, { entityLinkHost }) {
       ],
       message: ATTENTION_REGISTRY_MESSAGE,
     },
+    // Health hosts the progress slot; every other tool is a contributor.
+    ...(slug === PROGRESS_HOST
+      ? []
+      : [
+          {
+            group: ["@/lib/progress-sources/registry", "@/lib/progress-sources/resolve"],
+            message: PROGRESS_REGISTRY_MESSAGE,
+          },
+        ]),
     // Same shape, same reason — see SETUP_REGISTRY_MESSAGE above.
     {
       group: ["@/lib/setup-sources/registry", "@/lib/setup-sources/resolve"],
@@ -326,6 +358,8 @@ const eslintConfig = defineConfig([
       "src/lib/mail-extensions/resolve.ts",
       "src/lib/attention-sources/types.ts",
       "src/lib/attention-sources/resolve.ts",
+      "src/lib/progress-sources/types.ts",
+      "src/lib/progress-sources/resolve.ts",
       "src/lib/setup-sources/types.ts",
       "src/lib/setup-sources/resolve.ts",
       "src/lib/setup-sources/has-any.ts",
@@ -369,6 +403,12 @@ const eslintConfig = defineConfig([
     // node_modules into public/ by scripts/copy-map-worker.ts. Vendor code we
     // do not edit — linting it produced 1,081 warnings and no information.
     "public/maplibre/**",
+    // The posture check's pose library and hands-free's listener engine, copied
+    // the same way (scripts/copy-pose-assets.ts, copy-listener-assets.ts). CI's
+    // lint runs before the copy and never saw them; a local `npm run lint`
+    // after a build found 16 errors and 1,181 warnings in code we do not edit.
+    "public/pose/**",
+    "public/voice-commands/**",
     // The mobile shell (mobile/, ADR 0032) is its own npm package with its own
     // toolchain; its one TypeScript file is checked by that package, and the
     // generated native projects are not ours to lint.

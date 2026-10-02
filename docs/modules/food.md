@@ -145,6 +145,11 @@ once asked for it separately; `verify-modules` matched on both (21 modules).
 3. **Before it, the guarded resolver itself** (see [email.md](email.md)):
    every fetch failed until it answered Node's `all: true` with a list.
 
+**Found by CI:** `tests/module-accents.test.ts` put every accent on one
+wheel, and hue 45 sat 10° from `work`. Personal tools never share a rail with
+business modules, so the test now spaces each rail on its own
+([design-system.md](design-system.md)); Food keeps 45.
+
 Tests: `tests/food-amounts.test.ts` (37: reading and writing amounts),
 `tests/food-core.test.ts` (43: page data in every shape, durations, yields,
 instructions, nutrition, entities, page words, bot checks, Claude's answer read

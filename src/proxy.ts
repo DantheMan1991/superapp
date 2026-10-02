@@ -158,7 +158,10 @@ export const config = {
     // `wasm` and `task` are the posture check's pose model in `public/pose/`
     // (docs/modules/posture.md): 46 MB a phone should never have to pass
     // through Clerk for, or be refused with maintenance mode's 503.
-    "/((?!_next|[^?]*\\.(?:html?|css|mjs|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|wasm|task)).*)",
+    // `voice-commands/` is hands-free's listener (docs/modules/voice-commands.md),
+    // 15 MB for the same reason, whose model is a `.data` file: the folder is
+    // skipped whole, rather than every path with ".data" somewhere in it.
+    "/((?!_next|voice-commands/|[^?]*\\.(?:html?|css|mjs|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|wasm|task)).*)",
     // Always run for API routes
     "/(api|trpc)(.*)",
   ],

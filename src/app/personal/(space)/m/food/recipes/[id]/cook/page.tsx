@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { isSynthesisConfigured } from "@/lib/speech/synthesis";
 import { todayInTimezone } from "@/lib/timezone";
 import { loadRecipe } from "@/modules/food/recipe-ops";
 import { CookMode } from "@/modules/food/components/cook-mode";
@@ -18,7 +19,7 @@ function servingsOf(value: string | string[] | undefined): number | null {
   return Number.isFinite(n) && n > 0 && n <= 999 ? n : null;
 }
 
-/** Cook mode (docs/help/food/cook.md, D1b): a recipe one step at a time, with the screen on. */
+/** Cook mode (docs/help/food/cook.md, D1b, D1c): a recipe one step at a time, with the screen on, and hands-free. */
 export default async function CookPage({
   params,
   searchParams,
@@ -43,6 +44,7 @@ export default async function CookPage({
       steps={row.steps}
       urlServings={row.yieldAmount ? servingsOf(search.servings) : null}
       today={todayInTimezone(ctx.tenant.timezone)}
+      naturalVoice={isSynthesisConfigured()}
     />
   );
 }

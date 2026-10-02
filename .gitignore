@@ -55,6 +55,7 @@ next-env.d.ts
 # scripts/copy-map-worker.ts on prebuild/predev. Generated, never edited.
 /public/maplibre/
 /public/pose/
+/public/voice-commands/
 
 # Clerk instance migration artefacts (scripts/clerk-*.ts): a snapshot names
 # people and a mapping identifies them; the password CSV must never land here.

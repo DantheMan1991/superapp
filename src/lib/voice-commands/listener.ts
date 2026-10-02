@@ -18,7 +18,8 @@ import type { FromListener, ToListener } from "./protocol";
  * While the page's one voice talks (`voice-queue.ts`), and for `TAIL_MS`
  * after, the worker drops the sound, and a phrase heard just before is
  * ignored: a step that says "repeat with the rest of the dough" must not
- * repeat itself. Echo cancellation is OFF for the same reason it is not
+ * repeat itself. Anything else on the page that speaks holds it the same
+ * way (`holdListener`): a workout's demo playing with its author's sound. Echo cancellation is OFF for the same reason it is not
  * needed (half duplex), and because on Android it puts the phone in call mode,
  * which turns the voice and the timer's alarm down.
  *
@@ -62,6 +63,13 @@ const OFF: ListenerState = { status: "off" };
  * echo in the room, and the time the speaker takes to play what it was given.
  */
 const TAIL_MS = 600;
+
+/**
+ * How long the page must stay on the screen before the microphone is taken
+ * back. Found on the F6 drive: a page behind another window was shown for
+ * about 10 ms every 2 s, and took and dropped the microphone each time.
+ */
+const RESUME_AFTER_MS = 300;
 
 /** One channel; the browser's own clean-up of noise and level, but no echo cancelling (above). */
 const MICROPHONE: MediaTrackConstraints = {
@@ -123,6 +131,25 @@ export function setHeardHandler(handler: ((label: string) => void) | null): void
   onHeard = handler;
 }
 
+/** Other things on the page making speech, by name: the listener holds while any is. */
+const holds = new Set<string>();
+
+/**
+ * Something on the page other than the one voice is speaking (a workout's
+ * demo playing with the author's sound, F6): hold the listener as for the
+ * voice, the tail included, so it never takes their words for a phrase.
+ */
+export function holdListener(reason: string, on: boolean): void {
+  if (on) holds.add(reason);
+  else holds.delete(reason);
+  if (session) followVoice(session);
+}
+
+/** The page is speaking: its one voice, or anything held for. */
+function speaking(): boolean {
+  return isVoiceBusy() || holds.size > 0;
+}
+
 /** Whether this browser has everything the listener needs. */
 export function canListen(): boolean {
   return (
@@ -178,7 +205,7 @@ export function startListening(keywords: Keyword[]): void {
     ready: false,
     keywords,
     sent: null,
-    hold: isVoiceBusy(),
+    hold: speaking(),
     tail: null,
     paused: false,
     loaded: 0,
@@ -350,6 +377,9 @@ function pause(s: Session): void {
 
 async function resume(s: Session): Promise<void> {
   if (session !== s || !s.paused) return;
+  await new Promise((settle) => window.setTimeout(settle, RESUME_AFTER_MS));
+  // Hidden again already, or let go: it stays paused.
+  if (session !== s || !s.paused || document.hidden) return;
   s.paused = false;
   void s.context.resume().catch(() => {});
   if (!s.stream && s.node) {
@@ -373,7 +403,7 @@ async function resume(s: Session): Promise<void> {
 
 function followVoice(s: Session): void {
   if (session !== s) return;
-  if (isVoiceBusy()) {
+  if (speaking()) {
     if (s.tail !== null) {
       window.clearTimeout(s.tail);
       s.tail = null;
@@ -385,7 +415,7 @@ function followVoice(s: Session): void {
   } else if (s.hold && s.tail === null) {
     s.tail = window.setTimeout(() => {
       s.tail = null;
-      if (session !== s || isVoiceBusy()) return;
+      if (session !== s || speaking()) return;
       s.hold = false;
       post(s, { type: "hold", on: false });
       show(s);

@@ -15,7 +15,8 @@ import { isNativeAppUserAgent } from "@/lib/native-app-core";
 import { chosenVoice, chosenVoiceOnTheServer } from "@/lib/speech/voice-choice";
 import { RECORDED_VOICES } from "@/lib/speech/voices";
 import { LISTENER_DOWNLOAD_WORDS } from "@/lib/voice-commands/assets";
-import type { ListenerFailure, ListenerState } from "@/lib/voice-commands/listener";
+import type { ListenerState } from "@/lib/voice-commands/listener";
+import { canRetry, downloadPercent, listenerFailureWords } from "@/lib/voice-commands/words";
 import { commandWords, cookListening } from "../core/hands-free";
 
 /**
@@ -155,28 +156,6 @@ export function HandsFreeIntro({
   );
 }
 
-function failureWords(failure: ListenerFailure, inApp: boolean): string {
-  switch (failure) {
-    case "unsupported":
-      return "Hands-free needs a newer browser. Chrome, or the Yosher app, has what it needs.";
-    case "denied":
-      return inApp
-        ? "The microphone is blocked for the Yosher app. Allow it in the phone's settings, then try again."
-        : "The microphone is blocked for this site. Allow it in the browser's site settings, then try again.";
-    case "no-microphone":
-      return "No microphone would start. Another app may be using it.";
-    case "download":
-      return "Hands-free could not be downloaded. Check the connection, then try again.";
-    case "engine":
-      return "Hands-free would not start on this phone.";
-  }
-}
-
-/** The model's share of the first download, which is most of it. */
-function percent(loaded: number, total: number): number {
-  return Math.min(100, Math.round((loaded / total) * 100));
-}
-
 /** What the phone is doing, what to say, and what it last heard. */
 export function HandsFreeStrip({
   state,
@@ -196,9 +175,9 @@ export function HandsFreeStrip({
   if (state.status === "failed") {
     return (
       <div role="alert" className="space-y-2 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-        <p>{failureWords(state.failure, inApp)}</p>
+        <p>{listenerFailureWords(state.failure, inApp)}</p>
         <div className="flex gap-2">
-          {state.failure !== "unsupported" && state.failure !== "engine" && (
+          {canRetry(state.failure) && (
             <Button variant="outline" size="sm" onClick={onRetry}>
               <RotateCcw aria-hidden /> Try again
             </Button>
@@ -219,7 +198,7 @@ export function HandsFreeStrip({
           <span className="inline-flex items-center gap-1.5 font-medium">
             <Loader2 className="size-4 animate-spin" aria-hidden />
             Getting hands-free ready
-            {state.total ? ` · ${percent(state.loaded, state.total)}%` : "…"}
+            {state.total ? ` · ${downloadPercent(state.loaded, state.total)}%` : "…"}
           </span>
         ) : state.status === "held" ? (
           <span className="inline-flex items-center gap-1.5 font-medium text-module-accent">
@@ -238,7 +217,7 @@ export function HandsFreeStrip({
       </div>
       {state.status === "starting" && state.total ? (
         <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
-          <div className="h-full bg-module-accent" style={{ width: `${percent(state.loaded, state.total)}%` }} />
+          <div className="h-full bg-module-accent" style={{ width: `${downloadPercent(state.loaded, state.total)}%` }} />
         </div>
       ) : null}
       <p className="text-muted-foreground">Say {sayList}.</p>

@@ -13,6 +13,119 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — F6: hands-free in workout mode (`claude/fitness-f6`)
+
+The founder chose it right after Food's hands-free merged (#691). The phrases
+were measured before the mockup, the same way as cook mode's
+([voice-commands.md](voice-commands.md)): Deepgram's four voices saying each
+candidate, and 13 sentences of talk around a workout ("One, two, three…",
+"I'm almost done with this one.", "Can you pause the TV for a second?",
+"Start the car, I'll be right out."). The single words in the plan ("done",
+"next", "start") were heard from all four voices and fired on every sentence
+that had the word in it; "pause" alone was heard from two. Two-word phrases,
+listened for together with "resume" and "repeat": 29 of 32 heard, no phrase
+taken for another, 0 false fires on 60 sentences.
+
+His calls, from a mockup of the three screens:
+
+- **Two-word phrases**: "start set", "set done", "pause workout", "resume",
+  "one more set", "next exercise", "repeat". "pause workout" is the weak one
+  (three voices of four; eight more ways of saying it caught the fourth no
+  better).
+- **"next exercise" moves on with the taps as left**: effort, cues and "anything
+  hurt" stay as tapped, the rest blank. Effort by voice would be ten more
+  phrases to measure; not built.
+- **On once**: a `Hands-free` switch on the start screen, remembered by the
+  phone; every session after listens from its Start tap.
+- **A word back** from the coach: "Paused.", "Resumed.", "Not yet: 3 of 5
+  breaths.", so a person face down knows it heard.
+
+What was built:
+
+- `core/hands-free.ts` (pure): the commands and their phrases
+  (`WORKOUT_COMMANDS`, one vocabulary all session, since the measure found no
+  confusion and a change rebuilds the engine's spotter), what each place lists
+  (`sayHere`, `sayList`), and the words back (`REPLY`, `notYet`, `replyLines`,
+  all keyed `reply`, fetched ahead with the session's lines when the switch is
+  on).
+- `components/workout/hands-free.ts`: the switch (`yosher.fitness.hands-free`)
+  and `useWorkoutCommands` / `sendWorkoutCommand`: the screen hears a phrase
+  and hands it on, and the control on the screen takes the commands it can
+  carry out, because only it knows its state. The breath pacer and the hold
+  timer take start, done, pause and resume (start is Start, or Start now in
+  the countdown; pause in the countdown is Wait; done before the least says
+  how far); the count takes done (its Done, with the count shown); the set
+  takes repeat (the set's line again) and turns away the check's two; the
+  check takes one more set, next exercise and repeat (what can be said); the
+  finish asks for its tap.
+- `components/workout/hands-free-hint.tsx`: the box under the count and above
+  the check's buttons: `Listening`, `Coach speaking`, `Getting hands-free
+  ready · 42%`, `Paused`, `Hands-free is on. Tap here to start listening.`
+  (a reload has had no tap; a button, because a tap on the demo lands in
+  YouTube's frame), what can be said here, and what it heard. A failure says what to do, with Try again.
+- `workout-screen.tsx`: listening starts at Start, or at any tap on a session
+  resumed after a reload; a microphone switch in the top bar turns it off or
+  on mid-session; leaving or finishing lets the microphone go.
+- **The demo holds the listener while it plays with the author's sound**
+  (`holdListener`, new in the shared listener): the author saying "repeat on
+  the other side" is speech the voice queue does not know about.
+- Shared with Food: the failure messages and the download percentage moved to
+  `src/lib/voice-commands/words.ts`, so both tools say the same.
+- Guide `workout.md`: a Hands-free section (turning it on, the box, every
+  phrase and what it does, the words back, how to say it, turning it off, the
+  messages), the switch, the top bar's microphone, the box in each step.
+
+**Driven** on a production build against dev, on the dev space's own program
+(Phase 1, Half now), with the spike's recordings played into a stand-in
+microphone and the page's sound muted; each recorded line the coach played was
+matched back to its words by its bytes.
+
+- **The start**: the switch on and remembered (`yosher.fitness.hands-free`);
+  Start asked for the microphone once, the listener was ready in 1.5 s, the box
+  said `Coach speaking` through the set's line and then `Listening`.
+- **A counted set** (rolls): "repeat" said the set again; "set done" was Done,
+  once (one set in the session document, not two); per side, two "set done"s
+  did the right side, then the left.
+- **The check**: "one more set" on an exercise that takes no more got "That is
+  all the sets it takes. Say next exercise."; "repeat" got "Say one more set,
+  or next exercise."; "next exercise" moved on with the taps blank.
+- **A breath set**: "set done" before it began got "Say start set first.";
+  "start set" began the countdown with "Starting in five."; "pause workout"
+  paused it ("Paused."), "resume" resumed it ("Resumed."); the set finished
+  itself at 8 breaths; on a 5–8 set, "set done" at 5 ended it, as Finish set
+  does.
+- **The finish**: a phrase got "Tap how you feel, then Finish."
+- **The top bar's microphone**: off let the microphone go, cleared the switch
+  and hid the box, and a phrase did nothing; on again listened at once.
+- **A reload mid-session**: the box asked for a tap; a tap started listening
+  again, and "next exercise" was heard straight after.
+
+The two test sessions were deleted from dev afterwards (with their exercises
+and sets), and the pane's copy and switch cleared.
+
+**Found by the drive, and fixed:**
+
+- **"Not yet: 0 of 8 breaths." came in the phone's voice**: fetched only when
+  said, its recording took 2.06 s, past the voice's 2-second wait. A timed
+  set's "not yet" lines are now fetched as the set appears (`notYetLines`, at
+  most 30); re-driven, it played in the recorded voice.
+- **A tap on the finish started the microphone**: the tap-to-listen after a
+  reload ran on every step. It now runs on a set or a check only.
+- **A page behind another window took and dropped the microphone every 2 s**:
+  the pane showed it for about 10 ms each time. The listener now waits until
+  the page has stayed on the screen 0.3 s (`RESUME_AFTER_MS`); re-driven, one
+  request in 8 s of flicker.
+- **"Tap the screen" missed when the tap landed on the demo**, which is
+  YouTube's frame. The line is now a button, `Hands-free is on. Tap here to
+  start listening.`, which starts listening only if the tap did not already;
+  re-driven, one microphone request.
+
+Tests: `tests/fitness-hands-free.test.ts` (new, pure: the phrases he chose as
+one vocabulary the engine accepts, no single word that comes up in talk, what
+each place lists, the words back and their keys, the "not yet" lines and every
+fixed reply fitting the voice route), `tests/voice-commands.test.ts` (the new
+phrases' sounds are in the model's, and no two alike).
+
 ### 2026-10-02 — The coach's voice is shared with cook mode, and F6 has its listener (`claude/food-d1c`)
 
 Food's hands-free cook mode (food.md, D1c; ADR 0124) reads recipes in the
@@ -406,7 +519,7 @@ person's own space, the way a pack must never carry one business's price list
 | F3 | **Progress and the gate** | Done days per phase, the week against its target, the effort warning, how he felt before and after, and the next phase opening at 14 done days |
 | F4 | **Fitting it to him** | The side self-assessment, progressions and their nudges, morning and evening split with reminders |
 | F5 | **Your own workouts** | An exercise library and a builder, for strength as well as mobility: weight, rest timer, last time's numbers, personal bests |
-| F6 | **Hands-free** | "Next", "done", "again" said aloud, for when you are lying on the floor. The listener is built and shared (Food D1c, [voice-commands.md](voice-commands.md)); F6 brings Workouts' phrases and commands |
+| F6 | **Hands-free** | Two-word phrases said aloud, for when you are lying on the floor: "start set", "set done", "pause workout", "resume", "one more set", "next exercise", "repeat", with a word back from the coach. The listener is Food's (D1c, [voice-commands.md](voice-commands.md)). **Built** |
 
 ### F1 — the program, imported
 
@@ -602,8 +715,14 @@ right after the exercise and on the program page. **F4 is complete.**
 
 F5 widens the same model to strength: an exercise can carry a load, a set logs
 weight and reps, and workout mode gains a rest timer and last time's numbers,
-with a personal best called out when you beat it. F6 is voice commands in
-workout mode. Neither is designed further until F1–F4 have been used.
+with a personal best called out when you beat it. It is not designed further
+until F1–F4 have been used.
+
+**F6 is built** (2026-10-02; the build log has it): two-word phrases in workout
+mode, the founder's calls from a mockup, with the phrases measured first. Where
+it moved from the first plan: two-word phrases rather than "next", "done" and
+"again", which fired on talk; and "next exercise" moves on without the three
+taps rather than asking for them by voice.
 
 ## Inline video
 

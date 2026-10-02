@@ -1,6 +1,6 @@
 # Doing a session
 
-> The screen for the workout itself: one exercise at a time, the demo looping above the count, the breaths paced and counted for you, a coach's voice for when you cannot look, each set logged, and a quick check after every exercise. It works with no signal and picks up where you left off.
+> The screen for the workout itself: one exercise at a time, the demo looping above the count, the breaths paced and counted for you, a coach's voice for when you cannot look, each set logged, and a quick check after every exercise. Turn on hands-free and short phrases such as "set done" work the buttons for you. It works with no signal and picks up where you left off.
 > **Route:** /personal/m/fitness/programs/*/session
 > **Order:** 40
 
@@ -13,6 +13,7 @@ At the top, on every step:
 - **{icon:x}.** Leaves the session and goes back to the program. The session stays open. The program then shows {button:Resume today's session|primary|play}, which brings you back to the set you were on.
 - **Where you are**, for example `Exercise 2 of 4`, or `Today's session` before you start.
 - **Under it, whether it is saved**: `Saved` {icon:check}, `Saving`, or `Kept on this phone` {icon:cloud-off} when there is no signal. Nothing is lost while it says `Kept on this phone`. It goes up by itself when the phone has signal again.
+- **{icon:mic}**, during a session, when hands-free is on. Turns hands-free off; it becomes {icon:mic-off}. Click it again to turn it back on, which starts listening straight away. It shows on a phone that can listen. See [Hands-free](#hands-free).
 - **{icon:megaphone}.** Turns the coach's voice off. The tones stay on. It becomes {icon:megaphone-off}; click it again to turn the voice back on. Your phone remembers the choice. It is there whenever the coach can speak, which with the recorded voice is always. See [The coach's voice](#the-coachs-voice).
 - **{icon:volume-2}.** Turns every sound off: the tones, the buzz and the coach's voice. It becomes {icon:volume-x}; click it again to turn them back on. Your phone remembers the choice.
 - **{icon:circle-question-mark}.** Opens this guide beside the screen.
@@ -26,6 +27,7 @@ At the top, on every step:
 - **`Coach's voice`**, with {icon:megaphone}: the voice the coach speaks in, `Arcas` to start with. Choose another from the list: `Arcas`, `Orion`, `Helena` or `Vesta`. Your phone remembers the choice.
   - {button:Try|outline|play} says the first exercise's line in the chosen voice. You hear it even with the voice or the sounds switched off, because you asked for it.
   - The session's lines are fetched while this screen is open, so the first one is ready when you start.
+- **`Hands-free`**, with a switch, on a phone that can listen: `Say “start set”, “set done” and the rest while you are on the floor. It listens on this phone, and nothing you say leaves it. The first time, it downloads about 15 MB.` Turn it on once and your phone remembers it: every session after listens from its Start. See [Hands-free](#hands-free).
 - **`How much now?`**, when some exercise has two or more sets to go today:
   - {button:All of it|primary}, or {button:All that's left|primary} after a session earlier today, does every set the day still needs. It is chosen to start with.
   - {button:Half now, the rest later today|outline} does the first half of each exercise's sets, rounded up: 1 of 2, 2 of 3. The rest is waiting when you start again later today.
@@ -47,6 +49,7 @@ At the top, on every step:
 - **An exercise done on one side**, once the program's tests have found your side, says that side instead, for example `Set 1 of 2 · Lying on your left side · 2 × 5–8 breaths`, with `One side only: you lean left.` under it. You do every set on that side, and never the other. An exercise you started on both sides before saving your side finishes on both. See [Finding your side](side.md).
 - **An exercise with levels** shows your level under its name, for example `Level 2 of 4`, and its demo plays that level's part of the video. A set counted in reps starts at what you did in the set before, so you tap only to change it.
 - **One of the program's checks** in large type, for example `Low back relaxed`. It changes with each set.
+- **The hands-free box**, under the count, when hands-free is on. It says what the phone is doing and what you can say for this set. See [Hands-free](#hands-free).
 - **The exercise's notes**, in a gray box, when the program has any.
 - **{button:Skip this exercise|ghost|player-skip-forward}.** Moves on without it. Use it for an optional exercise, or one you cannot do today.
 
@@ -93,6 +96,7 @@ After the first set of an exercise, each next set starts itself after a five-sec
 - **`What did you feel?`** The exercise's checks, each with a box to tick for the ones you felt.
 - **`Anything hurt?`** {button:No|outline}, {button:A pinch|outline} or {button:Yes|outline}. After A pinch or Yes, a box asks `Where, and what it felt like`.
 - **When you made the mark for moving up**, on an exercise with levels: a box says so, for example `2 × 15 at Level 1, effort 3, nothing hurt. That's the program's mark to move on.` The mark is the program's sets and count at your level, on each side for an exercise done per side, with your effort no higher than the program's and nothing hurt, so it shows once you have answered both. {button:Move up to Level 2|outline} puts you on the next level from your next session, and says `Level 2 from your next session.` {button:Not yet|ghost} keeps you where you are, and says `Staying at Level 1. The program page keeps the suggestion.` Tap either again to undo it. Your choice goes with the session when you tap Next, so it works with no signal.
+- **The hands-free box**, when hands-free is on: `Say “one more set”, “next exercise” or “repeat”.`, or without “one more set” when the exercise takes no more sets.
 - **{button:One more set|outline|plus}**, when the program allows more sets than you have done, for example the third set of `2–3 × 8`. On a split day it counts the day's earlier sets too: with one set this morning, tonight can go to two of `2–3`.
 - **{button:Next: Wall stack|primary}.** Saves your answers and starts the next exercise. On the last exercise it reads {button:On to the finish|primary}.
 
@@ -148,6 +152,54 @@ It never talks over itself. `Last one.` cuts in on a check, and anything that co
 A line your phone does not have yet, for example with no signal the first time you do a phase, is said in your phone's own voice instead: the most natural one your phone has. A line the phone is still fetching is waited for a moment first, so it may come a second late.
 
 If you reload the page in the middle of a session, the voice may stay quiet until you tap anywhere on the screen. To turn it off, click {icon:megaphone} at the top. To turn off every sound, click {icon:volume-2}.
+
+## Hands-free
+
+Hands-free lets you work the session's buttons by saying short phrases, so you can stay on the floor. The phone listens for those phrases and nothing else. The listening happens on the phone itself: nothing you say is recorded or sent anywhere.
+
+### Turning it on
+
+1. On the screen before you start, turn on the **`Hands-free`** switch. Your phone remembers it for every session after this one.
+2. Click {button:Start|primary|play}. The first time, your browser (or the Yosher app) asks for the microphone. Allow it.
+3. The first time, the listener downloads, about 15 MB. The box under the count says `Getting hands-free ready · 42%`. After that, your phone keeps it and it starts in a moment.
+4. When the box says **Listening**, say a phrase.
+
+You can also turn it on in the middle of a session with {icon:mic-off} at the top. It starts listening at once.
+
+### The hands-free box
+
+Under the count during a set, and above the buttons after an exercise:
+
+- **Listening**, with a pulsing dot: say a phrase.
+- **{icon:volume-2} Coach speaking**: the coach is talking. The phone does not listen while the coach speaks, so it never hears itself. Say your phrase when the coach has finished.
+- **{icon:mic-off} Paused**: you came back from another app or a locked screen, and the microphone is starting again.
+- **`Hands-free is on. Tap here to start listening.`**: you reloaded the page in the middle of a session. A phone only starts a page's microphone after a tap, so tap the box, or anywhere on the screen but the video.
+- What you can say here, for example `Say “set done”, “pause workout” or “repeat”.`
+- After a phrase, what it heard, for a few seconds, for example `Heard “pause workout”.`
+
+### What you can say
+
+| Say | What happens |
+| --- | --- |
+| “start set” | On a set counted in breaths or seconds: the five-second countdown starts, as {button:Start|primary|play} does, and the coach says “Starting in five.” Said during the countdown, the set starts now, as {button:Start now|primary} does. On a set counted in reps or rolls: “Go ahead. Say set done when you finish.” |
+| “set done” | Ends the set, as {button:Finish set|primary} or {button:Done|primary|check} does. Before the least the program asks for, the coach says how far you are instead, for example “Not yet: 3 of 5 breaths.” |
+| “pause workout” | Pauses the breaths or the hold, and the coach says “Paused.” Said during the countdown, it stops the countdown, as {button:Wait|outline} does: “Waiting. Say start set when you are ready.” |
+| “resume” | Starts the breaths or the hold again, and the coach says “Resumed.” |
+| “one more set” | After an exercise: adds a set, as {button:One more set|outline|plus} does. When the exercise takes no more: “That is all the sets it takes. Say next exercise.” |
+| “next exercise” | After an exercise: moves on, as the next exercise's button does. Whatever you tapped for the three questions is kept, and the rest stays blank. |
+| “repeat” | During a set, the coach says the set again, for example `Set 2 of 2. Left side.` After an exercise, it says what you can say. |
+
+A phrase that does not fit the moment gets a word back instead. For example, “one more set” during a set: “Finish this set first. Say set done.” On a set that has not started: “Say start set first.” At the finish: “Tap how you feel, then Finish.”, because how you feel needs a tap.
+
+**How to say it.** Say the phrase on its own, at a normal voice, with a short pause before and after. Talking around you, counting aloud or a TV does not set it off: it only hears these phrases, said together. If it misses one, say it again a little more clearly.
+
+The coach's words back come in the coach's voice. With the coach's voice or every sound turned off, they are not said, and the box still shows what was heard.
+
+### Turning it off
+
+- Click {icon:mic} at the top during a session. It stops listening at once, and your phone remembers it is off.
+- Or turn off the **`Hands-free`** switch before you start.
+- Leaving the session, or finishing it, lets go of the microphone. So does another app in front or a locked screen, until you come back.
 
 ## How to do a session
 
@@ -206,9 +258,22 @@ The coach's voice keeps working too. Lines your phone has said before are kept o
 | `That session belongs to another program.` | The session cannot be saved under this program. Tell us if you see this. |
 | `Part of that session belongs to another one.` | Part of the session is already saved in another one. Tell us if you see this. |
 
+Hands-free's messages appear in a red box where the hands-free box would be, with {button:Try again|outline|rotate-ccw} (when trying again can help) and {button:Turn off hands-free|ghost}. The session carries on by tapping whatever the box says.
+
+| Message | What it means |
+| --- | --- |
+| `The microphone is blocked for this site. Allow it in the browser's site settings, then try again.` | The microphone was refused, now or earlier. In Chrome, tap the icon left of the web address, allow the microphone, then click Try again. |
+| `The microphone is blocked for the Yosher app. Allow it in the phone's settings, then try again.` | The app was refused the microphone. In the phone's settings, find the Yosher app's permissions, allow the microphone, then click Try again. |
+| `No microphone would start. Another app may be using it.` | A call, a recording or another app is holding the microphone. Close it, then click Try again. |
+| `Hands-free could not be downloaded. Check the connection, then try again.` | The listener's first download stopped, usually for want of signal. Try again starts it afresh. |
+| `Hands-free needs a newer browser. Chrome, or the Yosher app, has what it needs.` | This browser cannot run the listener. Use Chrome or the app. |
+| `Hands-free would not start on this phone.` | The listener downloaded but would not run here. Tap through the session; tell us through the feedback button. |
+
 ## Not on this page
 
 - **Changing what the voice says.** You can choose the voice and turn it off, but its words are the screen's.
+- **Answering the three questions by voice.** “next exercise” moves on with what you tapped; the effort and the rest are taps.
+- **Speaking over the coach.** The phone does not listen while the coach speaks; say the phrase when it has finished.
 - **Your progress.** Done days, this week and when the next phase opens are on the program's page. See [Following a program](program.md#your-progress).
 - **Doing a one-sided exercise on both sides today.** A session keeps your side. To change it, take the tests again from the program's page. See [Finding your side](side.md).
 

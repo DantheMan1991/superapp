@@ -3,7 +3,9 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { sounds } from "./sound";
+import { notYet, REPLY } from "../../core/hands-free";
+import { useWorkoutCommands } from "./hands-free";
+import { coachSay, sounds } from "./sound";
 
 const COUNTDOWN_S = 5;
 
@@ -80,6 +82,50 @@ export function HoldTimer({
     return () => window.clearInterval(timer);
   }, [status]);
 
+  function waitAgain() {
+    setStatus("ready");
+    setCountdown(COUNTDOWN_S);
+  }
+
+  // Hands-free (F6), as the breath pacer's: a phrase does what the button would.
+  useWorkoutCommands((command) => {
+    const going = status === "running" || status === "paused";
+    if (command === "start") {
+      if (status === "ready") {
+        setStatus("countdown");
+        coachSay(REPLY.starting);
+      } else if (status === "countdown") begin();
+      else if (going) coachSay(REPLY.started);
+      return status !== "done";
+    }
+    if (command === "done") {
+      if (going && held >= min) finishSet(held);
+      else if (going) coachSay(notYet(held, min, "seconds"));
+      else if (status !== "done") coachSay(REPLY.notStarted);
+      return status !== "done";
+    }
+    if (command === "pause") {
+      if (status === "running") {
+        setStatus("paused");
+        coachSay(REPLY.paused);
+      } else if (status === "paused") coachSay(REPLY.alreadyPaused);
+      else if (status === "countdown") {
+        waitAgain();
+        coachSay(REPLY.waiting);
+      } else if (status === "ready") coachSay(REPLY.notStarted);
+      return status !== "done";
+    }
+    if (command === "resume") {
+      if (status === "paused") {
+        setStatus("running");
+        coachSay(REPLY.resumed);
+      } else if (status === "running") coachSay(REPLY.notPaused);
+      else if (status !== "done") coachSay(REPLY.notStarted);
+      return status !== "done";
+    }
+    return false;
+  });
+
   const left = Math.max(0, max - held);
   const running = status === "running";
 
@@ -119,10 +165,7 @@ export function HoldTimer({
             size="lg"
             variant="outline"
             className="h-14"
-            onClick={() => {
-              setStatus("ready");
-              setCountdown(COUNTDOWN_S);
-            }}
+            onClick={waitAgain}
           >
             Wait
           </Button>

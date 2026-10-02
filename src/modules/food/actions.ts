@@ -10,7 +10,8 @@ import { FoodError, foodMessage } from "./core/errors";
 import { recipeInputSchema } from "./core/recipe";
 import { discardImport, readLink, readPhotos, readText, takeImport, type ReadResult } from "./import-ops";
 import { discardPhoto, storeRecipePhoto, type StoredPhoto } from "./photo-ops";
-import { FOOD_HOME, deleteRecipe, insertRecipe, updateRecipe } from "./recipe-ops";
+import { logCook, undoCook } from "./cook-ops";
+import { FOOD_HOME, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
 
 /**
  * FOOD'S SERVER ACTIONS. Each one: the personal space's own door
@@ -177,5 +178,45 @@ export async function discardImportAction(input: unknown): Promise<Outcome> {
     return { ok: true };
   } catch (err) {
     return failure(err, "The draft could not be discarded. Try again.");
+  }
+}
+
+const logCookInput = z.object({
+  cookId: z.string().uuid(),
+  recipeId: z.string().uuid(),
+  servings: z.number().positive().max(100_000).nullable(),
+});
+
+/**
+ * "Log that you made it" (D1b): the end of cook mode. The id is the phone's,
+ * made when cook mode opened, so a second press or a resend is one log.
+ */
+export async function logCookAction(input: unknown): Promise<Outcome<{ madeOn: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = logCookInput.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    const { madeOn } = await withTenant(ctx.tenant.id, (tx) => logCook(tx, ctx, parsed.data), { role: ctx.role });
+    revalidatePath(FOOD_HOME);
+    revalidatePath(recipeHref(parsed.data.recipeId));
+    return { ok: true, madeOn };
+  } catch (err) {
+    return failure(err, "It could not be logged. Try again.");
+  }
+}
+
+const undoCookInput = z.object({ cookId: z.string().uuid(), recipeId: z.string().uuid() });
+
+export async function undoCookAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = undoCookInput.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => undoCook(tx, ctx.tenant.id, parsed.data.cookId), { role: ctx.role });
+    revalidatePath(FOOD_HOME);
+    revalidatePath(recipeHref(parsed.data.recipeId));
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be undone. Try again.");
   }
 }

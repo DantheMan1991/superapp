@@ -93,7 +93,7 @@ import {
   voiceOffOnTheServer,
 } from "./sound";
 import { useSessionSync, useStoredSessions, type SyncState } from "./use-session-sync";
-import { useWakeLock } from "./use-wake-lock";
+import { useWakeLock } from "@/lib/use-wake-lock";
 
 /**
  * WORKOUT MODE (docs/help/fitness/workout.md, docs/modules/fitness.md F2a).

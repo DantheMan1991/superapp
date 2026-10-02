@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Place } from "../core/placement";
 import { stickersIn, VIEWS, type View } from "../core/sticker-map";
-import { useWakeLock } from "../../components/workout/use-wake-lock";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import { askToKeepStorage, newCheckId, sweepAbandoned } from "../store/checks";
 import type { CaptureAction } from "../client/capture-base";
 import { CheckSession, HOLD_FRAMES, ROUNDS, VIEW_LABEL, type CheckResult, type CheckStep, type Marks } from "../client/check-session";

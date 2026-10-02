@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useWakeLock } from "../../components/workout/use-wake-lock";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import { useScreenPrivacy } from "../client/screen-privacy";
 import { SetupSession, type RowKey, type RowState, type SetupAction } from "../client/setup-session";
 import type { FrameResult } from "../worker/protocol";

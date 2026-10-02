@@ -17,7 +17,7 @@ Open **Food** {icon:utensils} in the sidebar of your personal space. This page s
   - {button:Discard draft|outline} beside a draft or a failure. It asks `Discard this draft?` with `Nothing from it is kept. To try again, add the recipe again.` Click {button:Discard draft|destructive} to throw it away, or {button:Keep it|ghost} to leave it.
 - **The search box**, `Search recipes or ingredients`. Type one word or several. A recipe stays in the list when every word is in its name, its tags or its ingredient lines, so `lemon chicken` finds a recipe with both.
 - **The tags.** {button:All|outline} and a button for each tag your recipes use, in alphabetical order. Click a tag to see only the recipes that have it; click All to see every recipe again. The tag and the search box work together.
-- **A row for each recipe**, in alphabetical order by name: its photo, or a grey picture when it has none; its name; its time and what it makes, such as `35 min · 4 servings`; and its tags. Click a row to open the recipe. See [Cooking from a recipe](recipe.md).
+- **A row for each recipe**, in alphabetical order by name: its photo, or a grey picture when it has none; its name; its time and what it makes, such as `35 min · 4 servings`; and its tags, and `made 3×` once you have logged cooking it. Click a row to open the recipe. See [Cooking from a recipe](recipe.md).
 - **`No recipe matches.`** when the search and the tag leave nothing to show.
 - **With no recipes and no drafts**, the page says `No recipes yet`, with `Add one from a link, a photo of a cookbook page, text you pasted, or type it in. You check it before it is saved.` and {button:Add a recipe|primary|plus}.
 
@@ -41,8 +41,7 @@ The reasons a recipe could not be read are listed in [Adding a recipe](add.md).
 
 ## Not on this page
 
-- **Cook mode.** A screen that stays on while you cook, shows one step at a time and starts the timers a step names. It comes next.
-- **The week's meals and the shopping list.** They come after cook mode.
+- **The week's meals and the shopping list.** They come next.
 - **Working out nutrition from the ingredients.** Not built. A recipe shows the nutrition it states, when it states it.
 - **Sharing a recipe with somebody.** Not built.
 

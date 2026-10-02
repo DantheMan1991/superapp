@@ -15,6 +15,101 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — D1b: cook mode (`claude/food-d1b`)
+
+The slice he asked for right after D1. His calls, from an interactive mockup
+(the cornbread recipe tapped through, timers running fast):
+
+- **Gather the ingredients first**, a checklist at the chosen servings, then
+  the steps; an Ingredients button on every step brings the list back.
+- **`Uses:` under each step**: the ingredient lines the step's words name, at
+  the servings being cooked.
+- **Reading steps aloud waits**, to come in one slice with saying "next" (voice
+  commands), since reading aloud is half of hands-free.
+- **Log that you made it** at the end: a count and the last day on the recipe.
+
+**Migrations `0439`** (`food_cooks`) **and `0440`** (its RLS): on dev, and on
+production on his word before the merge (its ledger read first: exactly these
+two were pending). `verify-rls` passed on both (259 tables), and the table's
+forced RLS, its two policies and its composite key were read back on both. No
+seed: the catalogue row is D1's.
+
+- **Cook mode** (`/personal/m/food/recipes/[id]/cook?servings=`): the screen
+  kept on (`useWakeLock`), the gather list, then one step at a time in big
+  type with its group's heading, Back and Next, Done cooking, and the finish
+  screen. The recipe page's **Cook** button carries the servings chosen there.
+- **Timers** (`core/times.ts`, pure): every time in a step's words is a button
+  (`findTimes`: a number and a unit of time, ranges, `1 hr 15 min`, `1½
+  hours`, `half an hour`; never `400°F`, `2-inch` or `overnight`). A timer is an
+  END TIME (`core/cook.ts`), so a slept phone comes back to the right time
+  left, or to a timer already ringing; several run at once and keep running
+  between steps; a range rings at the shorter with "Check it now. It can take
+  up to 30 min."; `+1 min` and Stop. The alarm (`alarm.ts`): three Web Audio
+  chimes and a buzz every 1.5 s until stopped, unlocked by the first tap.
+- **`Uses:`** (`core/uses.ts`, pure): a line's food words (after its amount and
+  unit, brackets out, before a comma, descriptive words dropped) matched to
+  the step's words, plural or not; a word two lines share only counts when the
+  step names the whole food. Errs toward missing.
+- **The phone's store** (`cook-store.ts`): the session per recipe in the
+  browser's storage (place, ticks, timers, the log), read with
+  `useSyncExternalStore` and a cached snapshot, so a reload or another app in
+  between loses nothing; stale after 12 hours. Time and new ids come from the
+  store (`changeCookSession`), never the component: the React compiler's
+  purity rule refused `Date.now()` in a handler defined in the component.
+- **Log that you made it** (`cook-ops.ts`, `logCookAction`): one
+  `food_cooks` row, its id the phone's (made when the session starts), so a
+  second press or a resend is one log; the day is the space's
+  (`todayInTimezone`); Undo deletes it. The recipe page says `Made 3 times,
+  last on Sep 30.`, the list `made 3×`.
+- **Shared, and guarded**: `useWakeLock` moved from Workouts to
+  `src/lib/use-wake-lock.ts` (a module may not import another), and `fitness`
+  and `food` joined the lint's module-isolation list, which neither was on
+  (the third time a module shipped unlisted; both were clean).
+- Guides: `cook.md` (new), `recipe.md` (Cook, how often it was made),
+  `overview.md` (`made 3×`); guide icons `chef-hat`, `timer`, `bell-ring`.
+
+**Driven** on a production build against dev, on the invented cornbread typed
+in (8 wedges), with the page's chimes, buzzes and screen-on requests counted:
+
+- The recipe page's **Cook** linked `?servings=8`, then `?servings=12` after
+  four +. Cook mode asked to keep the screen on, and gathered at 12 wedges
+  (`1 ⅞ cups cornmeal`, `3 large eggs`); two ticks crossed out and were kept on
+  the phone with the cook's id.
+- **Steps**: step 1's `15 minutes` was a timer and `400F` was not, with no
+  `Uses:`; step 2's `Uses:` listed all seven lines at 12 wedges; step 3 none
+  (`buttered`); step 4 had `25 to 30 minutes` and `5 minutes`, and Done cooking.
+- **Timers**: both started and counted down together (`25:00` → `24:58`). The
+  5-minute one, brought forward in the phone's store, rang: `Step 4 · 5 min:
+  time's up`, `Done.`, 3 chimes (9 tones) and 3 buzzes in 3.5 s; Stop silenced
+  it at once (no tone in the next 4 s) and the other kept running. The range
+  rang with `Check it now. It can take up to 30 min.`; `1 min` re-armed it at
+  `1:00`; later it rang on the finish screen too.
+- **Leaving and coming back** resumed at Step 4 of 4 with the timer still
+  running (`21:47`). The Ingredients button showed the same ticks.
+- **The finish**: `Log that you made it` → `Logged: made today, for 8 wedges.`
+  (the space's day); Undo, and the button again; logged again. Back to the
+  recipe cleared the cook (no timer left), and the page said `Made once,
+  today.`, the list `8 wedges · made 1×`.
+
+**Found by the drive, and fixed:** coming back through the recipe page
+switched the cook in progress to the page's servings: the page's own stepper
+starts again at the recipe's size, and its Cook link (`?servings=8`) won over
+the 12 being cooked. A cook under way now keeps its own servings, and the
+recipe page says **Back to cooking** with where it is (`Step 4 of 4 · 1 timer
+running · 12 wedges`), with **Start over** beside it. Re-checked after the
+rebuild: Back to cooking resumed at Step 4 of 4, at 12 wedges, with its timer
+still counting; Start over gave Cook back; at 375 px no screen was wider than
+the phone, and the step, its timer buttons and Back and Done cooking fit.
+
+Tests: `tests/food-cook.test.ts` (new, pure, 29: the times in a step and what
+is not one, the step's pieces, the words for durations and the countdown,
+what a step uses, the session's transitions, how often it was made),
+`tests/food-ops.test.ts` (db: a cook logged once however often it is sent, on
+the space's day, undone, counted on the list, deleted with its recipe; a
+cook for a missing recipe or under another recipe's id refused),
+`tests/isolation/food.test.ts` (`food_cooks`, and a cook that cannot point at
+another space's recipe), `tests/guides.test.ts` (cook mode finds its guide).
+
 ### 2026-10-01 — D1: recipes (`claude/food-d1`)
 
 The first slice. After Workouts' F1–F4 he chose to switch to the food side and
@@ -154,7 +249,7 @@ Tests: `tests/food-amounts.test.ts` (37: reading and writing amounts),
 `tests/food-core.test.ts` (43: page data in every shape, durations, yields,
 instructions, nutrition, entities, page words, bot checks, Claude's answer read
 back, photo limits, the editor both ways and every message), `tests/food-ops.
-test.ts` (db, 13: recipes saved, listed, edited and deleted; a link with data
+test.ts` (db, 12: recipes saved, listed, edited and deleted; a link with data
 read with no model, one without sent to Claude, every reason a link fails with
 no row left, a paste, photos kept nowhere, a failed answer, one read at a time,
 an interrupted read, a draft's photo handed back), `tests/isolation/food.test.
@@ -165,7 +260,8 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | # | Slice | Done when |
 | --- | --- | --- |
 | D1 | **Recipes** | A recipe by hand, from a link, from pasted text or from a photo of a page, checked before it is saved, scaled to a number of servings, with its photo and the nutrition it states. **Built** |
-| D1b | **Cook mode** | "Cook" on a recipe: the screen stays on, one step at a time in big type, the ingredients ticked off, a timer for each time a step names, several at once, sounding when done (his call: right after D1) |
+| D1b | **Cook mode** | "Cook" on a recipe: the screen stays on, the ingredients gathered first, one step at a time in big type with what it uses, a timer for each time a step names, several at once, ringing until stopped, and "Log that you made it". **Built** |
+| D1c | **Hands-free** | Each step read aloud, and "next", "back" and "start the timer" said aloud (his call: reading aloud comes with the voice commands, not before) |
 | D2 | **The week** | Recipes on days and meals, moved about, a past week repeated |
 | D3 | **The shopping list** | Built from the week, the same food added up across recipes (`core/amounts.ts` reads every line), ticked off in the shop on a phone |
 | D4 | **Nutrition** | Per recipe and per day, worked out from the ingredients and labelled as worked out, beside the recipe's own numbers. Moved up by his health goal; it needs a food database (USDA FoodData Central is public domain) |
@@ -183,6 +279,7 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `food_recipes` | A person's recipe: title, what it makes (`yield_amount` double, `yield_unit`), prep, cook and total minutes, `tags` text[], `ingredients` and `steps` jsonb (`{ text, heading? }[]`, kept as written), `notes`, `nutrition` jsonb (per serving, as the recipe states it: calories, protein, carbs, fat, fiber, sugar g; sodium mg), `source_url`, the photo (`photo_pathname`, width, height), `created_by_clerk_user_id` | D1, `0437`. RLS member + superadmin (`0438`). `food_recipes_tenant_id_id_idx` is the composite key later slices point at. CHECKs: a title, yield > 0, minutes 0–10,080, a photo all or nothing |
+| `food_cooks` | A time a recipe was cooked (D1b): `made_on` (the space's day), `servings` (what it was made for), the phone's id | `0439`/`0440`. Composite key to `food_recipes` (`(tenant_id, recipe_id)`, ON DELETE CASCADE). The recipe's count and last day are read from it |
 | `food_imports` | A recipe on its way in: `kind` (`link`, `text`, `photo`), `source_url` (a link's), `status` (`reading`, `draft`, `failed`), the `draft` (a recipe input, its name allowed empty), `error`, the page's photo for a link | D1, `0437`/`0438`. Deleted on save or discard. CHECKs: a link has its URL; a photo all or nothing. Nothing points at it |
 
 ## Key files & seams
@@ -204,6 +301,11 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   `discardImport`, `settleImport`); its `ReadDeps` replace the fetch, the photo
   and the model in tests. `recipe-ops.ts` — recipes. `photo-ops.ts` — photos.
   `actions.ts` — the five actions.
+- Cook mode (D1b): `core/times.ts` (the times in a step), `core/uses.ts` (what
+  a step uses), `core/cook.ts` (the session, timers as end times, the words),
+  `components/cook-mode.tsx`, `cook-store.ts` (the phone's store),
+  `use-now.ts` (the countdown's clock), `alarm.ts`; `cook-ops.ts` (the log).
+  The screen-on hook is `src/lib/use-wake-lock.ts`, shared with Workouts.
 - `src/lib/net/fetch-page.ts` and `guarded-lookup.ts` — the server's guarded
   page fetch; `fetch-image.ts` (the mail image proxy's) fetches a page's photo.
 - `src/lib/blob.ts` — `foodPhotoPathPrefix`.
@@ -237,6 +339,16 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   on Add a recipe and no draft.
 - **A late answer to a discarded draft is dropped**, and the photo kept for it
   deleted: only a row still `reading` takes Claude's answer.
+- **A timer is an end time, and lives on the phone** (D1b). A count would
+  drift while a phone sleeps; an end time is right whenever cook mode looks.
+  Kept per recipe in the browser's storage for 12 hours, so leaving and
+  coming back resumes it.
+- **The alarm rings only while cook mode is on the screen.** The screen is
+  kept on for it; a phone locked or another app in front hears nothing, and
+  a timer that ended meanwhile is ringing on return. A page has no other way
+  to sound (no notifications here).
+- **A cook's id is the phone's**, so "Log that you made it" pressed twice, or
+  sent again, is one log; the day it is logged for is the space's.
 - **Per serving stays per serving.** The recipe page's servings change the
   ingredients, never the nutrition. Changing a saved recipe's "Makes" without
   changing its nutrition would make that nutrition wrong; the editor does not
@@ -256,7 +368,13 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 - **Nobody has added a recipe on a phone yet.** The drive ran in a desktop
   pane at 375 px; a phone's camera, its photo picker and a real Android
   keyboard are unwatched.
-- **Cook mode (D1b)** is next, his call.
+- **Hands-free (D1c)**: steps read aloud and voice commands, together (his
+  call).
+- **A timer cannot sound with cook mode off the screen.** Notifications (the
+  app's, or the browser's) would let it; not built.
+- **The cook history is a count and a day.** Undo works right after logging;
+  older logs cannot be seen or changed. What was EATEN (a serving, not a
+  batch) is the food log, with nutrition (D4).
 - **A pasted list of several recipes** reads as the first (or the main) one.
 - **A recipe in another language** is copied in its language; nothing
   translates.

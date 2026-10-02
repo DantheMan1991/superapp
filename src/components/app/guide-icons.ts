@@ -66,6 +66,9 @@ import {
   Megaphone,
   MegaphoneOff,
   Minus,
+  ChefHat,
+  Timer,
+  BellRing,
   Pause,
   Pencil,
   PenLine,
@@ -203,6 +206,10 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "message-square-plus": MessageSquarePlus,
   // A recipe's servings, one fewer (food.md, D1); `plus` is its twin.
   minus: Minus,
+  // Cook mode (food.md, D1b): the Cook button, a time in a step, a timer ringing.
+  "chef-hat": ChefHat,
+  timer: Timer,
+  "bell-ring": BellRing,
   // "Say it" on the tell box (voice slice 2, ADR 0049).
   mic: Mic,
   share: Share2,

@@ -30,6 +30,7 @@ import {
   updateRecipe,
 } from "../src/modules/food/recipe-ops";
 import { ReadModelError } from "../src/modules/food/read-model";
+import { cookSummary, logCook, undoCook } from "../src/modules/food/cook-ops";
 import type { StoredPhoto } from "../src/modules/food/photo-ops";
 
 /**
@@ -181,6 +182,67 @@ d("food (db)", () => {
           }),
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("cooking it (D1b)", () => {
+    it("logs a cook once however often it is sent, on the space's day, and undoes it", async () => {
+      const recipeId = await withTenant(tenant.id, (tx) => insertRecipe(tx, ctx, oats(), null));
+      const cookId = crypto.randomUUID();
+      // 23:30 in UTC is already tomorrow in Auckland: the space's clock decides the day.
+      const late = new Date("2026-10-01T23:30:00Z");
+      const spaced = { ...ctx, tenant: { ...ctx.tenant, timezone: "Pacific/Auckland" } };
+      const first = await withTenant(tenant.id, (tx) => logCook(tx, spaced, { cookId, recipeId, servings: 2 }, late));
+      expect(first.madeOn).toBe("2026-10-02");
+      const again = await withTenant(tenant.id, (tx) => logCook(tx, spaced, { cookId, recipeId, servings: 2 }));
+      expect(again.madeOn).toBe("2026-10-02");
+      expect(await withTenant(tenant.id, (tx) => cookSummary(tx, tenant.id, recipeId))).toEqual({
+        count: 1,
+        lastOn: "2026-10-02",
+      });
+
+      await withTenant(tenant.id, (tx) =>
+        logCook(tx, ctx, { cookId: crypto.randomUUID(), recipeId, servings: null }, new Date("2026-09-20T12:00:00Z")),
+      );
+      expect(await withTenant(tenant.id, (tx) => cookSummary(tx, tenant.id, recipeId))).toEqual({
+        count: 2,
+        lastOn: "2026-10-02",
+      });
+      const listed = (await withTenant(tenant.id, (tx) => listRecipes(tx, tenant.id))).find((r) => r.id === recipeId);
+      expect(listed?.made).toBe(2);
+
+      await withTenant(tenant.id, (tx) => undoCook(tx, tenant.id, cookId));
+      await withTenant(tenant.id, (tx) => undoCook(tx, tenant.id, cookId));
+      expect(await withTenant(tenant.id, (tx) => cookSummary(tx, tenant.id, recipeId))).toEqual({
+        count: 1,
+        lastOn: "2026-09-20",
+      });
+
+      // Deleting the recipe takes its cooks with it.
+      await withTenant(tenant.id, (tx) => deleteRecipe(tx, tenant.id, recipeId));
+      const left = await withSystem((tx) =>
+        tx.select({ id: schema.foodCooks.id }).from(schema.foodCooks).where(eq(schema.foodCooks.recipeId, recipeId)),
+      );
+      expect(left).toEqual([]);
+    });
+
+    it("refuses a cook for a recipe that is not there, or an id already used for another", async () => {
+      await expect(
+        withTenant(tenant.id, (tx) =>
+          logCook(tx, ctx, { cookId: crypto.randomUUID(), recipeId: crypto.randomUUID(), servings: null }),
+        ),
+      ).rejects.toMatchObject({ code: "RECIPE_MISSING" });
+      const a = await withTenant(tenant.id, (tx) => insertRecipe(tx, ctx, oats(), null));
+      const b = await withTenant(tenant.id, (tx) => insertRecipe(tx, ctx, { ...oats(), title: "Other oats" }, null));
+      const cookId = crypto.randomUUID();
+      await withTenant(tenant.id, (tx) => logCook(tx, ctx, { cookId, recipeId: a, servings: null }));
+      await expect(
+        withTenant(tenant.id, (tx) => logCook(tx, ctx, { cookId, recipeId: b, servings: null })),
+      ).rejects.toMatchObject({ code: "INVALID" });
+      await withTenant(tenant.id, async (tx) => {
+        await deleteRecipe(tx, tenant.id, a);
+        await deleteRecipe(tx, tenant.id, b);
+      });
     });
   });
 

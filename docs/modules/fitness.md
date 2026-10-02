@@ -13,6 +13,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — The screen-on hook is shared, and Workouts is guarded (`claude/food-d1b`)
+
+Food's cook mode needed `useWakeLock`, and a module may not import another,
+so it moved to `src/lib/use-wake-lock.ts`; workout mode and the posture
+check import it from there, unchanged. `fitness` (and `food`) joined the
+lint's module-isolation list (`eslint.config.mjs`), which Workouts had never
+been on since F1: nothing stopped it importing another module, or another
+module importing it. It was clean.
+
 ### 2026-09-30 — The posture pages locked to this site (`claude/posture-lockdown`)
 
 Every page under `/personal/m/fitness/posture` now carries a content security
@@ -701,10 +710,11 @@ column-list `ON DELETE SET NULL ("x")`, hand-written in the migration.
 - `src/modules/fitness/components/workout/` — the workout screen
   (`workout-screen.tsx`), `breath-pacer.tsx`, `hold-timer.tsx`,
   `confirm-count.tsx`, `feel-scale.tsx`, the phone's store
-  (`session-store.ts`) and its sync (`use-session-sync.ts`),
-  `use-wake-lock.ts`, `sound.ts` (the tones, the two switches and
+  (`session-store.ts`) and its sync (`use-session-sync.ts`), `sound.ts`
+  (the tones, the two switches and
   `coachSay`), `demo-loop.tsx` (the looping demo) and `youtube-api.ts` (the
-  IFrame Player API, loaded once). `start-session-button.tsx` is the program
+  IFrame Player API, loaded once). The screen-on hook is `src/lib/use-wake-lock.ts`
+  since Food's cook mode (D1b) needed it too. `start-session-button.tsx` is the program
   page's Start/Resume/Do the rest, and `today-card.tsx` the Workouts home's
   Today card.
 - `src/modules/fitness/core/reminders.ts` and `reminder-ops.ts` — workout

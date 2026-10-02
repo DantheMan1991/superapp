@@ -77,6 +77,13 @@ const MODULE_SLUGS = [
   // directory; this is the second time that sentence has been written after
   // the fact.
   "time",
+  // Added 2026-10-02, the third time after the fact: Workouts shipped in F1
+  // (2026-09-27) unlisted, and Food in D1, and it surfaced only when cook mode
+  // wanted Workouts' screen-on hook (moved to src/lib/use-wake-lock.ts
+  // instead). Both were clean. The personal tools are modules like any other:
+  // sold separately, and neither may reach into the other.
+  "fitness",
+  "food",
 ];
 
 const CROSS_MODULE_MESSAGE =

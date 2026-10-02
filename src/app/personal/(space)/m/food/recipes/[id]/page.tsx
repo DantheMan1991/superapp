@@ -7,7 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { todayInTimezone } from "@/lib/timezone";
+import { madeWords } from "@/modules/food/core/cook";
 import { hostOf, minutesWords, timeOf } from "@/modules/food/core/recipe";
+import { cookSummary } from "@/modules/food/cook-ops";
 import { loadRecipe, recipePhotoUrl, recipeToInput } from "@/modules/food/recipe-ops";
 import { DeleteRecipeButton } from "@/modules/food/components/delete-recipe-button";
 import { RecipeView } from "@/modules/food/components/recipe-view";
@@ -22,8 +25,13 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
   if (!UUID.test(id)) notFound();
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "food");
-  const row = await withTenant(ctx.tenant.id, (tx) => loadRecipe(tx, ctx.tenant.id, id), { role: ctx.role });
+  const [row, made] = await withTenant(
+    ctx.tenant.id,
+    (tx) => Promise.all([loadRecipe(tx, ctx.tenant.id, id), cookSummary(tx, ctx.tenant.id, id)]),
+    { role: ctx.role },
+  );
   if (!row) notFound();
+  const madeLine = madeWords(made.count, made.lastOn, todayInTimezone(ctx.tenant.timezone));
 
   const recipe = recipeToInput(row);
   const host = hostOf(recipe.sourceUrl);
@@ -50,6 +58,7 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
           </div>
         }
       />
+      {madeLine && <p className="text-sm text-muted-foreground">{madeLine}</p>}
       {(host || recipe.tags.length > 0) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {host && recipe.sourceUrl && (
@@ -70,6 +79,7 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
         </div>
       )}
       <RecipeView
+        recipeId={row.id}
         recipe={recipe}
         photo={
           row.photoPathname && row.photoWidth && row.photoHeight

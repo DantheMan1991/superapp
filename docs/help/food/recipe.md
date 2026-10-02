@@ -9,11 +9,14 @@ Open **Food** and click a recipe. Change the servings with {button:−|outline|m
 ## What you see
 
 - **The recipe's name**, the title, with its times under it, such as `35 min · Prep 15 min · Cook 20 min`.
+- **How often you have made it**, once you have logged it from cook mode, such as `Made 3 times, last on Sep 30.`
 - **{button:Edit|outline|pencil}.** Opens the recipe in the editor. See [Typing in and editing a recipe](editor.md).
 - **{button:Delete|outline|trash}.** Asks `Delete` and the recipe's name, with `The recipe and its photo are deleted. This cannot be undone.` Click {button:Delete recipe|destructive} to delete it, or {button:Keep it|ghost}. After a delete it says `Recipe deleted` and opens the Food page.
 - **`From` and the site's name**, with {icon:external-link}, when the recipe has a source link. Click it to open the page it came from, in a new tab.
 - **The tags**, after the source.
 - **The photo**, when the recipe has one.
+- **{button:Cook|primary|chef-hat}**, with `The screen stays on, one step at a time, with timers from the steps.` It opens cook mode at the servings set below. See [Cooking with cook mode](cook.md).
+  - With a cook under way on this phone, it says {button:Back to cooking|primary|chef-hat} instead, with where you are, such as `Step 4 of 4 · 1 timer running · 12 wedges`. It goes back to that place, at the servings you were cooking. {button:Start over|ghost} beside it clears the cook, its ticks and its timers, and the button says Cook again.
 - **Ingredients**, with the servings beside the heading when the recipe says how many it makes:
   - {button:−|outline|minus}, what it makes now, such as `4 servings`, and {button:+|outline|plus}. Each press changes it by one, down to one. A recipe that makes less than one changes by its own amount.
   - Every amount on a line follows, and so does a unit written in full: `1 cup` becomes `2 cups`. A few foods counted whole follow too: `1 egg` becomes `2 eggs`.
@@ -45,7 +48,6 @@ Open **Food** and click a recipe. Change the servings with {button:−|outline|m
 
 ## Not on this page
 
-- **Cook mode**, with the screen staying on, one step at a time, and the timers a step names. It comes next.
 - **Converting units**, such as cups to grams. Not built.
 - **Scaling the amounts inside the steps.** Not built; the note under the ingredients says so when the servings are changed.
 

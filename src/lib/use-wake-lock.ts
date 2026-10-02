@@ -4,9 +4,11 @@ import { useEffect } from "react";
 import { readNativeBridge } from "@/lib/native-bridge";
 
 /**
- * THE SCREEN STAYS ON while a session is open (docs/modules/fitness.md, F2)
- * or a posture check runs (docs/modules/posture.md): nobody can tap a phone
- * awake from the floor mid-breath, or from three meters away.
+ * THE SCREEN STAYS ON while a session is open (docs/modules/fitness.md, F2),
+ * a posture check runs (docs/modules/posture.md) or a recipe is being cooked
+ * (docs/modules/food.md, D1b): nobody can tap a phone awake from the floor
+ * mid-breath, from three meters away, or with flour on their hands. Shared
+ * here since Food needed it too: a module may not import another.
  *
  * Inside the app (1.0.8 and later), the shell's own switch
  * (`FLAG_KEEP_SCREEN_ON` through the KeepAwake plugin), because a WebView's

@@ -3,6 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { FoodRecipe } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
+import { cookCounts } from "./cook-ops";
 import { FoodError } from "./core/errors";
 import { timeOf, type RecipeInput } from "./core/recipe";
 import { photoVersion, type StoredPhoto } from "./photo-ops";
@@ -36,6 +37,8 @@ export interface RecipeSummary {
   yieldUnit: string | null;
   minutes: number | null;
   photoUrl: string | null;
+  /** How many times it was made (cook mode's log, D1b). */
+  made: number;
   /** Ingredient lines, lower case, so "chicken" finds a recipe by what is in it. */
   search: string;
 }
@@ -48,6 +51,7 @@ export async function listRecipes(tx: Tx, tenantId: string): Promise<RecipeSumma
     .where(eq(t.foodRecipes.tenantId, tenantId))
     .orderBy(asc(sql`lower(${t.foodRecipes.title})`))
     .limit(2_000);
+  const made = await cookCounts(tx, tenantId);
   return rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -56,6 +60,7 @@ export async function listRecipes(tx: Tx, tenantId: string): Promise<RecipeSumma
     yieldUnit: row.yieldUnit,
     minutes: timeOf(row),
     photoUrl: row.photoPathname ? recipePhotoUrl(row.id, row.photoPathname) : null,
+    made: made.get(row.id) ?? 0,
     search: [row.title, ...row.tags, ...row.ingredients.map((line) => line.text)].join("\n").toLowerCase(),
   }));
 }

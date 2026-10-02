@@ -1,10 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { Minus, Plus } from "lucide-react";
+import { ChefHat, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { readLine, showLine } from "../core/amounts";
+import { clampStep, isStale, realSteps } from "../core/cook";
+import { useCookSession, writeCookSession } from "./cook-store";
+import { useNow } from "./use-now";
 import { NUTRITION_KEYS, NUTRITION_LABELS, plainNumber, yieldWords, type RecipeInput } from "../core/recipe";
 
 /**
@@ -14,9 +18,11 @@ import { NUTRITION_KEYS, NUTRITION_LABELS, plainNumber, yieldWords, type RecipeI
  * this screen's alone: nothing here is saved.
  */
 export function RecipeView({
+  recipeId,
   recipe,
   photo,
 }: {
+  recipeId: string;
   recipe: RecipeInput;
   photo: { url: string; width: number; height: number } | null;
 }) {
@@ -59,6 +65,10 @@ export function RecipeView({
           height={photo.height}
           className="max-h-[28rem] w-full rounded-2xl object-cover"
         />
+      )}
+
+      {(recipe.steps.length > 0 || recipe.ingredients.length > 0) && (
+        <CookButton recipeId={recipeId} recipe={recipe} servings={base !== null ? servings : null} />
       )}
 
       <section className="space-y-3 rounded-2xl bg-card p-4 shadow-elevation-1 sm:p-5">
@@ -194,6 +204,66 @@ export function RecipeView({
           <p className="whitespace-pre-line text-sm">{recipe.notes}</p>
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * Cook, at the servings chosen here (D1b); or, with a cook already under way
+ * on this phone, Back to cooking, where it was left, at its own servings,
+ * with Start over beside it. Read from the phone's store, so it is right on
+ * this phone and says nothing about another.
+ */
+function CookButton({
+  recipeId,
+  recipe,
+  servings,
+}: {
+  recipeId: string;
+  recipe: RecipeInput;
+  servings: number | null;
+}) {
+  const stored = useCookSession(recipeId);
+  const now = useNow();
+  const under = stored && now > 0 && !isStale(stored, now) ? stored : null;
+  const href = `/personal/m/food/recipes/${recipeId}/cook`;
+  if (!under) {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <Button asChild size="lg">
+          <Link href={servings !== null ? `${href}?servings=${plainNumber(servings)}` : href}>
+            <ChefHat aria-hidden /> Cook
+          </Link>
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          The screen stays on, one step at a time, with timers from the steps.
+        </p>
+      </div>
+    );
+  }
+  const steps = realSteps(recipe.steps).length;
+  const where =
+    under.screen === "gather"
+      ? "Gathering the ingredients"
+      : under.screen === "done"
+        ? "Finished"
+        : `Step ${clampStep(under.step, steps) + 1} of ${steps}`;
+  const timers = under.timers.length;
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button asChild size="lg">
+        <Link href={href}>
+          <ChefHat aria-hidden /> Back to cooking
+        </Link>
+      </Button>
+      <p className="text-sm text-muted-foreground">
+        {where}
+        {timers > 0 ? ` · ${timers === 1 ? "1 timer" : `${timers} timers`} running` : ""}
+        {under.servings && recipe.yieldAmount ? ` · ${yieldWords(under.servings, recipe.yieldUnit)}` : ""}
+      </p>
+      <Button variant="ghost" size="sm" onClick={() => writeCookSession(recipeId, null)}>
+        Start over
+      </Button>
     </div>
   );
 }

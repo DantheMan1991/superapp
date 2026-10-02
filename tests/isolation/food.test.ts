@@ -5,8 +5,9 @@ import { withTenant, withSystem, schema } from "../../src/db";
 import { d } from "./_shared";
 
 /**
- * FOOD'S TWO TABLES ARE ORDINARY TENANT TABLES (docs/modules/food.md, D1):
- * recipes, and the imports a recipe comes in through.
+ * FOOD'S TABLES ARE ORDINARY TENANT TABLES (docs/modules/food.md): recipes,
+ * the imports a recipe comes in through (D1), and the times one was cooked
+ * (D1b).
  *
  * They only ever hold rows in a personal space, but to the database a personal
  * space is a tenant like any other (ADR 0111), so this proves what
@@ -18,7 +19,7 @@ const STAMP = `iso-food-${process.pid}`;
 
 let a: string;
 let b: string;
-const ids = { recipe: "", import: "" };
+const ids = { recipe: "", import: "", cook: "" };
 
 d("food tables (RLS)", () => {
   beforeAll(async () => {
@@ -65,7 +66,17 @@ d("food tables (RLS)", () => {
           createdByClerkUserId: `user_isofooda${process.pid}`,
         })
         .returning();
-      Object.assign(ids, { recipe: recipe.id, import: draft.id });
+      const [cook] = await tx
+        .insert(schema.foodCooks)
+        .values({
+          id: crypto.randomUUID(),
+          tenantId: a,
+          recipeId: recipe.id,
+          madeOn: "2026-10-02",
+          createdByClerkUserId: `user_isofooda${process.pid}`,
+        })
+        .returning();
+      Object.assign(ids, { recipe: recipe.id, import: draft.id, cook: cook.id });
     });
   });
 
@@ -73,19 +84,22 @@ d("food tables (RLS)", () => {
     await withSystem((tx) => tx.delete(schema.tenants).where(inArray(schema.tenants.id, [a, b])));
   });
 
-  it("A reads its own recipe and draft", async () => {
+  it("A reads its own recipe, draft and cook", async () => {
     const seen = await withTenant(a, async (tx) => ({
       recipes: await tx.select({ id: schema.foodRecipes.id }).from(schema.foodRecipes),
       imports: await tx.select({ id: schema.foodImports.id }).from(schema.foodImports),
+      cooks: await tx.select({ id: schema.foodCooks.id }).from(schema.foodCooks),
     }));
     expect(seen.recipes.map((r) => r.id)).toEqual([ids.recipe]);
     expect(seen.imports.map((r) => r.id)).toEqual([ids.import]);
+    expect(seen.cooks.map((r) => r.id)).toEqual([ids.cook]);
   });
 
   it("B cannot read any of A's rows, even by id", async () => {
     const seen = await withTenant(b, async (tx) => [
       ...(await tx.select().from(schema.foodRecipes).where(eq(schema.foodRecipes.id, ids.recipe))),
       ...(await tx.select().from(schema.foodImports).where(eq(schema.foodImports.id, ids.import))),
+      ...(await tx.select().from(schema.foodCooks).where(eq(schema.foodCooks.id, ids.cook))),
     ]);
     expect(seen).toHaveLength(0);
   });
@@ -98,6 +112,7 @@ d("food tables (RLS)", () => {
         .where(eq(schema.foodRecipes.id, ids.recipe))
         .returning()),
       ...(await tx.delete(schema.foodImports).where(eq(schema.foodImports.id, ids.import)).returning()),
+      ...(await tx.delete(schema.foodCooks).where(eq(schema.foodCooks.id, ids.cook)).returning()),
       ...(await tx.delete(schema.foodRecipes).where(eq(schema.foodRecipes.id, ids.recipe)).returning()),
     ]);
     expect(changed).toHaveLength(0);
@@ -120,10 +135,26 @@ d("food tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("a cook cannot point at another space's recipe", async () => {
+    // B's own row, aimed at A's recipe: the composite key refuses it.
+    await expect(
+      withTenant(b, (tx) =>
+        tx.insert(schema.foodCooks).values({
+          id: crypto.randomUUID(),
+          tenantId: b,
+          recipeId: ids.recipe,
+          madeOn: "2026-10-02",
+          createdByClerkUserId: "user_planted",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("with no tenant at all, nothing is visible", async () => {
     const seen = await withTenant("00000000-0000-0000-0000-000000000000", async (tx) => [
       ...(await tx.select().from(schema.foodRecipes)),
       ...(await tx.select().from(schema.foodImports)),
+      ...(await tx.select().from(schema.foodCooks)),
     ]);
     expect(seen).toHaveLength(0);
   });

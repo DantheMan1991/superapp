@@ -81,6 +81,7 @@ export function RecipeList({ recipes }: { recipes: RecipeSummary[] }) {
                     {[
                       recipe.minutes !== null ? minutesWords(recipe.minutes) : null,
                       recipe.yieldAmount !== null ? yieldWords(recipe.yieldAmount, recipe.yieldUnit) : null,
+                      recipe.made > 0 ? `made ${recipe.made}×` : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")}

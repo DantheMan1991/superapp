@@ -809,6 +809,7 @@ describe("docs/help on disk", () => {
     expect(at("/personal/m/food/drafts/abc")).toBe("food/editor");
     expect(at("/personal/m/food/recipes/abc/edit")).toBe("food/editor");
     expect(at("/personal/m/food/recipes/abc")).toBe("food/recipe");
+    expect(at("/personal/m/food/recipes/abc/cook")).toBe("food/cook");
     expect(at("/personal/m/food/no-such-screen")).toBe("food/overview");
   });
 

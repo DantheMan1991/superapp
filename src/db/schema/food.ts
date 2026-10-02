@@ -18,7 +18,9 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  date,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -164,5 +166,40 @@ export const foodImports = pgTable(
   ],
 );
 
+/**
+ * A TIME A RECIPE WAS COOKED (D1b, the founder's call): "Log that you made it"
+ * at the end of cook mode. The recipe shows how many times and when last; it
+ * is the first record of what the person ate, which his health goal wants
+ * (docs/modules/food.md). The id is the phone's, made when cook mode opens,
+ * so a log sent twice is one log; undo deletes it. Deleting the recipe takes
+ * its cooks with it.
+ */
+export const foodCooks = pgTable(
+  "food_cooks",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    recipeId: uuid("recipe_id").notNull(),
+    /** The space's own day it was made (`todayInTimezone`). */
+    madeOn: date("made_on").notNull(),
+    /** What it was made for, in the recipe's own unit: the servings cook mode was set to. */
+    servings: doublePrecision("servings"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("food_cooks_tenant_recipe_idx").on(t.tenantId, t.recipeId, t.madeOn),
+    foreignKey({
+      name: "food_cooks_recipe_fk",
+      columns: [t.tenantId, t.recipeId],
+      foreignColumns: [foodRecipes.tenantId, foodRecipes.id],
+    }).onDelete("cascade"),
+    check("food_cooks_servings_positive", sql`${t.servings} is null or ${t.servings} > 0`),
+  ],
+);
+
 export type FoodRecipe = typeof foodRecipes.$inferSelect;
+export type FoodCook = typeof foodCooks.$inferSelect;
 export type FoodImport = typeof foodImports.$inferSelect;

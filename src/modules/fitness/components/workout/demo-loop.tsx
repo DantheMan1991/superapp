@@ -13,6 +13,7 @@ import { AudioLines, ExternalLink, Pause, Play, Volume2, VolumeX } from "lucide-
 import { Button } from "@/components/ui/button";
 import { isVoiceBusy, silence, subscribeVoiceBusy } from "@/lib/speech/voice-queue";
 import { cn } from "@/lib/utils";
+import { holdListener } from "@/lib/voice-commands/listener";
 import type { PlanVideo } from "../../core/session";
 import {
   DEMO_SPEEDS,
@@ -153,6 +154,13 @@ export function DemoLoop({ video, title, ref }: { video: PlanVideo; title: strin
       if (p && withSound) backToLoop(p);
     },
   }));
+
+  // Hands-free (F6): while the author talks, the listener holds, as it does
+  // for the coach, so "repeat on the other side" is never taken for a phrase.
+  useEffect(() => {
+    holdListener("demo", withSound);
+    return () => holdListener("demo", false);
+  }, [withSound]);
 
   const whenReady = useEffectEvent((p: YouTubePlayer) => {
     player.current = p;

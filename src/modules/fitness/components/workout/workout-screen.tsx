@@ -18,6 +18,8 @@ import {
   Loader2,
   Megaphone,
   MegaphoneOff,
+  Mic,
+  MicOff,
   Play,
   Plus,
   SkipForward,
@@ -31,11 +33,21 @@ import { HelpButton } from "@/components/app/help-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { prefetchLines, setClipSource } from "@/lib/speech/clips";
 import { canSpeak, noVoiceOnTheServer, subscribeVoice } from "@/lib/speech/say";
 import { silence } from "@/lib/speech/voice-queue";
 import { isRecordedVoice, RECORDED_VOICES, type RecordedVoice } from "@/lib/speech/voices";
 import { cn } from "@/lib/utils";
+import { LISTENER_DOWNLOAD_WORDS } from "@/lib/voice-commands/assets";
+import {
+  canListen,
+  listenerState,
+  setHeardHandler,
+  startListening,
+  stopListening,
+} from "@/lib/voice-commands/listener";
+import { useListener } from "@/lib/voice-commands/use-listener";
 import { breathLine, cueFor, EXERCISE_DONE, holdLine, sessionLines, setIntro } from "../../core/coach";
 import {
   aimFor,
@@ -49,6 +61,7 @@ import {
   type DaySession,
   type SplitChoice,
 } from "../../core/day";
+import { commandWords, isWorkoutCommand, notYetLines, replyLines, REPLY } from "../../core/hands-free";
 import { madeWords, markMade } from "../../core/levels";
 import { countOf, prescription } from "../../core/program";
 import { sideWords as oneSideWords } from "../../core/side";
@@ -75,6 +88,15 @@ import { BreathPacer } from "./breath-pacer";
 import { ConfirmCount } from "./confirm-count";
 import { DemoLoop, type DemoHandle } from "./demo-loop";
 import { FeelScale } from "./feel-scale";
+import {
+  isHandsFreeOn,
+  sendWorkoutCommand,
+  setHandsFreeOn,
+  useHandsFreeOn,
+  useWorkoutCommands,
+  WORKOUT_KEYWORDS,
+} from "./hands-free";
+import { HandsFreeHint, type HandsFreeView } from "./hands-free-hint";
 import { HoldTimer } from "./hold-timer";
 import { newId, openSessionFor, putSession, readSessions, sendPending } from "./session-store";
 import {
@@ -121,6 +143,14 @@ import { useWakeLock } from "@/lib/use-wake-lock";
  * THE WIDTH (F2d): a set with a demo spreads out on a wide screen, the demo
  * on the left as big as the window's height allows and the set on the right,
  * so Done stays in view. Every other view keeps the phone's column.
+ *
+ * HANDS-FREE (F6): switched on before the workout and remembered, the phone
+ * listens from the Start tap (on the phone itself, `@/lib/voice-commands`,
+ * ADR 0124) for "start set", "set done", "pause workout", "resume", "one more
+ * set", "next exercise" and "repeat". This screen hears a phrase and hands it
+ * on (`sendWorkoutCommand`); the control on the screen does what its button
+ * would and the coach says a word back. The listener never hears the coach:
+ * it drops the sound while the one voice speaks.
  */
 const VOICE_ENDPOINT = "/api/fitness/voice";
 
@@ -154,9 +184,70 @@ export function WorkoutScreen({
   const muted = useSyncExternalStore(subscribeMuted, isMuted, mutedOnTheServer);
   const voiceOff = useSyncExternalStore(subscribeMuted, isVoiceOff, voiceOffOnTheServer);
   const quiet = muted || voiceOff;
+  const handsFreeOn = useHandsFreeOn();
+  const listener = useListener();
+  const listenable = useSyncExternalStore(subscribeToNothing, canListen, () => false);
+  /** What hands-free last heard, shown for a few seconds. */
+  const [heardNote, setHeardNote] = useState<{ id: number; text: string } | null>(null);
   useWakeLock(doc !== null && !leaving);
   // Leaving the screen, however it happens, leaves nothing talking.
   useEffect(() => () => silence(), []);
+
+  /* -- hands-free (F6) -------------------------------------------------------- */
+
+  /** From a tap: the one moment a phone lets a page start its microphone. */
+  function listen() {
+    if (listenable) startListening(WORKOUT_KEYWORDS);
+  }
+
+  const heard = useEffectEvent((label: string) => {
+    if (!isWorkoutCommand(label)) return;
+    setHeardNote((before) => ({ id: (before?.id ?? 0) + 1, text: `Heard “${commandWords(label)}”.` }));
+    sendWorkoutCommand(label);
+  });
+
+  // Phrases come to this screen while it is open; leaving it lets go of the
+  // microphone.
+  useEffect(() => {
+    setHeardHandler((label) => heard(label));
+    return () => {
+      setHeardHandler(null);
+      stopListening();
+    };
+  }, []);
+
+  // What it heard fades after a few seconds.
+  useEffect(() => {
+    if (!heardNote) return;
+    const timer = window.setTimeout(() => setHeardNote((now) => (now?.id === heardNote.id ? null : now)), 6000);
+    return () => window.clearTimeout(timer);
+  }, [heardNote]);
+
+  function turnHandsFree(next: boolean) {
+    setHandsFreeOn(next);
+    if (!next) {
+      stopListening();
+      setHeardNote(null);
+    } else if (doc) listen();
+  }
+
+  const handsFreeView: HandsFreeView | null = listenable
+    ? {
+        on: handsFreeOn,
+        state: listener,
+        heard: heardNote?.text ?? null,
+        // As things are at the tap, not at render: the screen's own tap
+        // handler may have started it a moment before this click.
+        onStart: () => {
+          if (listenerState().status === "off") listen();
+        },
+        onRetry: () => {
+          stopListening();
+          listen();
+        },
+        onOff: () => turnHandsFree(false),
+      }
+    : null;
 
   // The recordings, on while this screen is, in the voice this phone chose.
   // A LAYOUT effect: a child's effects run before its parent's, so a plain
@@ -171,12 +262,15 @@ export function WorkoutScreen({
 
   // What is left of the session, fetched ahead of being said: again as it
   // moves on, which asks only for a line a change made new ("One more set").
+  // With hands-free on, the coach's words back too (F6).
   const fetchAhead = useEffectEvent(() => {
-    if (doc && naturalVoice && !quiet) prefetchLines(sessionLines(plan, doc));
+    if (doc && naturalVoice && !quiet) {
+      prefetchLines([...sessionLines(plan, doc), ...(handsFreeOn ? replyLines() : [])]);
+    }
   });
   useEffect(() => {
     fetchAhead();
-  }, [doc?.id, doc?.revision, voice, quiet]);
+  }, [doc?.id, doc?.revision, voice, quiet, handsFreeOn]);
 
   // SPLIT DAYS (F2c): what the day's other sessions did, and so what this one
   // sets out to do. Pure over the server's sessions and the phone's own.
@@ -199,6 +293,9 @@ export function WorkoutScreen({
 
   function start(feelBefore: number | null, choice: SplitChoice) {
     unlockSound();
+    // Hands-free starts listening at the Start tap (the founder's call: on
+    // once, then every workout).
+    if (isHandsFreeOn()) listen();
     // A Try still talking stops: the first exercise's line is next.
     silence();
     const other = openSessionFor(readSessions(), plan.programId);
@@ -216,6 +313,7 @@ export function WorkoutScreen({
     const now = current();
     if (!now) return;
     setLeaving(true);
+    stopListening();
     putSession(finishSession(now, { feelAfter, now: new Date() }));
     const result = await Promise.race([
       sendPending(),
@@ -231,6 +329,8 @@ export function WorkoutScreen({
   let where = "Today's session";
   /** A set with a demo: the one view that spreads out on a wide screen. */
   let wide = false;
+  /** A set or the check after one: where a phrase has something to do (F6). */
+  let commandsHere = false;
   if (leaving) {
     body = (
       <p className="flex items-center justify-center gap-2 py-24 text-lg">
@@ -246,6 +346,7 @@ export function WorkoutScreen({
         elsewhere={elsewhere}
         voice={naturalVoice ? voice : null}
         quiet={quiet}
+        handsFree={listenable ? { on: handsFreeOn, onChange: setHandsFreeOn } : null}
         onStart={start}
       />
     );
@@ -253,6 +354,7 @@ export function WorkoutScreen({
     const step = nextStep(plan, doc);
     if (step.kind !== "finish") where = `Exercise ${step.itemIndex + 1} of ${plan.items.length}`;
     wide = step.kind === "set" && plan.items[step.itemIndex].video !== null;
+    commandsHere = step.kind !== "finish";
     body =
       step.kind === "set" ? (
         // One per exercise, so the demo keeps playing from set to set.
@@ -269,6 +371,7 @@ export function WorkoutScreen({
           onSkip={(itemIndex) =>
             change((d) => skipExercise(plan, d, { itemIndex, exerciseId: newId(), now: new Date() }))
           }
+          handsFree={handsFreeView}
         />
       ) : step.kind === "check" ? (
         <CheckView
@@ -280,6 +383,7 @@ export function WorkoutScreen({
           onDone={(answers) =>
             change((d) => finishExercise(plan, d, { itemIndex: step.itemIndex, ...answers, now: new Date() }))
           }
+          handsFree={handsFreeView}
         />
       ) : (
         // The session's own day, with it in: what the day comes to after it.
@@ -289,10 +393,16 @@ export function WorkoutScreen({
 
   return (
     // Any tap unlocks sound: a browser only lets audio start from one, and a
-    // session resumed after a reload has had no Start tap to do it.
+    // session resumed after a reload has had no Start tap to do it. For the
+    // same reason it starts hands-free listening again (F6) on such a session.
     <div
       className="dark fixed inset-0 z-50 overflow-y-auto bg-background text-foreground"
-      onPointerDown={unlockSound}
+      onPointerDown={() => {
+        unlockSound();
+        // Not at the finish: the tap there is for how you feel, and nothing is
+        // left to say.
+        if (commandsHere && handsFreeOn && listener.status === "off") listen();
+      }}
     >
       <div
         className={cn(
@@ -300,11 +410,26 @@ export function WorkoutScreen({
           wide ? "max-w-2xl lg:max-w-[120rem]" : "max-w-md",
         )}
       >
-        <TopBar where={where} programHref={programHref} sync={sync} naturalVoice={naturalVoice} />
+        <TopBar
+          where={where}
+          programHref={programHref}
+          sync={sync}
+          naturalVoice={naturalVoice}
+          handsFree={listenable && doc && !leaving ? { on: handsFreeOn, onChange: turnHandsFree } : null}
+        />
         {body}
       </div>
     </div>
   );
+}
+
+/** Nothing to subscribe to: whether this browser can listen does not change while the page is open. */
+const subscribeToNothing = () => () => {};
+
+/** The hands-free switch (F6): on or off, from the start screen or the top bar. */
+interface HandsFreeSwitch {
+  on: boolean;
+  onChange: (on: boolean) => void;
 }
 
 function TopBar({
@@ -312,11 +437,14 @@ function TopBar({
   programHref,
   sync,
   naturalVoice,
+  handsFree,
 }: {
   where: string;
   programHref: string;
   sync: SyncState;
   naturalVoice: boolean;
+  /** During a session, on a phone that can listen: hands-free on or off from here. */
+  handsFree: HandsFreeSwitch | null;
 }) {
   const muted = useSyncExternalStore(subscribeMuted, isMuted, mutedOnTheServer);
   const voiceOff = useSyncExternalStore(subscribeMuted, isVoiceOff, voiceOffOnTheServer);
@@ -353,6 +481,18 @@ function TopBar({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {handsFree && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={handsFree.on ? "Turn hands-free off" : "Turn hands-free on"}
+              aria-pressed={handsFree.on}
+              onClick={() => handsFree.onChange(!handsFree.on)}
+              className={handsFree.on ? "text-module-accent" : undefined}
+            >
+              {handsFree.on ? <Mic className="size-5" aria-hidden /> : <MicOff className="size-5" aria-hidden />}
+            </Button>
+          )}
           {speakable && (
             <Button
               variant="ghost"
@@ -406,6 +546,7 @@ function BeforeView({
   elsewhere,
   voice,
   quiet,
+  handsFree,
   onStart,
 }: {
   plan: SessionPlan;
@@ -418,6 +559,8 @@ function BeforeView({
   voice: RecordedVoice | null;
   /** The sounds or the coach's voice are switched off. */
   quiet: boolean;
+  /** Hands-free (F6), on a phone that can listen. */
+  handsFree: HandsFreeSwitch | null;
   onStart: (feelBefore: number | null, choice: SplitChoice) => void;
 }) {
   const [feel, setFeel] = useState<number | null>(null);
@@ -433,11 +576,11 @@ function BeforeView({
     return beginSession(plan, { id: "ahead", now: new Date(), feelBefore: null, aim: aims });
   }
   const fetchAhead = useEffectEvent(() => {
-    if (voice && !quiet) prefetchLines(sessionLines(plan, ahead()));
+    if (voice && !quiet) prefetchLines([...sessionLines(plan, ahead()), ...(handsFree?.on ? replyLines() : [])]);
   });
   useEffect(() => {
     fetchAhead();
-  }, [choice, voice, quiet]);
+  }, [choice, voice, quiet, handsFree?.on]);
 
   function tryVoice() {
     const doc = ahead();
@@ -505,6 +648,23 @@ function BeforeView({
           <Button type="button" variant="outline" className="h-10" onClick={tryVoice}>
             <Play aria-hidden /> Try
           </Button>
+        </div>
+      )}
+      {handsFree && (
+        // F6: turned on once, and every workout after listens from its Start.
+        <div className="flex items-start gap-3 rounded-xl border border-border px-3 py-2">
+          <Switch
+            id="hands-free"
+            className="mt-0.5"
+            checked={handsFree.on}
+            onCheckedChange={(on) => handsFree.onChange(on)}
+          />
+          <label htmlFor="hands-free" className="space-y-0.5 text-sm">
+            <span className="block font-medium">Hands-free</span>
+            <span className="block text-muted-foreground">
+              {`Say “start set”, “set done” and the rest while you are on the floor. It listens on this phone, and nothing you say leaves it. The first time, it downloads ${LISTENER_DOWNLOAD_WORDS}.`}
+            </span>
+          </label>
         </div>
       )}
       {halving && (
@@ -577,12 +737,14 @@ function SetView({
   step,
   onFinishSet,
   onSkip,
+  handsFree,
 }: {
   plan: SessionPlan;
   doc: SessionDoc;
   step: Extract<Step, { kind: "set" }>;
   onFinishSet: (itemIndex: number, count: number) => void;
   onSkip: (itemIndex: number) => void;
+  handsFree: HandsFreeView | null;
 }) {
   const item = plan.items[step.itemIndex];
   const logged = loggedFor(doc, item);
@@ -606,6 +768,22 @@ function SetView({
   useEffect(() => {
     announce();
   }, [key]);
+
+  // Hands-free (F6): the set's own control takes start, done, pause and
+  // resume; "repeat" says the set again, and the check's two wait for its end.
+  useWorkoutCommands((command) => {
+    if (command === "repeat") coachSay(setIntro(plan, doc, step));
+    else if (command === "again" || command === "next") coachSay(REPLY.finishFirst);
+    else return false;
+    return true;
+  });
+
+  // Its "Not yet: 3 of 5 breaths." lines, fetched ahead: once per exercise.
+  const timed = item.unit === "breaths" || item.unit === "seconds";
+  const listening = !!handsFree?.on;
+  useEffect(() => {
+    if (timed && listening) prefetchLines(notYetLines(item.targetMin, item.unit));
+  }, [timed, listening, item.targetMin, item.unit]);
 
   return (
     <div
@@ -691,6 +869,10 @@ function SetView({
           />
         )}
 
+        <HandsFreeHint
+          place={item.unit === "breaths" || item.unit === "seconds" ? "timed-set" : "counted-set"}
+          view={handsFree}
+        />
         {cue && <p className="text-center text-lg leading-snug">{cue}</p>}
         {item.notes && <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{item.notes}</p>}
         <div className="flex-1" />
@@ -714,6 +896,7 @@ function CheckView({
   itemIndex,
   onOneMore,
   onDone,
+  handsFree,
 }: {
   plan: SessionPlan;
   doc: SessionDoc;
@@ -726,6 +909,7 @@ function CheckView({
     hurtNote: string;
     levelUp: boolean;
   }) => void;
+  handsFree: HandsFreeView | null;
 }) {
   const item = plan.items[itemIndex];
   const [effort, setEffort] = useState<number | null>(null);
@@ -749,6 +933,22 @@ function CheckView({
   useEffect(() => {
     coachSay(EXERCISE_DONE);
   }, []);
+
+  const moreAllowed = canAddSet(plan, doc, itemIndex);
+  function moveOn() {
+    onDone({ effort, cuesFelt: felt, hurt, hurtNote, levelUp: made && choice === "up" });
+  }
+
+  // Hands-free (F6): "one more set" and "next exercise" are the two buttons;
+  // "next exercise" keeps the taps as they were left (the founder's call).
+  // Anything else gets told what can be said here.
+  useWorkoutCommands((command) => {
+    if (command === "again" && moreAllowed) onOneMore();
+    else if (command === "again") coachSay(REPLY.noMore);
+    else if (command === "next") moveOn();
+    else coachSay(moreAllowed ? REPLY.checkPrompt : REPLY.checkPromptFull);
+    return true;
+  });
 
   return (
     <div className="flex flex-1 flex-col gap-5">
@@ -873,16 +1073,13 @@ function CheckView({
       )}
 
       <div className="flex-1" />
-      {canAddSet(plan, doc, itemIndex) && (
+      <HandsFreeHint place={moreAllowed ? "check" : "check-full"} view={handsFree} />
+      {moreAllowed && (
         <Button variant="outline" size="lg" className="h-12 w-full" onClick={onOneMore}>
           <Plus aria-hidden /> One more set
         </Button>
       )}
-      <Button
-        size="lg"
-        className="h-14 w-full text-lg"
-        onClick={() => onDone({ effort, cuesFelt: felt, hurt, hurtNote, levelUp: made && choice === "up" })}
-      >
+      <Button size="lg" className="h-14 w-full text-lg" onClick={moveOn}>
         {next ? `Next: ${next.name}` : "On to the finish"}
       </Button>
     </div>
@@ -901,6 +1098,11 @@ function FinishView({
 }) {
   const [feel, setFeel] = useState<number | null>(null);
   const summary = sessionSummary(doc);
+  // Hands-free (F6): the finish wants a tap for how you feel; a phrase is told so.
+  useWorkoutCommands(() => {
+    coachSay(REPLY.finish);
+    return true;
+  });
   return (
     <div className="flex flex-1 flex-col gap-5">
       <h1 className="font-heading text-2xl font-medium">Session done</h1>

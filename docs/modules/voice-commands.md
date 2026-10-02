@@ -16,6 +16,44 @@
 Newest first. One entry per session/PR that touched this area. Every PR
 that changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — Workouts listens too (`claude/fitness-f6`)
+
+Workouts' F6 ([fitness.md](fitness.md)) is the listener's second user, as the
+founder asked when it was built. Its phrases were measured first, the same way
+(spikes 6 to 8, never committed): each candidate alone in the spotter against
+Deepgram's four voices, then the chosen set together, and 13 sentences of talk
+around a workout (counting aloud, "I'm almost done with this one.", "Can you
+pause the TV for a second?", "Start the car, I'll be right out.").
+
+- **Single words fire on talk.** "done", "next" and "start" were heard from all
+  four voices and fired on every sentence that had the word in it ("done" also
+  on "Hold on, I need some water."); "pause" alone was heard from two and fired
+  three times. A keyword spotter hears a word wherever it is said.
+- **Two words do not.** "start set", "set done", "one more set" and "next
+  exercise" from all four with 0 false fires; "resume" and "repeat", single
+  words nobody says in passing, the same. Listened for together: 29 of 32
+  heard, no phrase taken for another, 0 false fires on 60 sentences.
+- **"pause workout" is the weak one**: heard from three voices; eight more
+  ways of saying it (stress, the vowel, "workout" with either stress) caught
+  the fourth no better, so it keeps its two.
+- "finish set" (two of four) and "keep going" (two of four, and it fired on
+  "Keep going, you're doing great.") were measured and left out.
+
+What changed in the shared code:
+
+- `phrases.ts`: the six workout phrases, with what was measured.
+- **`holdListener(reason, on)`**: something on the page other than the one
+  voice is speaking, and the listener holds for it as for the voice, its tail
+  included. A workout's demo playing with the author's sound is the first:
+  "repeat on the other side" in the video must not repeat the set.
+- `words.ts`: why it stopped (`listenerFailureWords`), whether Try again can
+  help (`canRetry`), and the download's percentage, moved out of Food so both
+  tools say the same.
+- **A resume waits for the page to stay on the screen** (`RESUME_AFTER_MS`,
+  0.3 s). Found on the drive: a page behind another window was shown for about
+  10 ms every 2 s, and took and dropped the microphone each time (25 requests
+  in under a minute); after, one request in 8 s of the same flicker.
+
 ### 2026-10-02 — The listener, for cook mode (`claude/food-d1c`)
 
 Built with Food D1c ([food.md](food.md) has the cook-mode half and the drive).
@@ -143,7 +181,7 @@ the engine and model in its HTTP cache (served `immutable`).
   its own rate and the engine resamples, logging `Creating a resampler` once
   per stream.
 - **Only while it is on the screen.** The page hidden lets the microphone go
-  (`paused`); back on the screen, it is taken again with no prompt.
+  (`paused`); back on the screen for 0.3 s, it is taken again with no prompt.
 - **The proxy skips `/voice-commands/` whole**: the model is a `.data` file,
   and adding `data` to the matcher's extensions would also skip any path with
   ".data" in it. `tests/voice-commands.test.ts` reads the matcher out of
@@ -156,7 +194,8 @@ the engine and model in its HTTP cache (served `immutable`).
 ## Key files & seams
 
 - `src/lib/voice-commands/assets.ts`, `phrases.ts`, `protocol.ts`,
-  `capture-worklet.ts`, `listener.worker.ts`, `listener.ts`, `use-listener.ts`
+  `capture-worklet.ts`, `listener.worker.ts`, `listener.ts`, `use-listener.ts`,
+  `words.ts`
 - `scripts/copy-listener-assets.ts`; `package.json` prebuild and predev;
   `.gitignore` (`/public/voice-commands/`); `next.config.ts` (`immutable` for
   `/voice-commands/:path*`); `src/proxy.ts` (the matcher's skip)
@@ -164,7 +203,9 @@ the engine and model in its HTTP cache (served `immutable`).
   the matcher, the worklet parses). A tool's own phrases and commands are
   tested in its own suite (`tests/food-hands-free.test.ts`).
 - Users: Food's cook mode (`src/modules/food/components/cook-mode.tsx`,
-  `core/hands-free.ts`). Next: Workouts' F6.
+  `core/hands-free.ts`) and Workouts' workout mode
+  (`src/modules/fitness/components/workout/workout-screen.tsx`,
+  `hands-free.ts`, `core/hands-free.ts`).
 
 ## Open items
 
@@ -174,8 +215,6 @@ the engine and model in its HTTP cache (served `immutable`).
   founder's voice are the next measurement.
 - **The voice and the alarm's loudness while listening**, on Android, with echo
   cancelling off: untested on a phone.
-- **Workouts' phrases** ("done", "next", "again", "pause") are not measured or
-  added yet: F6.
 - **Speaking over the voice** (barge-in) is not possible by design; revisit if
   it frustrates in real use. Streaming to Deepgram (ADR 0124's rejected
   alternative) is the forgiving one.

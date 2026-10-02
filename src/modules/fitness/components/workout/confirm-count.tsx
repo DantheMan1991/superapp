@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { REPLY } from "../../core/hands-free";
 import { UNIT_WORDS, type FitnessUnitValue } from "../../core/program";
+import { useWorkoutCommands } from "./hands-free";
+import { coachSay } from "./sound";
 
 /**
  * REPS AND ROLLS CONFIRM THE TARGET (the founder's call, 2026-09-27): the set
@@ -28,6 +31,16 @@ export function ConfirmCount({
 }) {
   const [value, setValue] = useState(start);
   const words = UNIT_WORDS[unit][value === 1 ? "one" : "many"];
+
+  // Hands-free (F6): "set done" is Done, with the count as it stands. A
+  // counted set has no timer to start or pause.
+  useWorkoutCommands((command) => {
+    if (command === "done") onFinish(value);
+    else if (command === "start") coachSay(REPLY.counted);
+    else if (command === "pause" || command === "resume") coachSay(REPLY.noTimer);
+    else return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col items-center gap-5">

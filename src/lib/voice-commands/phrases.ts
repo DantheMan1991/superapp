@@ -30,9 +30,20 @@ export const MODEL_PHONES: ReadonlySet<string> = new Set(
 
 /**
  * The phrases, each with its pronunciations. Measured 2026-10-02 against four
- * voices: "next step", "repeat", "start timer" and "stop timer" heard from all
- * four; "go back" and "ingredients" from two, so each has a longer alternate,
- * "previous step" and "show ingredients", heard from three.
+ * voices.
+ *
+ * Cook mode's (Food D1c): "next step", "repeat", "start timer" and "stop
+ * timer" heard from all four; "go back" and "ingredients" from two, so each
+ * has a longer alternate, "previous step" and "show ingredients", heard from
+ * three.
+ *
+ * Workout mode's (Workouts F6), listened for together with "repeat": "start
+ * set", "set done", "resume", "one more set" and "next exercise" heard from all
+ * four, "pause workout" from three (eight more ways of saying it caught the
+ * fourth voice no better); 0 false fires on 60 sentences of talk around a
+ * workout. The single words first planned ("done", "next", "start") were
+ * heard as well, and fired on any sentence that had them in it ("I'm almost
+ * done with this one").
  */
 export const PHRASES = {
   "next step": ["N EH1 K S T S T EH1 P", "N EH1 K S S T EH1 P", "N EH1 K S T EH1 P"],
@@ -48,6 +59,12 @@ export const PHRASES = {
     "IH0 N G R IY1 D Y AH0 N T S",
   ],
   "show ingredients": ["SH OW1 IH2 N G R IY1 D IY0 AH0 N T S", "SH OW1 IH0 N G R IY1 D IY0 AH0 N T S"],
+  "start set": ["S T AA1 R T S EH1 T"],
+  "set done": ["S EH1 T D AH1 N"],
+  "pause workout": ["P AO1 Z W ER1 K AW2 T", "P AA1 Z W ER1 K AW2 T"],
+  resume: ["R IH0 Z UW1 M", "R IY0 Z UW1 M"],
+  "one more set": ["W AH1 N M AO1 R S EH1 T"],
+  "next exercise": ["N EH1 K S T EH1 K S ER0 S AY2 Z", "N EH1 K S EH1 K S ER0 S AY2 Z"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type PhraseKey = keyof typeof PHRASES;

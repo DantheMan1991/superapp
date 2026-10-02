@@ -186,7 +186,7 @@ No code yet. This entry is the plan; the slices are below and in
 | P0 | The container | A person has one personal space, can switch to it and back, nobody can be invited into it, support view refuses it, and the isolation suite says so |
 | P1 | The consumer door | A new sign-up is asked "for my business, or just for me", and "just for me" never sees the business setup |
 | F1–F6 | Fitness | See [fitness.md](fitness.md) |
-| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, next), the week, the shopping list, nutrition. See [food.md](food.md) |
+| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), the week, the shopping list, nutrition. See [food.md](food.md) |
 | H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. Habits logged beside what Workouts and Food already know, and progress shown across them. Not designed; ask him first |
 
 ### P0 — the container, as built

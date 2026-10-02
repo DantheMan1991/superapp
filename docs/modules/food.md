@@ -15,6 +15,130 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — D1c: hands-free (`claude/food-d1c`)
+
+Reading aloud and voice commands together, as he asked when D1b was planned.
+His calls, from a mockup (ADR 0124):
+
+- **The listener runs on the phone**: an open-source keyword spotter, so
+  nothing said in the kitchen leaves it. Over streaming to Deepgram (forgiving,
+  but the kitchen heard off the phone, about $0.35 a cook) and Chrome's
+  recognizer (Google hears it; none in the app).
+- **Short phrases**: "next step", "go back", "repeat", "start timer", "stop
+  timer", "ingredients".
+- **The workout coach's recorded voice** reads (ADR 0115), not the phone's.
+- **Shared code**, so Workouts' hands-free (F6) follows: the listener is a
+  platform area, [voice-commands.md](voice-commands.md), which holds the
+  spike's numbers and how a phrase is heard.
+
+No migration: nothing new is stored.
+
+- **Hands-free** (`components/hands-free.tsx`): a switch beside the recipe's
+  name, `Hands-free` / `Hands-free on`. The first time on a phone it opens the
+  mockup's explanation (how it listens, what you can say, the voice, the
+  microphone asked once); after that it turns on at once. A box under the name
+  says `Getting hands-free ready · 42%` (the model's share of the first
+  download), then `Listening`, `Reading` while the voice speaks, `Paused`
+  coming back from another app; `Say “next step”, …` with “stop timer” in
+  place of “start timer” while one rings; and for six seconds what it heard
+  and did (`Heard “start timer”: 25–30 min started.`). Failures say what to
+  do, with Try again and Turn off hands-free.
+- **The commands** (`core/hands-free.ts`, pure; `cook-mode.tsx`): each does
+  what its button does. "start timer" starts the step's first time not
+  already running (`nextStepTime`, said again for the next one); "stop timer"
+  stops the one ringing longest (`firstRinging`) and says how long a range can
+  take; "ingredients" opens the list and says what the step uses, or reads the
+  whole list on the gather and finish screens; "next step" on the last screen
+  and "go back" on the first say so. Timers keep one label from a tap or a
+  voice (`timerLabel`).
+- **What is read** (`stepSpeech`, `listSpeech`, `usesSpeech`, `SAY`): each
+  screen as it comes up, by a phrase or a tap; a group's heading when it
+  starts. `spokenText` writes out what the voice garbled when its own
+  recordings were read back by Deepgram's recognizer: `1/4 cup` ("one four
+  cup"), `1 1/2` ("one one two"), `1 ½` ("one half"), `½ tsp` ("one half T S
+  P"), `9x13-inch`, `400F`; spoons get their plural from the amount. Lines are
+  cut to the route's 300 characters at sentences, then commas
+  (`speechLines`), and handed to the voice queue one at a time
+  (`cook-voice.ts`), since the queue holds only three waiting. Every line the
+  recipe might need is fetched ahead when hands-free turns on
+  (`everyCookLine`), from `/api/food/voice`.
+- **A timer ringing stops the voice** (`hushCook`), so "stop timer" is heard at
+  once, and swaps the listener's words: "start timer" and "stop timer" are
+  never listened for together (the spike confused them).
+- **The alarm plays through the page's one audio context**
+  (`@/lib/audio-context`, the voice's): a timer started by voice has no tap
+  of its own, and turning hands-free on was the tap.
+- **Shared, moved out of Workouts**: whose voice (`src/lib/speech/voice-choice.ts`,
+  the same phone key) and the voice route's handler
+  (`src/lib/speech/record-route.ts`, `recordLinesHandler("food")`).
+- Guide `cook.md`: a Hands-free section (turning it on, the box, every phrase
+  and what it does, what is read, the voice, turning it off, every message);
+  guide icon `mic-off`.
+
+**Driven** on a production build against dev, on an invented cornbread (8
+wedges; its step 2 toasts the cornmeal for `1 minute`, so an alarm could ring
+for real). The microphone was a stand-in: `getUserMedia` answered with a stream
+the spike's recordings were played into, and the page's own sound went through
+a gain of 0, so nothing played aloud and nothing about its timing changed.
+
+- **Turning it on**: the explanation (the mockup's), the microphone asked once
+  (`channelCount 1`, echo cancellation off, noise suppression and gain on), the
+  model at 100% in 0.3 s from the local server, listening in 1.5 s.
+- **Every phrase, in the voice it was said in**: "next step" (Arcas, Helena,
+  Orion) moved on and the step was read; "start timer" (Orion, Vesta) started
+  `Step 1 · 15 min` and `Step 2 · 1 min` with `Timer started: …` read back;
+  "show ingredients" (Helena) opened the list and read what step 2 uses; the
+  1-minute timer rang (6 tones in 3 s), the box swapped to “stop timer”, and
+  "stop timer" (Arcas) silenced it at once (0 tones after) with the other
+  timer still running; "go back" (Orion, Helena), "previous step" (Vesta, to
+  the ingredients), "repeat" (Helena) and, on the ingredients, "start timer"
+  (`There is no timer on this screen.`), "go back" (`This is the start.`) and
+  "ingredients" (Orion, the whole list) all did what their buttons do.
+- **Nothing fired** on two sentences of kitchen talk ("Let's go out to the back
+  porch.", "What's next on the list for dinner?"), nor on "start timer" played
+  while a step was being read (by accident: a mistimed drive script, which is
+  the half duplex working).
+- **Off**: the microphone released (its track `ended`), a "next step" after it
+  did nothing. **On again**: no explanation, the engine from the phone's cache,
+  ready in 1.4 s. **Leaving cook mode** released the microphone; the recipe page
+  said Back to cooking with the timer kept. **The page hidden** (simulated):
+  `Paused`, the microphone let go; shown again: taken again without a prompt,
+  `Listening`, and "repeat" heard at once.
+- **A refused microphone**: `The microphone is blocked for this site. …` with
+  Try again, which, once allowed, went straight to listening.
+- **The files**: the model, the engine and its WebAssembly served `public,
+  max-age=31536000, immutable`, with no proxy header (a page has
+  `x-middleware-rewrite`; these have none). At 375 px nothing is wider than
+  the phone.
+- 16 lines were played in the recorded voice; the recordings came from
+  `/api/food/voice` (Deepgram), every one 200.
+
+**Found by the drive, and fixed:**
+
+- **The first line was always the phone's own voice** on a recipe's first
+  use: the first batch of four recordings took 4.4 s, past the queue's 2-second
+  wait. Now the screen's own lines go in a request of their own, and the
+  reading starts when the listener is ready rather than when hands-free is
+  switched on (hands-free is not on until it can hear). Re-driven with the
+  phone's recordings cleared, mid-recipe: the step's recording took 3.3 s, the
+  listener was ready at 1.5 s, and the step was read in the recorded voice.
+- **The recipe's name was cut off at 375 px** beside the switch, which hid
+  `· 8 wedges`. It wraps now.
+- **The explanation's chips, and the amounts in cook mode's Ingredients box,
+  were the brand's green**: a dialog is drawn outside the page, where the
+  route's `--module-accent` does not reach. Both boxes now carry Food's accent
+  (`FOOD_ACCENT`). Re-checked: the same orange as the page.
+
+Tests: `tests/food-hands-free.test.ts` (new, pure, 33: what cook mode
+listens for in each state and that the engine would accept it, the shorthand
+written out, lines cut to the route's size, what each screen says, timers by
+voice, and every line fetched ahead fitting the route's batches),
+`tests/voice-commands.test.ts` (new, pure, 9: the engine pinned to the
+installed package, the model's commit, hash and layout, every phrase in the
+model's sounds and none twice, the proxy's matcher skipping the folder, the
+worklet parsing). The whole `pure` project passed (5,359), and `tsc`, eslint
+and `npm run build`.
+
 ### 2026-10-02 — D1b: cook mode (`claude/food-d1b`)
 
 The slice he asked for right after D1. His calls, from an interactive mockup
@@ -261,7 +385,7 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | --- | --- | --- |
 | D1 | **Recipes** | A recipe by hand, from a link, from pasted text or from a photo of a page, checked before it is saved, scaled to a number of servings, with its photo and the nutrition it states. **Built** |
 | D1b | **Cook mode** | "Cook" on a recipe: the screen stays on, the ingredients gathered first, one step at a time in big type with what it uses, a timer for each time a step names, several at once, ringing until stopped, and "Log that you made it". **Built** |
-| D1c | **Hands-free** | Each step read aloud, and "next", "back" and "start the timer" said aloud (his call: reading aloud comes with the voice commands, not before) |
+| D1c | **Hands-free** | Each step read aloud in the coach's recorded voice, and "next step", "go back", "repeat", "start timer", "stop timer" and "ingredients" heard on the phone (his calls: reading aloud comes with the voice commands; the listener on the phone; short phrases). **Built** |
 | D2 | **The week** | Recipes on days and meals, moved about, a past week repeated |
 | D3 | **The shopping list** | Built from the week, the same food added up across recipes (`core/amounts.ts` reads every line), ticked off in the shop on a phone |
 | D4 | **Nutrition** | Per recipe and per day, worked out from the ingredients and labelled as worked out, beside the recipe's own numbers. Moved up by his health goal; it needs a food database (USDA FoodData Central is public domain) |
@@ -306,6 +430,13 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   `components/cook-mode.tsx`, `cook-store.ts` (the phone's store),
   `use-now.ts` (the countdown's clock), `alarm.ts`; `cook-ops.ts` (the log).
   The screen-on hook is `src/lib/use-wake-lock.ts`, shared with Workouts.
+- Hands-free (D1c): `core/hands-free.ts` (the commands, what is said, the
+  shorthand written out, timers by voice), `components/hands-free.tsx` (the
+  switch, the explanation, the box), `cook-voice.ts` (the script fed to the
+  voice queue). The listener is `src/lib/voice-commands/`
+  ([voice-commands.md](voice-commands.md)); the voice is `src/lib/speech/`
+  (`clips.ts`, `voice-queue.ts`, `voice-choice.ts`); the route is
+  `src/app/api/food/voice/route.ts` over `record-route.ts`.
 - `src/lib/net/fetch-page.ts` and `guarded-lookup.ts` — the server's guarded
   page fetch; `fetch-image.ts` (the mail image proxy's) fetches a page's photo.
 - `src/lib/blob.ts` — `foodPhotoPathPrefix`.
@@ -347,6 +478,20 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   kept on for it; a phone locked or another app in front hears nothing, and
   a timer that ended meanwhile is ringing on return. A page has no other way
   to sound (no notifications here).
+- **Hands-free hears only on the phone, and never while it speaks** (ADR
+  0124). The recipe's words go to the voice vendor to be recorded once;
+  nothing the person says leaves the phone. While a line is being read the
+  listener drops the sound, so a step that says "repeat with the rest" does
+  not repeat itself; the cost is that nobody can talk over the voice.
+- **A dialog does not inherit the module's colour.** It is portalled out of
+  the route's wrapper, so `text-module-accent` in it is the brand's green
+  unless the dialog sets `--module-accent` itself (`FOOD_ACCENT`, D1c).
+- **The voice waits for the listener** (D1c): a screen is read once the
+  listener is ready, so the first line has its recording (fetched in a
+  request of its own) instead of the phone's voice.
+- **The voice is fed one line at a time** (`cook-voice.ts`). The queue holds
+  three lines waiting and drops the rest, and a long step is several lines;
+  every line carries the key `cook`, so a new screen cuts the old one off.
 - **A cook's id is the phone's**, so "Log that you made it" pressed twice, or
   sent again, is one log; the day it is logged for is the space's.
 - **Per serving stays per serving.** The recipe page's servings change the
@@ -368,8 +513,12 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 - **Nobody has added a recipe on a phone yet.** The drive ran in a desktop
   pane at 375 px; a phone's camera, its photo picker and a real Android
   keyboard are unwatched.
-- **Hands-free (D1c)**: steps read aloud and voice commands, together (his
-  call).
+- **Hands-free has not met a kitchen.** The phrases were measured on
+  synthetic speech in silence, and the drive played those recordings into a
+  stand-in microphone. His voice, a fan, a sizzling pan, and the voice's and
+  alarm's loudness while the microphone is open on Android are unwatched.
+- **Hands-free cannot be talked over.** It does not listen while it reads;
+  a long step must finish, or a tap cut it, before "next step" works.
 - **A timer cannot sound with cook mode off the screen.** Notifications (the
   app's, or the browser's) would let it; not built.
 - **The cook history is a count and a day.** Undo works right after logging;

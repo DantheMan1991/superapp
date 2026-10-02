@@ -115,6 +115,14 @@ const nextConfig: NextConfig = {
         source: "/pose/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
       },
+      // Hands-free's listener (docs/modules/voice-commands.md): its engine and
+      // its model, copied and downloaded into `public/voice-commands/` by
+      // scripts/copy-listener-assets.ts, for the same reason. Each path
+      // carries the package version or the model's hash.
+      {
+        source: "/voice-commands/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
     ];
   },
   async redirects() {

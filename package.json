@@ -38,10 +38,11 @@
     "test": "vitest run",
     "test:isolation": "vitest run tests/isolation",
     "copy:map-worker": "tsx scripts/copy-map-worker.ts",
-    "prebuild": "tsx scripts/copy-map-worker.ts && tsx scripts/copy-pose-assets.ts --strict",
-    "predev": "tsx scripts/copy-map-worker.ts && tsx scripts/copy-pose-assets.ts",
+    "prebuild": "tsx scripts/copy-map-worker.ts && tsx scripts/copy-pose-assets.ts --strict && tsx scripts/copy-listener-assets.ts --strict",
+    "predev": "tsx scripts/copy-map-worker.ts && tsx scripts/copy-pose-assets.ts && tsx scripts/copy-listener-assets.ts",
     "print:probe": "tsx --conditions react-server scripts/print-probe.ts",
-    "copy:pose-assets": "tsx scripts/copy-pose-assets.ts"
+    "copy:pose-assets": "tsx scripts/copy-pose-assets.ts",
+    "copy:listener-assets": "tsx scripts/copy-listener-assets.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
@@ -52,6 +53,8 @@
     "@mediapipe/tasks-vision": "1.0.1",
     "@neondatabase/serverless": "^1.1.0",
     "@react-pdf/renderer": "^4.5.1",
+    "@sherpaw/kws": "0.2.1",
+    "@sherpaw/preloader": "0.2.1",
     "@sparticuz/chromium-min": "^153.0.0",
     "@vercel/blob": "^2.6.1",
     "archiver": "^7.0.1",

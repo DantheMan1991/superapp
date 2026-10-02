@@ -13,6 +13,28 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — The coach's voice is shared with cook mode, and F6 has its listener (`claude/food-d1c`)
+
+Food's hands-free cook mode (food.md, D1c; ADR 0124) reads recipes in the
+coach's recorded voice, the founder's call, so two things moved out of
+Workouts, unchanged in behaviour:
+
+- **Whose voice** (`coachVoice`, `setCoachVoice`) is now kept in
+  `src/lib/speech/voice-choice.ts`; `sound.ts` wraps it, so workout mode and
+  the posture check call the same functions as before. The phone's key is
+  still `yosher.fitness.coach-voice`, so a choice made before is kept.
+- **The voice route**: `/api/fitness/voice` is now one line over
+  `recordLinesHandler("fitness")` (`src/lib/speech/record-route.ts`), the same
+  handler as `/api/food/voice`. Its door (a personal space, the tool on), its
+  limits and its writing nothing are the same; the two error sentences say
+  "the recorded voice" rather than "the coach's voice", and nothing reads them.
+
+**F6 now has its ears**: the listener Food built is shared
+([voice-commands.md](voice-commands.md)). F6 adds Workouts' own phrases
+("done", "next", "again"), measured the same way before they go in, and its
+own commands; the voice queue already holds the listener off while the coach
+speaks.
+
 ### 2026-10-02 — The screen-on hook is shared, and Workouts is guarded (`claude/food-d1b`)
 
 Food's cook mode needed `useWakeLock`, and a module may not import another,
@@ -384,7 +406,7 @@ person's own space, the way a pack must never carry one business's price list
 | F3 | **Progress and the gate** | Done days per phase, the week against its target, the effort warning, how he felt before and after, and the next phase opening at 14 done days |
 | F4 | **Fitting it to him** | The side self-assessment, progressions and their nudges, morning and evening split with reminders |
 | F5 | **Your own workouts** | An exercise library and a builder, for strength as well as mobility: weight, rest timer, last time's numbers, personal bests |
-| F6 | **Hands-free** | "Next", "done", "again" said aloud, for when you are lying on the floor |
+| F6 | **Hands-free** | "Next", "done", "again" said aloud, for when you are lying on the floor. The listener is built and shared (Food D1c, [voice-commands.md](voice-commands.md)); F6 brings Workouts' phrases and commands |
 
 ### F1 — the program, imported
 

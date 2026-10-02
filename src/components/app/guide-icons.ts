@@ -81,6 +81,7 @@ import {
   Search,
   MessageSquarePlus,
   Mic,
+  MicOff,
   Send,
   Share2,
   Smartphone,
@@ -210,8 +211,10 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "chef-hat": ChefHat,
   timer: Timer,
   "bell-ring": BellRing,
-  // "Say it" on the tell box (voice slice 2, ADR 0049).
+  // "Say it" on the tell box (voice slice 2, ADR 0049); cook mode's
+  // Hands-free switch, on and off (food.md, D1c).
   mic: Mic,
+  "mic-off": MicOff,
   share: Share2,
   smartphone: Smartphone,
   sparkles: Sparkles,

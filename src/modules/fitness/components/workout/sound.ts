@@ -22,15 +22,14 @@
 
 import { audioContext, unlockAudio } from "@/lib/audio-context";
 import { warmUpSpeech } from "@/lib/speech/say";
-import { DEFAULT_RECORDED_VOICE, isRecordedVoice, type RecordedVoice } from "@/lib/speech/voices";
+import { chosenVoice, chosenVoiceOnTheServer, setChosenVoice } from "@/lib/speech/voice-choice";
+import type { RecordedVoice } from "@/lib/speech/voices";
 import { silence, speak, type VoiceLine } from "@/lib/speech/voice-queue";
 
 const MUTE_KEY = "yosher.fitness.sound";
 const VOICE_KEY = "yosher.fitness.voice";
-const WHOSE_KEY = "yosher.fitness.coach-voice";
 let muted: boolean | null = null;
 let voiceOff: boolean | null = null;
-let whose: RecordedVoice | null = null;
 const listeners = new Set<() => void>();
 
 function readMutedFromStorage(): boolean {
@@ -90,31 +89,20 @@ export function setVoiceOff(value: boolean): void {
   for (const listener of listeners) listener();
 }
 
-/** The recorded voice this phone chose for the coach (F2d). */
+/**
+ * The recorded voice this phone chose for the coach (F2d). Kept in
+ * `@/lib/speech/voice-choice`, because Food's cook mode reads in it too (D1c).
+ */
 export function coachVoice(): RecordedVoice {
-  if (whose === null) {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(WHOSE_KEY);
-    } catch {
-      // A private window: the default, for this page.
-    }
-    whose = isRecordedVoice(stored) ? stored : DEFAULT_RECORDED_VOICE;
-  }
-  return whose;
+  return chosenVoice();
 }
 
 export function coachVoiceOnTheServer(): RecordedVoice {
-  return DEFAULT_RECORDED_VOICE;
+  return chosenVoiceOnTheServer();
 }
 
 export function setCoachVoice(value: RecordedVoice): void {
-  whose = value;
-  try {
-    window.localStorage.setItem(WHOSE_KEY, value);
-  } catch {
-    // Kept in memory for this page.
-  }
+  setChosenVoice(value);
   for (const listener of listeners) listener();
 }
 

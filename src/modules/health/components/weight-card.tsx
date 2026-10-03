@@ -24,6 +24,7 @@ import {
   type WeightGoal,
 } from "../core/body";
 import { dayPhrase } from "../core/days";
+import { PhotoNudge } from "../photos/photo-nudge";
 
 const BODY = "/personal/m/health/body";
 
@@ -36,11 +37,13 @@ const BODY = "/personal/m/health/body";
  *
  * Like the sleep card, it shows what it just kept at once (the action answers
  * before the page it re-rendered arrives), and the server's weigh-in takes
- * over the moment it differs from the one last seen. The trend is worked out
+ * over the moment it differs from the one last seen. On today's, once the
+ * progress photos on this phone are four weeks old, a line says so (H2b). The trend is worked out
  * here, from the weeks of weigh-ins the page sends, so it moves with the
  * weigh-in just kept.
  */
 export function WeightCard({
+  owner,
   day,
   today,
   asToday,
@@ -48,6 +51,8 @@ export function WeightCard({
   goal,
   measures,
 }: {
+  /** The personal space: the photos on this phone are kept under it. */
+  owner: string;
   day: string;
   today: string;
   /** The page shows today (not a day being filled in). */
@@ -205,6 +210,7 @@ export function WeightCard({
           {measures.count === 0 ? "Choose them" : "Measure"}
         </Link>
       </p>
+      {asToday && <PhotoNudge owner={owner} today={today} />}
     </section>
   );
 }

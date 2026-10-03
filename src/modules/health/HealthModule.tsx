@@ -115,6 +115,7 @@ export async function HealthModule({
 
       <WeightCard
         key={`weight-${day}`}
+        owner={ctx.tenant.id}
         day={day}
         today={today}
         asToday={asToday}

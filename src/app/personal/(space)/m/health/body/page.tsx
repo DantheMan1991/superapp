@@ -12,6 +12,7 @@ import { inchesChange, inchesWords, measureSpan } from "@/modules/health/core/bo
 import { dayName, shortDay } from "@/modules/health/core/days";
 import { HEALTH_HOME } from "@/modules/health/log-ops";
 import { BodyView } from "@/modules/health/components/body-view";
+import { PhotosCard } from "@/modules/health/photos/photos-card";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,8 @@ const DAYS_LISTED = 8;
 
 /**
  * BODY (docs/help/health/body.md, H2; the founder's calls from a mockup,
- * 2026-10-03): the weigh-ins and the trend through them, the goal, and the
- * tape measures.
+ * 2026-10-03): the weigh-ins and the trend through them, the goal, the
+ * progress photos on this phone (H2b) and the tape measures.
  */
 export default async function BodyPage() {
   const ctx = await requirePersonalSpace();
@@ -49,7 +50,12 @@ export default async function BodyPage() {
         today={today}
         weighins={weighins}
         goal={goal}
-        measures={<TapeMeasures today={today} measures={measures} measurements={measurements} />}
+        measures={
+          <>
+            <PhotosCard owner={ctx.tenant.id} today={today} />
+            <TapeMeasures today={today} measures={measures} measurements={measurements} />
+          </>
+        }
       />
     </div>
   );

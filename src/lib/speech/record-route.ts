@@ -10,7 +10,9 @@ import { packClips, recordRequestSchema } from "./voices";
  * LINES IN, RECORDINGS OUT (ADR 0115): the one handler behind every personal
  * tool that speaks in a recorded voice. The workout coach's lines
  * (`/api/fitness/voice`, F2d) and Food's cook mode reading a recipe aloud
- * (`/api/food/voice`, D1c) differ only in which tool must be switched on.
+ * (`/api/food/voice`, D1c) and Health's progress photos counting down to
+ * each pose (`/api/health/voice`, H2b) differ only in which tool must be
+ * switched on.
  *
  * The phone asks for a batch of lines, keeps what comes back (`clips.ts`), and
  * asks again only for a line it has never had.
@@ -52,7 +54,7 @@ function fail(status: number, message: string): NextResponse {
 }
 
 /** The POST handler for a tool's voice route: the tool's own slug decides who may ask. */
-export function recordLinesHandler(tool: "fitness" | "food") {
+export function recordLinesHandler(tool: "fitness" | "food" | "health") {
   return async function POST(req: NextRequest): Promise<Response> {
     const ctx = await resolvePersonalContext();
     if (!ctx) return fail(401, "Sign in first.");

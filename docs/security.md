@@ -359,6 +359,24 @@ another site's URL anywhere in the posture code, and on any caller of the
 posture's actions but the one door; an exception needs the ADR's argument
 first.
 
+**S17 — Progress photos never leave the phone, but as a copy the person saves.**
+Health's progress photos (front, side and back, in little clothing; ADR
+[0128](decisions/0128-progress-photos-stay-on-the-phone-under-the-posture-lock.md))
+are taken by the page from the back camera, made JPEGs on the phone, and kept
+in the browser's storage for this site under the personal space's id: a
+filter, not a lock, as S16's. Nothing in the photo code reaches the network or
+calls a server action, so no server of ours ever has a photo; the weigh-ins
+for the trend on each come down with the page, and the countdown's voice
+sends words only, through the shared speech code. The photo pages are a
+locked area of their own under S16's second lock (ADR 0122's policy, without
+WebAssembly, and loaded whole across their edge), and the app blocks
+screenshots while they show. The one way out is the person's: "Save a copy",
+on a tap, one photo into the phone's own files (Downloads in a browser,
+Documents in the app), from where the phone's backups are the phone's.
+`tests/health-photos-privacy.test.ts` fails on network, a server action,
+storage, a picture made into a file or an address, sharing or a file written
+anywhere in the photo code but the three files it names with their reasons.
+
 ---
 
 ## 4. Checklists

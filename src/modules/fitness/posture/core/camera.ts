@@ -12,7 +12,10 @@
  * zoom lenses at all.
  */
 
-export type CameraFacing = "back" | "front" | "unknown";
+import { parseCameraLabel, type CameraFacing } from "@/lib/camera-label";
+
+// Shared with Health's progress photos (H2b): `src/lib/camera-label.ts`.
+export { parseCameraLabel, type CameraFacing };
 
 export type CameraInfo = {
   deviceId: string;
@@ -28,16 +31,6 @@ export type CameraInfo = {
   exposureModes: readonly string[];
   whiteBalanceModes: readonly string[];
 };
-
-export function parseCameraLabel(label: string): { index: number | null; facing: CameraFacing } {
-  const index = /camera2?\s+(\d+)/i.exec(label);
-  const facing = /facing back|back|rear|environment/i.test(label)
-    ? "back"
-    : /facing front|front|user/i.test(label)
-      ? "front"
-      : "unknown";
-  return { index: index ? Number(index[1]) : null, facing };
-}
 
 export type RankedCamera = CameraInfo & { score: number; why: string[] };
 

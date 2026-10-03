@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  appCanSaveFiles,
   appCanUseCamera,
   APP_CAMERA_VERSION,
+  APP_FILES_VERSION,
   compareVersions,
   isNativeAppRequest,
   isNativeAppUserAgent,
@@ -91,6 +93,28 @@ describe("the camera in the app", () => {
     expect(appCanUseCamera(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.12 (android)"))).toBe(true);
     expect(appCanUseCamera({ version: null, platform: "android" })).toBe(false);
     expect(appCanUseCamera(null)).toBe(true);
+  });
+});
+
+describe("saving a file in the app", () => {
+  const nativeWindow = (plugins: Record<string, unknown>) => ({
+    Capacitor: { isNativePlatform: () => true, getPlatform: () => "android", Plugins: plugins },
+  });
+
+  it("is 1.0.9 and later; a browser saves through its own download", () => {
+    expect(APP_FILES_VERSION).toBe("1.0.9");
+    expect(appCanSaveFiles(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.8 (android)"))).toBe(false);
+    expect(appCanSaveFiles(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.9 (android)"))).toBe(true);
+    expect(appCanSaveFiles(nativeAppInfo("Mozilla/5.0 YosherApp/1.0.10 (android)"))).toBe(true);
+    expect(appCanSaveFiles({ version: null, platform: "android" })).toBe(false);
+    expect(appCanSaveFiles(null)).toBe(true);
+  });
+
+  it("finds the shell's file plugin only when it can write", () => {
+    const files = { writeFile: async () => ({ uri: "file:///x" }) };
+    expect(readNativeBridge(nativeWindow({ Filesystem: files }))?.files).toBe(files);
+    expect(readNativeBridge(nativeWindow({}))?.files).toBeNull();
+    expect(readNativeBridge(nativeWindow({ Filesystem: { readFile: async () => ({}) } }))?.files).toBeNull();
   });
 });
 

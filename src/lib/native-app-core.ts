@@ -49,6 +49,14 @@ export function nativeAppInfo(userAgent: string | null | undefined): NativeAppIn
  */
 export const APP_CAMERA_VERSION = "1.0.8";
 
+/**
+ * The first app build that can write a file where the person finds it
+ * (`@capacitor/filesystem`, docs/modules/mobile-app.md, 2026-10-03): Health's
+ * progress photos' "Save a copy" (ADR 0128). An older build's WebView ignores
+ * a download, so its person is told to update.
+ */
+export const APP_FILES_VERSION = "1.0.9";
+
 /** Dotted versions compared part by part as numbers: below zero when `a` is older. */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map((p) => Number.parseInt(p, 10) || 0);
@@ -69,6 +77,13 @@ export function appCanUseCamera(info: NativeAppInfo | null): boolean {
   if (!info) return true;
   if (!info.version) return false;
   return compareVersions(info.version, APP_CAMERA_VERSION) >= 0;
+}
+
+/** Can this app build save a file (1.0.9)? A browser saves through its own download, so yes. */
+export function appCanSaveFiles(info: NativeAppInfo | null): boolean {
+  if (!info) return true;
+  if (!info.version) return false;
+  return compareVersions(info.version, APP_FILES_VERSION) >= 0;
 }
 
 /**

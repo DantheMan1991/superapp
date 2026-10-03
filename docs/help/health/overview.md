@@ -23,6 +23,7 @@ Open **Health** {icon:heart-pulse} in the sidebar of your personal space. This p
   - **Once you have weighed in today**, the weight, such as `184.6 lb`, and under it your trend and how it moved this week, such as `Trend 185.7 lb · down 0.5 lb this week`. The trend smooths out the swings of water and food from one morning to the next: see [Body](body.md#the-trend). `this week` shows once you have a weigh-in from a week or more ago. With a goal set on Body, how far you have to go, such as `10.7 lb to go to 175 lb`, or `At your goal of 175 lb`.
   - **{button:Change|ghost|pencil}** opens the box again with today's weight, with {button:Save|primary}, {button:Cancel|outline} to close it unchanged, and {button:Remove|ghost} to delete today's weigh-in. One weigh-in is kept a day: saving again changes it.
   - **The tape measures line**, under a rule: `Tape measures last taken yesterday.` with **Measure**, which opens [Measure](measure.md). Before you take any, it says `Tape measures: not taken yet.` Before you choose any, it says `Your waist and other tape measures go on Body.` with **Choose them**, which opens [Your tape measures](measures.md).
+  - **The photos line**, once your progress photos on this phone are four weeks old: `Progress photos: 4 weeks ago.` with **Take**, which opens [Taking progress photos](photos-take.md). Nothing before your first photos, and nothing on a phone that has none: the photos are only on the phone that took them.
 - **`Cold plunge`** {icon:snowflake}.
   - Before your first plunge of the day: `Not yet today`, and how many you took in the last 7 days, such as `Not yet today · 2 in the last 7 days`.
   - Each plunge you took today, such as `3 min 10 s in 48°F · felt 8`. The water shows when you gave it, and `felt` when you chose a number. Under them, how many in the last 7 days, today's included.
@@ -93,7 +94,6 @@ To fix it later in the day, click {button:Change|ghost|pencil}, change it, and c
 - **A day more than two weeks back.** Earlier days stop at two weeks before today. A weigh-in or a tape measure already kept on an older day can still be changed on [Body](body.md).
 - **Kilograms and centimeters.** Weights are in pounds and tape measures in inches. Ask us if you want metric.
 - **Sleep from a watch or a ring, or weight from a smart scale.** Not built. You type them in.
-- **Progress photos.** Coming in a slice of its own, kept on your phone only.
 - **Reminders.** Health does not remind you to plunge or to log your sleep.
 
 ## Who can do what

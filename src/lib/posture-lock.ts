@@ -1,7 +1,9 @@
 /**
  * THE POSTURE PAGES' LOCK (docs/modules/posture.md; ADR 0118's second lock,
- * ADR 0122). Pure and dependency-free: the proxy runs it on every request, and
- * the posture layout's guard in the browser.
+ * ADR 0122), and since Health's progress photos (H2b, ADR 0128) the same lock
+ * on their pages: every page that shows a picture of a body taken on the phone.
+ * Pure and dependency-free: the proxy runs it on every request, and each locked
+ * area's layout guard in the browser.
  *
  * A posture check's pictures never leave the phone because nothing we wrote
  * sends one (ADR 0118). This is the second lock. A posture page carries a
@@ -21,9 +23,29 @@
 
 export const POSTURE_PREFIX = "/personal/m/fitness/posture";
 
+/** Health's progress photos (H2b, ADR 0128): taken and compared on the phone, never sent. */
+export const HEALTH_PHOTOS_PREFIX = "/personal/m/health/photos";
+
+/** A group of pages under one lock: the router crossing its edge loads the page whole. */
+export type LockedArea = "posture" | "health-photos";
+
+const LOCKED_AREAS: readonly { area: LockedArea; prefix: string; wasm: boolean }[] = [
+  // The pose model runs as WebAssembly.
+  { area: "posture", prefix: POSTURE_PREFIX, wasm: true },
+  { area: "health-photos", prefix: HEALTH_PHOTOS_PREFIX, wasm: false },
+];
+
+/** Which locked area a page is in: its prefix's own page and everything under it; null for every other page. */
+export function lockedArea(pathname: string): LockedArea | null {
+  for (const { area, prefix } of LOCKED_AREAS) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return area;
+  }
+  return null;
+}
+
 /** A posture page: the posture check's own page and everything under it. */
 export function isPosturePath(pathname: string): boolean {
-  return pathname === POSTURE_PREFIX || pathname.startsWith(`${POSTURE_PREFIX}/`);
+  return lockedArea(pathname) === "posture";
 }
 
 /**
@@ -49,7 +71,8 @@ export function clerkFrontendApi(publishableKey: string | undefined): string | n
 
 /**
  * The policy. Everything from this site; scripts only with the page's nonce
- * (Next puts it on its own) or from Clerk; WebAssembly for the pose model; and
+ * (Next puts it on its own) or from Clerk; WebAssembly where the area runs it
+ * (the posture check's pose model; the progress photos run none); and
  * connections to this site and Clerk alone. Styles may be inline (React's style
  * attributes, Clerk's own), which sends nothing: anything a style would fetch
  * is held to the image and font rules. No frames, no plugins, no form posting
@@ -58,18 +81,20 @@ export function clerkFrontendApi(publishableKey: string | undefined): string | n
  * In development only: React needs `eval` for its error stacks, the dev server
  * talks over a WebSocket, and Clerk's development instance sends telemetry.
  */
-export function postureCsp(input: {
+export function lockCsp(input: {
   nonce: string;
   /** Clerk's Frontend API host (`clerkFrontendApi`); null leaves Clerk out. */
   clerk: string | null;
   /** The dev server's own socket origin, `ws://localhost:3000`; null outside development. */
   devSocket: string | null;
+  area: LockedArea;
 }): string {
   const clerk = input.clerk ? [`https://${input.clerk}`] : [];
   const dev = input.devSocket !== null;
+  const wasm = LOCKED_AREAS.find((a) => a.area === input.area)?.wasm ? ["'wasm-unsafe-eval'"] : [];
   const directives: [string, string[]][] = [
     ["default-src", ["'self'"]],
-    ["script-src", ["'self'", `'nonce-${input.nonce}'`, "'wasm-unsafe-eval'", ...clerk, ...(dev ? ["'unsafe-eval'"] : [])]],
+    ["script-src", ["'self'", `'nonce-${input.nonce}'`, ...wasm, ...clerk, ...(dev ? ["'unsafe-eval'"] : [])]],
     ["style-src", ["'self'", "'unsafe-inline'"]],
     ["img-src", ["'self'", "blob:", "data:", "https://img.clerk.com"]],
     ["font-src", ["'self'", "data:"]],
@@ -84,6 +109,11 @@ export function postureCsp(input: {
     ["frame-ancestors", ["'none'"]],
   ];
   return directives.map(([name, sources]) => `${name} ${sources.join(" ")}`).join("; ");
+}
+
+/** The posture pages' policy (`lockCsp` for the posture area), as ADR 0122 wrote it. */
+export function postureCsp(input: { nonce: string; clerk: string | null; devSocket: string | null }): string {
+  return lockCsp({ ...input, area: "posture" });
 }
 
 /**
@@ -117,34 +147,38 @@ export function fetchedByScript(secFetchDest: string | null, rsc: string | null)
 /**
  * What the proxy does with a request.
  *
- * - `full-load`: a script on one side of the posture pages' edge fetching a
- *   page on the other, which is the router moving there (a navigation or a
+ * - `full-load`: a script on one side of a locked area's edge fetching a page
+ *   on the other, which is the router moving there (a navigation or a
  *   prefetch). The answer is not the router's kind, which Next takes as "load
  *   this page whole" (`fetchServerResponse`): in, the page gets its own lock;
- *   out, the next page leaves the lock behind. Only pages: a posture page's
- *   fetch of an API (the coach's voice) is no crossing.
- * - `lock`: a whole page load of a posture page, which gets the policy.
- * - `pass`: anything else, including the router moving between two posture
- *   pages, which share the lock already on the page.
+ *   out, the next page leaves the lock behind. Between two locked areas too,
+ *   since each has its own policy. Only pages: a locked page's fetch of an API
+ *   (the coach's voice) is no crossing.
+ * - `lock`: a whole page load of a locked page, which gets the policy.
+ * - `pass`: anything else, including the router moving between two pages of
+ *   one area, which share the lock already on the page.
  *
  * With no word of where a request came from (`fromPath` null), the router's
- * requests pass, and the posture layout's guard catches a page that crossed.
+ * requests pass, and the area's layout guard catches a page that crossed.
  */
-export function postureCrossing(input: {
+export function lockCrossing(input: {
   pathname: string;
   method: string;
   /** A script's fetch rather than a page load (`fetchedByScript`). */
   fetched: boolean;
   fromPath: string | null;
 }): "full-load" | "lock" | "pass" {
-  const to = isPosturePath(input.pathname);
+  const to = lockedArea(input.pathname);
   const read = input.method === "GET" || input.method === "HEAD";
   if (input.fetched) {
     const page = read && !input.pathname.startsWith("/api/");
-    return page && input.fromPath !== null && isPosturePath(input.fromPath) !== to ? "full-load" : "pass";
+    return page && input.fromPath !== null && lockedArea(input.fromPath) !== to ? "full-load" : "pass";
   }
-  return to && read ? "lock" : "pass";
+  return to !== null && read ? "lock" : "pass";
 }
+
+/** ADR 0122's name for `lockCrossing`, from when the posture pages were the only ones locked. */
+export const postureCrossing = lockCrossing;
 
 /** A fresh nonce for one page load: 16 random bytes, base64. */
 export function newNonce(): string {

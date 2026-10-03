@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="true"
+        android:requestLegacyExternalStorage="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -111,4 +112,16 @@
         VIBRATE. A normal permission, granted at install without asking.
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+        PROGRESS PHOTOS' "SAVE A COPY" (docs/modules/health.md, H2b; ADR 0128):
+        @capacitor/filesystem writes the copy, on the person's tap, into the
+        phone's public Documents folder, under Yosher. From Android 11 an app
+        writes its own files there with no permission at all. Android 10 and
+        earlier need this one, which the plugin asks for at runtime, and never
+        past Android 10 (maxSdkVersion); Android 10 also needs the old storage
+        model, which `requestLegacyExternalStorage` on the application asks for
+        and Android 11 and later ignore.
+    -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 </manifest>

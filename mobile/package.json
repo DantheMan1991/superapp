@@ -1,6 +1,6 @@
 {
   "name": "yosher-mobile",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "description": "The Yosher mobile app: a native shell around yosherapp.com. See docs/modules/mobile-app.md.",
   "scripts": {
@@ -17,6 +17,7 @@
     "@capacitor/android": "^8.5.1",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.1",
+    "@capacitor/filesystem": "^8.1.4",
     "@capacitor/ios": "^8.5.1",
     "@capacitor/privacy-screen": "^2.0.1",
     "@capacitor/push-notifications": "^8.1.2",

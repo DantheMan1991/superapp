@@ -6,9 +6,10 @@ import { nativeAppEntryRedirect } from "@/lib/native-app-core";
 import {
   clerkFrontendApi,
   fetchedByScript,
+  lockCrossing,
+  lockCsp,
+  lockedArea,
   newNonce,
-  postureCrossing,
-  postureCsp,
   sameSitePath,
 } from "@/lib/posture-lock";
 import {
@@ -98,13 +99,13 @@ export default clerkMiddleware(
     const stamped = new Headers(req.headers);
     stamped.set("x-yosher-method", req.method);
     stamped.set("x-yosher-path", req.nextUrl.pathname);
-    // The posture pages' lock (src/lib/posture-lock.ts, ADR 0122): a page
-    // load gets the policy and its nonce, which Next reads off the request
-    // and puts on its own scripts; the router crossing the pages' edge gets a
-    // full page load instead.
+    // The locked pages (src/lib/posture-lock.ts, ADR 0122; Health's photos,
+    // ADR 0128): a page load gets the policy and its nonce, which Next reads
+    // off the request and puts on its own scripts; the router crossing a
+    // locked area's edge gets a full page load instead.
     const posture =
       kind.kind === "platform"
-        ? postureCrossing({
+        ? lockCrossing({
             pathname: req.nextUrl.pathname,
             method: req.method,
             fetched: fetchedByScript(req.headers.get("sec-fetch-dest"), req.headers.get("rsc")),
@@ -117,14 +118,16 @@ export default clerkMiddleware(
         headers: {
           "content-type": "text/plain; charset=utf-8",
           "cache-control": "no-store",
-          "x-yosher-full-load": "posture",
+          "x-yosher-full-load": lockedArea(req.nextUrl.pathname) ?? "unlocked",
         },
       });
     }
     let csp: string | null = null;
-    if (posture === "lock") {
+    const area = posture === "lock" ? lockedArea(req.nextUrl.pathname) : null;
+    if (area !== null) {
       const nonce = newNonce();
-      csp = postureCsp({
+      csp = lockCsp({
+        area,
         nonce,
         clerk: clerkFrontendApi(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
         devSocket:

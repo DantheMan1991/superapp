@@ -365,6 +365,13 @@ describe("control markers", () => {
 
   it("leaves a placeholder, an unknown kind and a bare word alone", () => {
     expect(controlMarkers("{{zone}} {field:Name} {button} {button:}")).toEqual([]);
+    expect(controlMarkers("{icon:} {badge:|outline} {button:|ghost}")).toEqual([]);
+  });
+
+  it("reads a button with only an icon, as a control drawn by its icon alone", () => {
+    const [marker] = controlMarkers("Click {button:|ghost|chevron-left} to go back.");
+    expect(marker).toMatchObject({ kind: "button", label: "", variant: "ghost", icon: "chevron-left" });
+    expect(marker.raw).toBe("{button:|ghost|chevron-left}");
   });
 
   it("names a modifier it cannot place and an icon nobody registered", () => {
@@ -518,6 +525,19 @@ describe("docs/help on disk", () => {
       for (const marker of controlMarkers(text)) {
         expect(controlMarkerProblem(marker, icons), file).toBeNull();
       }
+    }
+  });
+
+  it("every marker-looking text in a guide is a marker the reader sees drawn", () => {
+    // `{button:|ghost|x}` once reached readers as raw text in eight guides: the
+    // grammar wanted words before the first bar. Inline code is left out, since
+    // a guide may quote the syntax.
+    const vocabulary = buildVocabulary(guideDefinitions(), {});
+    for (const file of files()) {
+      const text = applyLabels(readFileSync(file, "utf8"), vocabulary).replace(/`[^`\n]*`/g, (code) => " ".repeat(code.length));
+      const drawn = new Set(controlMarkers(text).map((m) => m.index));
+      const looks = [...text.matchAll(/\{(button|badge|icon|kbd):/g)].map((m) => m.index ?? 0);
+      expect(looks.filter((at) => !drawn.has(at)).map((at) => text.slice(at, at + 40)), file).toEqual([]);
     }
   });
 

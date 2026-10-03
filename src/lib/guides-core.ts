@@ -526,11 +526,18 @@ export interface ControlMarker {
   index: number;
 }
 
-const CONTROL = /\{(button|badge|icon|kbd):([^{}|\n]+?)((?:\|[^{}|\n]+)*)\}/g;
+const CONTROL = /\{(button|badge|icon|kbd):([^{}|\n]*?)((?:\|[^{}|\n]+)*)\}/g;
 
-/** Every marker in `text`, in order. A `{{placeholder}}` is not one. */
+/**
+ * Every marker in `text`, in order. A `{{placeholder}}` is not one. A button
+ * may have no words, only an icon (`{button:|ghost|x}`, a control drawn as its
+ * icon alone); every other marker needs its label. The grammar once required
+ * words, and 23 icon-only buttons across eight guides reached readers as raw
+ * text (found 2026-10-03, Health H2b's drive): `tests/guides.test.ts` now fails
+ * on anything that looks like a marker and is not one.
+ */
 export function controlMarkers(text: string): ControlMarker[] {
-  return [...text.matchAll(CONTROL)].map((match) => {
+  return [...text.matchAll(CONTROL)].flatMap((match) => {
     const kind = match[1] as ControlKind;
     const label = match[2].trim();
     const modifiers = match[3]
@@ -547,7 +554,8 @@ export function controlMarkers(text: string): ControlMarker[] {
       else if (kind === "button" && icon === null) icon = modifier;
       else extra.push(modifier);
     }
-    return { kind, label, variant, icon, extra, raw: match[0], index: match.index ?? 0 };
+    if (label === "" && !(kind === "button" && icon !== null)) return [];
+    return [{ kind, label, variant, icon, extra, raw: match[0], index: match.index ?? 0 }];
   });
 }
 

@@ -10,6 +10,38 @@
 
 ## Build log
 
+### 2026-10-03 — 1.0.9: a file the person saves (`claude/health-h2b`)
+
+Health's progress photos ([health.md](health.md), H2b; ADR 0128) live on the
+phone only, and the founder chose a "Save a copy" button: on his tap, one
+photo into the phone's own files. Chrome does that with a download; a WebView
+ignores one, so inside the app only the shell can.
+
+- **`@capacitor/filesystem` 8.1.4** (MIT). The web calls `writeFile` through
+  the bridge (`readNativeBridge(...).files`, found only when it has the
+  method) with the photo as base64 into `DOCUMENTS`, path
+  `Yosher/yosher-<pose>-<day>.jpg`, `recursive`. The phone's Files app shows
+  it under Documents.
+- **`WRITE_EXTERNAL_STORAGE`, `maxSdkVersion="29"`**, and
+  `requestLegacyExternalStorage` on the application: from Android 11 an app
+  writes its own files into Documents with no permission; Android 10 and
+  earlier need these, the plugin asking at runtime.
+- **The web decides, by version**: `APP_FILES_VERSION = "1.0.9"` and
+  `appCanSaveFiles` (`native-app-core.ts`); an older app's person is told to
+  update ("This version of the app cannot save a copy...").
+- Version **1.0.9**, `versionCode` 10, across `app.json`, `package.json`,
+  `package-lock.json` and `build.gradle`; `cap sync android` wrote the plugin
+  into `capacitor.settings.gradle` and `capacitor.build.gradle`.
+
+`tests/mobile-shell.test.ts` asserts the plugin in the package and both
+Gradle files, the permission held to Android 10, the legacy flag, and a
+version the web counts as able; `tests/native-app.test.ts` the version rule
+and the plugin's read. The drive simulated the shell (a `Capacitor` with a
+`Filesystem` stand-in): 1.0.9 wrote a JPEG into `DOCUMENTS` under `Yosher/`,
+1.0.8 was told to update. **Not verified on a handset**: no Android SDK here;
+the workflow's APK is what proves it. On the phone: Save a copy on Progress
+photos, then the Files app, Documents, Yosher.
+
 ### 2026-09-30 — 1.0.8: the camera, a privacy screen and keep-awake (`claude/app-camera`)
 
 The founder wants the posture check ([posture.md](posture.md)) to work in the

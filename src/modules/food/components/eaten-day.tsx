@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { ChefHat, Plus, Target } from "lucide-react";
+import { Check, ChefHat, Plus, Target } from "lucide-react";
 import { toast } from "sonner";
 import type { FoodPortion } from "@/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { changeEatenAction, deleteEatenAction, setTargetsAction } from "../actions";
+import { ateItAction, changeEatenAction, deleteEatenAction, setTargetsAction } from "../actions";
 import {
   GRAM_UNITS,
   MEALS,
@@ -27,6 +27,9 @@ import {
   type Nutrients,
   type TargetsInput,
 } from "../core/eating";
+import { plainNumber, yieldWords } from "../core/recipe";
+import { eatsHere, planAmountWords, planNumbers, type PlanItem } from "../core/week";
+import { newId } from "./new-id";
 
 /** One thing on the day, as Today shows and changes it. */
 export interface EntryView extends Nutrients {
@@ -42,6 +45,10 @@ export interface EntryView extends Nutrients {
 
 function entriesKey(entries: readonly EntryView[]): string {
   return entries.map((e) => `${e.id}:${e.meal}:${e.amount}:${e.portion}:${e.calories ?? ""}`).join("|");
+}
+
+function plansKey(plans: readonly PlanItem[]): string {
+  return plans.map((p) => `${p.id}:${p.meal}:${p.eatenId ?? ""}:${p.servings ?? ""}:${p.make ?? ""}:${p.amount ?? ""}`).join("|");
 }
 
 function targetsKey(targets: TargetsInput): string {
@@ -90,16 +97,25 @@ export function EatenDay({
   day,
   entries,
   targets,
+  planned = [],
 }: {
   day: string;
   entries: EntryView[];
   targets: TargetsInput;
+  /** The day's plan (D2): each meal shows what is planned and not yet eaten, with Ate it. */
+  planned?: PlanItem[];
 }) {
   const [rows, setRows] = useState(entries);
   const [seenRows, setSeenRows] = useState(entriesKey(entries));
   if (entriesKey(entries) !== seenRows) {
     setSeenRows(entriesKey(entries));
     setRows(entries);
+  }
+  const [plans, setPlans] = useState(planned);
+  const [seenPlans, setSeenPlans] = useState(plansKey(planned));
+  if (plansKey(planned) !== seenPlans) {
+    setSeenPlans(plansKey(planned));
+    setPlans(planned);
   }
   const [goal, setGoal] = useState(targets);
   const [seenGoal, setSeenGoal] = useState(targetsKey(targets));
@@ -157,7 +173,10 @@ export function EatenDay({
 
   function remove(entry: EntryView) {
     const before = rows;
+    const plansBefore = plans;
     setRows((now) => now.filter((r) => r.id !== entry.id));
+    // A planned meal logged and then taken off the log is waiting again.
+    setPlans((now) => now.map((p) => (p.eatenId === entry.id ? { ...p, eatenId: null } : p)));
     setEditing(null);
     setConfirming(null);
     startTransition(async () => {
@@ -165,6 +184,35 @@ export function EatenDay({
       if ("error" in outcome) {
         toast.error(outcome.error);
         setRows(before);
+        setPlans(plansBefore);
+      }
+    });
+  }
+
+  /** "Ate it": the planned meal logged as planned, shown at once and put back if the server refuses it. */
+  function ate(plan: PlanItem) {
+    const eatenId = newId();
+    const entry: EntryView = {
+      id: eatenId,
+      meal: plan.meal,
+      source: plan.kind === "food" ? "food" : "recipe",
+      name: plan.name,
+      amount: (plan.kind === "food" ? plan.amount : plan.servings) ?? 1,
+      portion: plan.kind === "food" ? (plan.portion ?? "g") : "serving",
+      grams: plan.kind === "food" ? plan.grams : null,
+      portions: plan.kind === "food" ? plan.portions : null,
+      ...planNumbers(plan),
+    };
+    const before = rows;
+    const plansBefore = plans;
+    setRows((now) => [...now, entry]);
+    setPlans((now) => now.map((p) => (p.id === plan.id ? { ...p, eatenId } : p)));
+    startTransition(async () => {
+      const outcome = await ateItAction({ planId: plan.id, eatenId });
+      if ("error" in outcome) {
+        toast.error(outcome.error);
+        setRows(before);
+        setPlans(plansBefore);
       }
     });
   }
@@ -292,6 +340,7 @@ export function EatenDay({
 
       {MEALS.map((m) => {
         const inMeal = rows.filter((r) => r.meal === m);
+        const waiting = plans.filter((p) => p.meal === m && p.eatenId === null);
         const sub = totals(inMeal);
         return (
           <section key={m} className="space-y-2 rounded-2xl bg-card px-4 py-3 shadow-elevation-1">
@@ -306,9 +355,9 @@ export function EatenDay({
                 </Link>
               </Button>
             </div>
-            {inMeal.length === 0 ? (
+            {inMeal.length === 0 && waiting.length === 0 ? (
               <p className="text-sm text-muted-foreground">Nothing yet</p>
-            ) : (
+            ) : inMeal.length === 0 ? null : (
               <ul className="divide-y divide-border">
                 {inMeal.map((entry) => {
                   const open_ = editing === entry.id;
@@ -424,6 +473,54 @@ export function EatenDay({
                 })}
               </ul>
             )}
+            {waiting.map((plan) => {
+              const n = eatsHere(plan) ? planNumbers(plan) : null;
+              const cookHref =
+                plan.kind === "cook" && plan.recipeId
+                  ? `/personal/m/food/recipes/${plan.recipeId}/cook?servings=${plainNumber(plan.make ?? 1)}`
+                  : null;
+              return (
+                <div key={plan.id} className="space-y-2 rounded-xl border border-dashed border-border px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block text-xs text-muted-foreground">Planned</span>
+                      <span className="flex items-center gap-1.5">
+                        {plan.kind !== "food" && <ChefHat className="size-3.5 shrink-0 text-module-accent" aria-hidden />}
+                        <span className="line-clamp-2">{plan.name}</span>
+                      </span>
+                      <span className="block text-sm text-muted-foreground">{planAmountWords(plan)}</span>
+                    </span>
+                    <span className="shrink-0 text-sm tabular-nums">
+                      {n === null ? "for later" : n.calories === null ? "no nutrition" : kcalWords(n.calories)}
+                    </span>
+                  </div>
+                  {n === null ? (
+                    <p className="text-sm text-muted-foreground">
+                      {`Made for later meals: cook ${yieldWords(plan.make ?? 0, plan.yieldUnit)}, and eat it as its leftovers.`}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {n !== null && (
+                      <Button size="sm" onClick={() => ate(plan)} disabled={pending}>
+                        <Check aria-hidden /> Ate it
+                      </Button>
+                    )}
+                    {n !== null && (
+                      <Button asChild size="sm" variant="ghost">
+                        <Link href={`/personal/m/food/log?plan=${plan.id}`}>Change first</Link>
+                      </Button>
+                    )}
+                    {cookHref && (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={cookHref}>
+                          <ChefHat aria-hidden /> Cook
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </section>
         );
       })}

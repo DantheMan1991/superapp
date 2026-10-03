@@ -27,6 +27,12 @@ export type FoodErrorCode =
   | "DAY"
   | "PLATE_EMPTY"
   | "PLATE_FAILED"
+  | "PLAN_DAY"
+  | "PLAN_MISSING"
+  | "PLAN_ORDER"
+  | "PLAN_BATCH"
+  | "PLAN_NOTHING"
+  | "PLAN_WEEK"
   | "INVALID";
 
 const MESSAGES: Record<FoodErrorCode, string> = {
@@ -52,6 +58,12 @@ const MESSAGES: Record<FoodErrorCode, string> = {
   DAY: "You can log today and the two weeks before it.",
   PLATE_EMPTY: "No food was found in that photo. Try another one, or search for the foods.",
   PLATE_FAILED: "The photo could not be read this time. Try again, or search for the foods.",
+  PLAN_DAY: "You can plan this week and next.",
+  PLAN_MISSING: "That meal is not on the week any more. Reload the page.",
+  PLAN_ORDER: "Leftovers come after the meal they are cooked at. Move the cook earlier, or the leftovers later.",
+  PLAN_BATCH: "That is more than the batch makes. Cook more, or put fewer leftovers on the week.",
+  PLAN_NOTHING: "Nothing is eaten at that meal: the batch is made ahead. Log its leftovers when you eat them.",
+  PLAN_WEEK: "Choose a past week to repeat, on this week or the next.",
   INVALID: "Something in that was not right. Check it and try again.",
 };
 

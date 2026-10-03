@@ -80,6 +80,8 @@ export interface RecipeHit {
   title: string;
   /** As the recipe states it, per serving; null when it states none. */
   perServing: FoodNutrition | null;
+  /** What one batch makes, in `yieldUnit` (D2's Cook starts there); null when it does not say. */
+  yieldAmount: number | null;
   yieldUnit: string | null;
 }
 
@@ -194,6 +196,8 @@ export const logFoodSchema = z.object({
   fdcId: z.number().int().positive(),
   amount,
   portion: z.string().trim().min(1).max(120),
+  /** The planned meal this is (D2: Change first, from Today), logged once. */
+  planId: z.string().uuid().optional(),
 });
 export type LogFoodInput = z.infer<typeof logFoodSchema>;
 
@@ -203,6 +207,7 @@ export const logRecipeSchema = z.object({
   meal,
   recipeId: z.string().uuid(),
   servings: amount,
+  planId: z.string().uuid().optional(),
 });
 export type LogRecipeInput = z.infer<typeof logRecipeSchema>;
 

@@ -6,12 +6,12 @@
 
 Click {button:Log food|primary|plus} on Food's `Today`, or {button:Add|ghost|plus} beside a meal. Type what you ate, choose it, say how much, and click {button:Add to lunch|primary}. You stay on this page to add the next thing; click {button:Done|outline} when the meal is in.
 
-You also get here from {button:Log it|outline|plus} on a recipe, and from {button:Log what you ate|outline} at the end of cook mode. Both open with that recipe already chosen.
+You also get here from {button:Log it|outline|plus} on a recipe, and from {button:Log what you ate|outline} at the end of cook mode. Both open with that recipe already chosen. And from {button:Change first|ghost} on a planned meal on Today: it opens on that day and meal, with the recipe or food chosen and the planned amount filled in, and says `Planned for this meal. Change how much, then add it.` The first thing you add then is logged as that planned meal, and it stops waiting on Today.
 
 ## What you see
 
 - **{button:Food|ghost|arrow-left}** and **{button:Done|outline}.** Both go back to the day on Food's `Today`.
-- **`Log food`**, the title, with the day under it: `Today`, `Yesterday`, or a date such as `Thursday, Oct 1`. Everything you add goes on that day.
+- **`Log food`**, the title, with {icon:circle-question-mark} beside it, which opens this guide beside the page, and the day under it: `Today`, `Yesterday`, or a date such as `Thursday, Oct 1`. Everything you add goes on that day.
 - **The meal buttons**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`. The one filled in is where the next thing goes. It starts on the meal you clicked {button:Add|ghost|plus} beside, or the one the time of day suggests. Click another to change it.
 - **What you added**, once you add something: a line for each, such as `Added to lunch: Banana, raw, 1 banana`, with {button:Undo|ghost|undo} to take it off again.
 - **The search box**, `Search foods or your recipes`. Type a word or two, such as `chicken breast` or `greek yogurt`. Each word can be the start of one, so `chick` finds chicken. The {icon:x} in the box clears it.
@@ -62,6 +62,7 @@ The photo is sent to Claude to be read and is kept nowhere: not on the page, not
 | `That food is not on the list any more. Search for it again.` | The food list changed since you chose it. Search for the food again. |
 | `That amount is not one this food can be logged in. Choose another.` | The portion is not one of this food's. Choose another, or use `g` or `oz`. |
 | `That recipe is not here any more.` | The recipe was deleted. Search for something else. |
+| `That meal is not on the week any more. Reload the page.` | You came from {button:Change first|ghost}, and the planned meal was taken off the week since. Go back to Food and log it with {button:Add|ghost|plus}. |
 | `You can log today and the two weeks before it.` | The day is more than two weeks back, or a page left open has fallen behind. Go back to Food and open the day again. |
 | `Reading the photo. It takes up to half a minute.` | Claude is reading the photo. Wait on this page. |
 | `No food was found in that photo. Try another one, or search for the foods.` | The photo showed no food Claude could name. Take it again closer, or search. |

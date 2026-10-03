@@ -18,6 +18,12 @@ import { photoVersion, type StoredPhoto } from "./photo-ops";
 export const FOOD_HOME = "/personal/m/food";
 /** The recipes, their own page since D4a made Today the front. */
 export const FOOD_RECIPES = "/personal/m/food/recipes";
+/** The week (D2): `?week=` a Monday, this week's without one. */
+export const FOOD_WEEK = "/personal/m/food/week";
+
+export function weekHref(monday: string | null): string {
+  return monday ? `${FOOD_WEEK}?week=${monday}` : FOOD_WEEK;
+}
 
 export function recipeHref(recipeId: string): string {
   return `${FOOD_HOME}/recipes/${recipeId}`;

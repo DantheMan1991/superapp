@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { addDays, localHourInTimezone, todayInTimezone } from "@/lib/timezone";
 import { LOG_BACK_DAYS, mealAt } from "./core/eating";
 import { dayEaten, getTargets } from "./eating-ops";
+import { planOn } from "./plan-ops";
 import { FOOD_HOME } from "./recipe-ops";
 import { EatenDay } from "./components/eaten-day";
 import { FoodNav } from "./components/food-nav";
@@ -45,9 +46,10 @@ export async function FoodModule({
   const earliest = addDays(today, -LOG_BACK_DAYS);
   const asked = typeof searchParams?.day === "string" ? searchParams.day : null;
   const day = asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today && asked >= earliest ? asked : today;
-  const [entries, targets] = await withTenant(
+  const [entries, targets, planned] = await withTenant(
     ctx.tenant.id,
-    async (tx) => [await dayEaten(tx, ctx.tenant.id, day), await getTargets(tx, ctx.tenant.id)] as const,
+    async (tx) =>
+      [await dayEaten(tx, ctx.tenant.id, day), await getTargets(tx, ctx.tenant.id), await planOn(tx, ctx.tenant.id, day)] as const,
     { role: ctx.role },
   );
   const meal = day === today ? mealAt(localHourInTimezone(ctx.tenant.timezone)) : "dinner";
@@ -58,7 +60,7 @@ export async function FoodModule({
       {day === today && <DayWatch today={today} timeZone={ctx.tenant.timezone} />}
       <PageHeader
         title="Food"
-        description="What you ate, and your recipes."
+        description="What you ate, the week ahead, and your recipes."
         icon={<UtensilsCrossed />}
         actions={
           <Button asChild size="sm">
@@ -96,6 +98,7 @@ export async function FoodModule({
         key={day}
         day={day}
         targets={targets}
+        planned={planned}
         entries={entries.map((e) => ({
           id: e.id,
           meal: e.meal,

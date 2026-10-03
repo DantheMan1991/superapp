@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { ArrowLeft, Camera, ChefHat, Loader2, Search, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
+import { HelpButton } from "@/components/app/help-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +33,7 @@ import {
 import { PLATE_PHOTO_BASE64_LIMIT, PLATE_PHOTO_EDGE } from "../core/plate";
 import { newId } from "./new-id";
 import { shrinkToFit } from "./shrink-photo";
+import { useFoodSearch } from "./use-food-search";
 
 export interface RecentChoice {
   key: string;
@@ -101,6 +103,8 @@ export function LogFood({
   recent,
   recipes,
   initial,
+  initialAmount = null,
+  planId: fromPlan = null,
 }: {
   day: string;
   dayLabel: string;
@@ -109,49 +113,28 @@ export function LogFood({
   recent: RecentChoice[];
   recipes: RecipeHit[];
   initial: Choice | null;
+  /** How much, when it opens from a planned meal (Change first on Today, D2). */
+  initialAmount?: { amount: number; portion: string } | null;
+  /** The planned meal it opens from: the first Add logs it as that meal, once. */
+  planId?: string | null;
 }) {
   const router = useRouter();
   const [meal, setMeal] = useState<Meal>(initialMeal);
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<{ q: string; foods: FoodHit[]; recipes: RecipeHit[] } | null>(null);
-  const [searching, setSearching] = useState(false);
+  const { q, results, searching, search } = useFoodSearch();
   const [choice, setChoice] = useState<Choice | null>(initial);
-  const [amountText, setAmountText] = useState(initial?.kind === "food" ? String(defaultPortion(initial.food.portions).amount) : "1");
-  const [portion, setPortion] = useState(initial?.kind === "food" ? defaultPortion(initial.food.portions).portion : "serving");
+  const [amountText, setAmountText] = useState(
+    initialAmount ? String(initialAmount.amount) : initial?.kind === "food" ? String(defaultPortion(initial.food.portions).amount) : "1",
+  );
+  const [portion, setPortion] = useState(
+    initialAmount ? initialAmount.portion : initial?.kind === "food" ? defaultPortion(initial.food.portions).portion : "serving",
+  );
+  const [planId, setPlanId] = useState(fromPlan);
   const [added, setAdded] = useState<{ id: string; words: string; meal: Meal }[]>([]);
   const [plate, setPlate] = useState<{ status: "reading" } | { status: "review"; rows: PlateRow[] } | null>(null);
   const [replacing, setReplacing] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const timer = useRef<number | null>(null);
-  const inFlight = useRef<AbortController | null>(null);
   const searchBox = useRef<HTMLInputElement | null>(null);
   const camera = useRef<HTMLInputElement | null>(null);
-
-  function search(text: string) {
-    setQ(text);
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    inFlight.current?.abort();
-    if (text.trim() === "") {
-      setResults(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    timer.current = window.setTimeout(async () => {
-      const controller = new AbortController();
-      inFlight.current = controller;
-      try {
-        const response = await fetch(`/api/food/search?q=${encodeURIComponent(text)}`, { signal: controller.signal });
-        if (!response.ok) throw new Error(String(response.status));
-        const body = (await response.json()) as { foods: FoodHit[]; recipes: RecipeHit[] };
-        setResults({ q: text, foods: body.foods, recipes: body.recipes });
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        toast.error("The search did not work this time. Try again.");
-      }
-      setSearching(false);
-    }, 200);
-  }
 
   function choose(next: Choice, amount?: number, unit?: string) {
     if (replacing && plate?.status === "review" && next.kind === "food") {
@@ -191,14 +174,16 @@ export function LogFood({
         ? `${choice.food.name}, ${amountWords(amount, portion)}`
         : `${choice.recipe.title}, ${amountWords(amount, "serving")}`;
     startTransition(async () => {
+      const plan = planId ? { planId } : {};
       const outcome =
         choice.kind === "food"
-          ? await logFoodAction({ id, day, meal, fdcId: choice.food.fdcId, amount, portion })
-          : await logRecipeAction({ id, day, meal, recipeId: choice.recipe.recipeId, servings: amount });
+          ? await logFoodAction({ id, day, meal, fdcId: choice.food.fdcId, amount, portion, ...plan })
+          : await logRecipeAction({ id, day, meal, recipeId: choice.recipe.recipeId, servings: amount, ...plan });
       if ("error" in outcome) {
         toast.error(outcome.error);
         return;
       }
+      setPlanId(null);
       setAdded((now) => [{ id, words, meal }, ...now]);
       setChoice(null);
       search("");
@@ -293,7 +278,10 @@ export function LogFood({
         </Button>
       </div>
       <div>
-        <h1 className="font-heading text-2xl font-medium tracking-heading">Log food</h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="font-heading text-2xl font-medium tracking-heading">Log food</h1>
+          <HelpButton />
+        </div>
         <p className="text-muted-foreground">{dayLabel}</p>
       </div>
 
@@ -487,6 +475,7 @@ export function LogFood({
               {choice.kind === "food" ? choice.food.name : choice.recipe.title}
             </h2>
             <p className="text-sm text-muted-foreground">{choice.kind === "food" ? choice.food.category : "Your recipe"}</p>
+            {planId && <p className="text-sm text-muted-foreground">Planned for this meal. Change how much, then add it.</p>}
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">

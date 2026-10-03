@@ -53,8 +53,12 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
   icon `heart-pulse`, four guides (`docs/help/health/`), and the tests:
   `tests/health-core.test.ts` (pure), `tests/health-ops.test.ts` (the
   database, the slot included) and `tests/isolation/health.test.ts`.
-- **Applied to dev only.** The migrations and the seed reach production only
-  on the founder's word (open items).
+- **On dev and production, before the merge.** Production's ledger was read
+  first (it ended at `0440`, with exactly `0441` and `0442` pending); both
+  went on at the founder's word, and `db:verify-rls` is green on both
+  databases (263 tables). The catalogue row was seeded on both at his separate
+  yes, and `db:verify-modules` is green on both (22 modules). As a
+  `coming_soon` tool, the seed switched Health on in no space.
 - **Driven on dev (a production build, his space).** Sleep saved and changed,
   same times refused; habits added (a duplicate name refused with its
   message), marked with and without an amount; a plunge timed past a minute
@@ -164,10 +168,6 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 ## Open items
 
-- **Production.** `0441_health.sql` and `0442_health_rls.sql`, and the
-  catalogue row, are on dev only. On the founder's word: read the prod
-  ledger, `npm run db:migrate`, `npm run db:verify-rls`, `npm run db:seed`,
-  `npm run db:verify-modules`, before the merge (ADR 0014).
 - **Eating.** Food's source fills the slot when Food logs meals (D4): a row
   per week and a line on Today.
 - **A watch or a ring.** Sleep and heart rate from a wearable, only if he wears

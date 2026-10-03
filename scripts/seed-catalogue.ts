@@ -339,4 +339,17 @@ export const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "coming_soon",
     sortOrder: 310,
   },
+  {
+    id: "health",
+    name: "Health",
+    description:
+      "Cold plunges, sleep and your own habits, logged in a few taps, with your progress across them and your workouts, week by week.",
+    category: "personal",
+    // `coming_soon` from H1 (2026-10-02), as Workouts and Food are and for the
+    // same reasons: the founder's own space previews it, and nobody else's
+    // personal door opens before a health-data privacy policy. See
+    // docs/modules/health.md.
+    status: "coming_soon",
+    sortOrder: 320,
+  },
 ];

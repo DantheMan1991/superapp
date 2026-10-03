@@ -1,0 +1,71 @@
+# Health
+
+> Your cold plunges, your sleep and your own habits, logged in a few taps, beside today's workout. Progress shows how they are going, week by week.
+> **Route:** /personal/m/health/**
+> **Order:** 0
+
+Open **Health** {icon:heart-pulse} in the sidebar of your personal space. This page is today: last night's sleep, today's cold plunges, today's workout, and your own habits to mark. Most mornings, logging your sleep is one tap on {button:Save|primary}. To see how things are going over the last four weeks, click {button:Progress|outline|chart-column}.
+
+## What you see
+
+- **`Health`**, the title, with today's date under it, such as `Friday, Oct 2`. The date is your personal space's day.
+- **The {icon:circle-question-mark}**, which opens this guide beside the page.
+- **{button:Progress|outline|chart-column}.** Opens Progress: your sleep, plunges, habits and workouts, week by week. See [Progress](progress.md).
+- **`Last night's sleep`** {icon:moon}. Until you save this morning's night, it is a form, already filled in:
+  - **`Into bed`** and **`Woke up`**, two times. They start at the times of the last night you saved, so on a usual morning there is nothing to change. The very first time, they start at 10:30 pm and 6:30 am. Tap a time to change it.
+  - **The hours**, worked out as you change the times, such as `7 h 20 min of sleep.` A bed time later on the clock than the wake time is counted across midnight, so 10:50 pm to 6:10 am is 7 h 20 min. When the two times are the same it says `Bed and wake times are the same.`, and {button:Save|primary} stays grayed out.
+  - **`How rested do you feel?`**, with a button for each number from `0` to `10`, and `0 is worn out, 10 is fully rested.` under them. Tap a number to choose it. Tap it again to clear it. It is optional.
+  - **{button:Save|primary}.** Keeps the night as this morning's. It reads `Saving…` while it works.
+- **Once you have saved this morning's night**, the card shows it instead, such as `7 h 20 min · rested 8 of 10`, and the times under it, such as `10:50 pm to 6:10 am`. {button:Change|ghost|pencil} opens the form again with that night's times, with {button:Save|primary}, {button:Cancel|outline} to close it unchanged, and {button:Remove|ghost} to delete this morning's night. One night is kept a morning: saving again changes it.
+- **`Cold plunge`** {icon:snowflake}.
+  - Before your first plunge of the day: `Not yet today`, and how many you took in the last 7 days, such as `Not yet today · 2 in the last 7 days`.
+  - Each plunge you took today, such as `3 min 10 s in 48°F · felt 8`. The water shows when you gave it, and `felt` when you chose a number. Under them, how many in the last 7 days, today's included.
+  - **{button:|ghost|x}** beside a plunge removes one you logged by mistake. It asks `Remove it?`. Click {button:Remove|destructive} to delete it, or {button:Keep it|ghost} to leave it.
+  - **{button:Start the timer|primary|play}.** Opens the plunge timer. See [The cold plunge timer](plunge.md). While a plunge is being timed on this phone, it reads {button:Back to the timer|primary|play} instead.
+  - **{button:Type one in|outline}.** For a plunge you timed some other way: type its minutes and seconds. It is hidden while the timer is running.
+- **`Workout`** {icon:dumbbell}, when Workouts is switched on in your space. It says `Not yet today`, or what you did today, such as `Worked out · 4 exercises · 22 min`, and how your last workout of the day left you, such as `Felt 4 before, 7 after`. A workout here is any session in which you logged at least one set, in any program. {button:Open|ghost} opens Workouts.
+- **`Your habits`**, the things you added yourself, such as a sauna or stretching. {button:Change|ghost|settings-2} opens [Your habits](habits.md), where you add, rename and delete them. Before you have any, the button reads {button:Add|ghost|settings-2}, and the card says `Add your own, such as a sauna, stretching or a supplement, to mark them done here each day.` with the link `Add a habit` {icon:list-plus}.
+  - **A button for each habit.** Tap one to mark it done today: it fills in, with a {icon:check}. Tap it again to undo.
+  - **A counted habit** (one with a unit, such as minutes) asks how much first, such as `Sauna: how much, in min?`. Type the amount and click {button:Done|primary}, or {button:Cancel|ghost}. {button:Done|primary} stays grayed out until the amount is a number above 0. The button then says the amount, such as `Sauna · 20 min`.
+  - `Tap one to mark it done today. Tap it again to undo.` under the buttons.
+
+The page keeps up with the day. If you leave it open overnight, it fetches today's page the next time you look at it.
+
+## How to log last night's sleep
+
+1. Open Health. The `Last night's sleep` form starts at the times of the last night you saved.
+2. If last night was different, tap `Into bed` or `Woke up` and change the time. The hours under them change as you do.
+3. Tap how rested you feel, from `0` to `10`, if you want to.
+4. Click {button:Save|primary}. The card shows the night, such as `7 h 20 min · rested 8 of 10`.
+
+To fix it later in the day, click {button:Change|ghost|pencil}, change it, and click {button:Save|primary}.
+
+## How to mark a habit done
+
+1. Tap the habit's button under `Your habits`. It fills in, with a {icon:check}.
+2. For a counted habit, type how much, then click {button:Done|primary}. The button says the amount, such as `Sauna · 20 min`.
+3. Tapped the wrong one? Tap it again to undo. To change an amount, tap the button to undo it, then tap it again and type the new amount.
+
+## Messages
+
+| Message | What it means |
+| --- | --- |
+| `Bed and wake times are the same. Change one of them.` | The two times match, so there is no night to keep. Change one of them. |
+| `It is a new day. Reload the page, then try again.` | The page was opened yesterday and has not caught up. Reload it. Your sleep and habits are kept for today, as your personal space counts the day. |
+| `That is not here any more. Reload the page.` | The habit was deleted, perhaps in another tab. Reload to see your habits as they are. |
+| `Your sleep could not be kept. Try again.` | Something went wrong while saving. Nothing changed. Click {button:Save|primary} again. |
+| `That could not be kept. Try again.` | Marking the habit did not work. Nothing changed. Tap it again. |
+| `It could not be removed. Try again.` | Removing the night or the plunge did not work. It is still there. Try again in a moment. |
+| `Something in that was not right. Check it and try again.` | What was sent was not something Health keeps. Reload the page and try again. |
+| `Workouts could not be read just now. Reload the page to try again.` | Your workouts are fine, but Health could not read them this time. Everything else on the page is up to date. |
+
+## Not on this page
+
+- **Logging an earlier night or day.** You log this morning's night and mark today's habits. A night you missed cannot be filled in yet. Ask us if you need it.
+- **Sleep from a watch or a ring.** Not built. It comes later if you wear one.
+- **What you ate.** It comes from Food when Food logs meals, and then shows here and on Progress.
+- **Reminders.** Health does not remind you to plunge or to log your sleep.
+
+## Who can do what
+
+Only you. Health is in your personal space, which nobody else can open. Yosher staff cannot open it from the product either.

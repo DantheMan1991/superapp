@@ -14,6 +14,18 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-02 — The third tool: Health (`claude/health-h1`)
+
+The founder chose Health after Workouts' hands-free merged (#692), and made
+its calls from a mockup ([health.md](health.md)). It is a third personal tool
+exactly as Workouts and Food are: `category: "personal"`, `coming_soon`, at
+`/personal/m/health`, four tables of its own under the same RLS, switched on
+in his space by the superadmin preview. Nothing in the container changed. The
+space's home names it under what is coming, and so does
+`docs/help/personal/overview.md`. New beside it: the progress slot
+(`src/lib/progress-sources/`, ADR 0125), through which Health reads Workouts
+without importing it.
+
 ### 2026-10-01 — The second tool: Food, and a health goal (`claude/food-d1`)
 
 With Workouts' F1–F4 merged, the founder switched to the food side. D1, recipes,
@@ -187,7 +199,7 @@ No code yet. This entry is the plan; the slices are below and in
 | P1 | The consumer door | A new sign-up is asked "for my business, or just for me", and "just for me" never sees the business setup |
 | F1–F6 | Fitness | See [fitness.md](fitness.md) |
 | D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), the week, the shopping list, nutrition. See [food.md](food.md) |
-| H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. Habits logged beside what Workouts and Food already know, and progress shown across them. Not designed; ask him first |
+| H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. H1 built 2026-10-02 from a mockup: cold plunges timed on the phone, sleep as bed and wake times, his own habits, and progress by week across them and his workouts, read through a slot the tools fill (ADR 0125). Eating joins when Food logs it (D4); a watch or ring only if he wears one. See [health.md](health.md) |
 
 ### P0 — the container, as built
 

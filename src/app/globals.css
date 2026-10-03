@@ -283,9 +283,13 @@
    * all day; Workouts never does. Food (D1) takes 45, a warm orange half a
    * wheel from Workouts' teal, the only tool it shares a rail with; between
    * work (35) and production (55) only on paper, since neither is ever beside it.
+   * Health (H1) takes 345, a rose for a heart, 60 degrees from Food and the
+   * widest gap left on the personal rail; it is beside livestock's 350 only on
+   * paper, since a business rail never shows Health.
    */
   --accent-fitness: oklch(0.53 0.12 185);
   --accent-food: oklch(0.56 0.14 45);
+  --accent-health: oklch(0.55 0.15 345);
 
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
@@ -369,6 +373,7 @@
   --accent-jobs: oklch(0.76 0.14 155);
   --accent-fitness: oklch(0.74 0.12 185);
   --accent-food: oklch(0.76 0.13 45);
+  --accent-health: oklch(0.75 0.13 345);
   --chart-1: oklch(0.6 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.68 0.14 150);
@@ -422,6 +427,7 @@
   --accent-jobs: oklch(0.76 0.14 155);
   --accent-fitness: oklch(0.74 0.12 185);
   --accent-food: oklch(0.76 0.13 45);
+  --accent-health: oklch(0.75 0.13 345);
 }
 
 @layer base {

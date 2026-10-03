@@ -51,6 +51,7 @@ export * from "./feedback";
 // (ADR 0111). To RLS they are ordinary tenant tables. Workouts first, then Food.
 export * from "./fitness";
 export * from "./food";
+export * from "./health";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

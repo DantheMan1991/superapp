@@ -83,8 +83,12 @@ export default async function PersonalHomePage() {
               </p>
               <p>
                 Food comes with it: your recipes from a link, a photo of a page or
-                typed in, then the week&apos;s meals and the shopping list. Each tool
-                appears on this page and in the sidebar as soon as it is ready.
+                typed in, then the week&apos;s meals and the shopping list.
+              </p>
+              <p>
+                Health keeps your cold plunges, your sleep and your own habits, and
+                shows your progress across them and your workouts, week by week. Each
+                tool appears on this page and in the sidebar as soon as it is ready.
               </p>
             </>
           ) : (

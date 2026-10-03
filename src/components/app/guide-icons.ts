@@ -69,6 +69,11 @@ import {
   ChefHat,
   Timer,
   BellRing,
+  ChartColumn,
+  ListPlus,
+  Moon,
+  Settings2,
+  Snowflake,
   Pause,
   Pencil,
   PenLine,
@@ -92,6 +97,7 @@ import {
   Tablet,
   Tag,
   Trash2,
+  TrendingDown,
   TrendingUp,
   Undo2,
   Unlink,
@@ -211,6 +217,13 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "chef-hat": ChefHat,
   timer: Timer,
   "bell-ring": BellRing,
+  // Health's Today and Progress (health.md, H1): the cards' headings, the
+  // Progress button, the habits' Change and Add, and which way a week went.
+  "chart-column": ChartColumn,
+  "list-plus": ListPlus,
+  moon: Moon,
+  "settings-2": Settings2,
+  snowflake: Snowflake,
   // "Say it" on the tell box (voice slice 2, ADR 0049); cook mode's
   // Hands-free switch, on and off (food.md, D1c).
   mic: Mic,
@@ -224,6 +237,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   tag: Tag,
   trash: Trash2,
   "trending-up": TrendingUp,
+  "trending-down": TrendingDown,
   undo: Undo2,
   unlink: Unlink,
   upload: Upload,

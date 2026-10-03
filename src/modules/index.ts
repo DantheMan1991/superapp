@@ -5,6 +5,7 @@ import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { FitnessModule } from "./fitness/FitnessModule";
 import { FoodModule } from "./food/FoodModule";
+import { HealthModule } from "./health/HealthModule";
 import { HelloModule } from "./hello/HelloModule";
 import { MarketingModule } from "./marketing/MarketingModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
@@ -253,6 +254,16 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Food",
     icon: "utensils",
     Component: FoodModule,
+  },
+  // THE THIRD PERSONAL TOOL (docs/modules/health.md): cold plunges, sleep and
+  // the person's own habits (H1), and progress by week across them and the
+  // workouts. A personal tool exactly as Workouts and Food are, at
+  // `/personal/m/health`, and `coming_soon` for the same reason.
+  health: {
+    slug: "health",
+    name: "Health",
+    icon: "heart-pulse",
+    Component: HealthModule,
   },
 };
 

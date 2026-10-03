@@ -343,7 +343,7 @@ export const MODULES: (typeof schema.modules.$inferInsert)[] = [
     id: "health",
     name: "Health",
     description:
-      "Cold plunges, sleep and your own habits, logged in a few taps, with your progress across them and your workouts, week by week.",
+      "Your sleep, weight, cold plunges and own habits, logged in a few taps, with your progress across them, your workouts and what you eat, week by week.",
     category: "personal",
     // `coming_soon` from H1 (2026-10-02), as Workouts and Food are and for the
     // same reasons: the founder's own space previews it, and nobody else's

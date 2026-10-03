@@ -1,8 +1,8 @@
 # Health
 
-> The third personal tool (ADR 0111): the person's cold plunges, sleep and own
-> habits, logged in a few taps, beside today's workout, and their progress
-> across all of it and their workouts, week by week. It answers the founder's
+> The third personal tool (ADR 0111): the person's cold plunges, sleep, own
+> habits, weight and tape measures, logged in a few taps, beside today's
+> workout and what they ate, and their progress across all of it, week by week. It answers the founder's
 > goal (2026-10-01): "track progress based on things i am doing with the
 > workout, eating/diet, cold plunge, sleep etc." Health keeps what no other
 > tool knows, and reads the rest through the progress slot
@@ -15,6 +15,77 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — H2: weight and the body, and earlier days (`claude/health-h2`)
+- **The founder's calls, from a mockup (2026-10-03, after D4a #695 merged).**
+  Weight and the body next ("Weight and body", over the week and shopping
+  list, a recipe's nutrition and strength). Weight typed in (his scale does not
+  sync to an app); the **waist and more tape measures** he picks; a **goal
+  weight and a pace**; **progress photos** as a slice of their own after this
+  one, kept on the phone only; **the calorie check** (what his eating and his
+  trend say he burns) as its own slice once a few weeks are logged. Not body
+  fat. Pounds and inches (as the plunge's °F), and two weeks back for earlier
+  days (as Food), were my defaults, said in the chat.
+- **Weight on Today** (`components/weight-card.tsx`): the box starts at the last
+  weigh-in; kept, the weight, the trend through it and how it moved this week
+  ("Trend 185.7 lb · down 0.5 lb this week"), and how far the goal is. The trend
+  is worked out on the phone from the two months of weigh-ins the page sends, so
+  it moves with the weigh-in just kept. Under it, when the tape measures were
+  last taken, and Measure.
+- **Body** (`/personal/m/health/body`, `body-view.tsx`, `weight-chart.tsx`,
+  `goal-card.tsx`): Trend, This week and Goal; the chart (30 days, 90 days,
+  All: dots, the trend's line, the goal dashed when near); the goal (set,
+  change, remove; lose or gain is wherever it is from the trend); the tape
+  measures (latest, the move since the first, the days measured to open again);
+  every weigh-in, changed or removed in place, any day.
+- **Measure** (`/body/measure?day=`, `measure-form.tsx`): a day's tape measures
+  together, as a decimal or as a tape reads ("36 1/4"). **Your tape measures**
+  (`/body/measures`, `measure-manager.tsx`): the common ones a tap to add, any
+  other by name, each with its better way.
+- **Earlier days**: Today steps back two weeks (`?day=`, `core/days.ts`). That
+  day's night ("The night before yesterday"), weigh-in, plunges (Type one in
+  only: `plungeInputSchema.takenOn`) and habits; the slot's cards are left off,
+  since their lines speak of today. Every action that writes a day takes
+  `asToday`, so `NEW_DAY` still guards a page left open overnight, and `DAY`
+  refuses one out of reach.
+- **Progress**: Weight (the trend at each week's last weigh-in) and each tape
+  measure (the week's mean) first, as the slot's new `measure` format: bars
+  across the weeks' range, at least 5 lb or 2 in of it; a change under 0.3 lb or
+  0.2 in is "about the same". The weight's better way is towards the goal.
+- Four tables (`0446_health_body.sql`, RLS in `0447_health_body_rls.sql`; the
+  composite key's target index moved above its foreign key by hand, as 0441's),
+  ADR 0127, three new guides (`body.md`, `measure.md`, `measures.md`) and the
+  others updated, `weight` and `ruler` in the guides' icons, the catalogue line
+  and the personal home's copy. Tests: `tests/health-body.test.ts` (20 pure),
+  `tests/health-body-ops.test.ts` (10 db), `tests/isolation/health-body.test.ts`
+  (6), and `health-ops` for the day read and the row order.
+- **On dev and production, before the merge.** Production's ledger was read
+  first (it ended at `0445`, with exactly `0446` and `0447` pending); both went
+  on at the founder's word (ledger ids 452 and 453), `db:verify-rls` is green on
+  both databases (270 tables), and the measure key reads `FOREIGN KEY
+  (tenant_id, measure_id) REFERENCES health_measures(tenant_id, id) ON DELETE
+  CASCADE` in `pg_constraint`. The seed put Health's new catalogue line on both,
+  and `db:verify-modules` is green on both.
+- **Driven on dev (a production build, his space).** A weight refused (40) and
+  kept; yesterday filled in (its night and weigh-in), and weigh-ins on four
+  earlier days; the trend and week change checked by hand (185.7, down 0.5); a
+  goal set (no date with five days, then "around Nov 24" with twelve); tape
+  measures added (two common ones, one by name and bigger-is-better), taken
+  today and on an earlier day from Today's link, a "0.5" refused and "36 1/4"
+  read; a weigh-in changed in Body's list; a plunge typed in for yesterday;
+  Progress; 375 px with no sideways scroll. It found:
+  - **The chart's words were 17 pixels on a desktop**: a fixed viewBox scaled
+    to the card. It is drawn at the card's measured width now, and starts at
+    the first weigh-in in the days chosen, not 30 days back with a week of dots
+    in its last quarter.
+  - **Progress drew a 0.9 lb fall as one bar a fifth of the other**: bars across
+    the bare range. They span at least 5 lb or 2 in now.
+  - **"At the last 4 weeks' pace" was read off twelve days**: it says "your
+    recent pace" now.
+  - Progress rounded a tape to a tenth ("36.3 in") where Body wrote "36.25 in":
+    a tape reads to a hundredth in both. Body's list mixed "Tuesday, Sep 29"
+    and "Sep 26"; it names every day of this year alike. A "colours" in the
+    product's words is "colors".
 
 ### 2026-10-03 — Food joins the progress slot (`claude/food-d4a`)
 - Food's eating log (D4a, [food.md](food.md)) fills the slot: Progress gains
@@ -108,18 +179,22 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 | `health_sleep` | One night, kept the morning it ended: `woke_on`, `bed_time` and `woke_time` (Postgres `time`), `minutes` (1 to 1440, worked out from the two), `rested` (0 to 10, optional) | Unique `(tenant_id, woke_on)`: one night a morning, a second save updates it. Same RLS |
 | `health_habits` | The person's own habit: `name` (1 to 60), `unit` (1 to 20, or null for done-or-not), `position` | Unique `(tenant_id, id)` (`health_habits_tenant_id_id_idx`) for the composite key below. Names unique per space case-insensitively, checked in `createHabit`/`updateHabit` (no index: see gotchas). At most 30 (`HABITS_MAX`, checked in code). Same RLS |
 | `health_habit_logs` | A habit done on a day: `done_on`, `amount` (> 0, or null) | Unique `(tenant_id, habit_id, done_on)`: once a day, a second mark updates the amount. Composite FK `(tenant_id, habit_id)` → `health_habits (tenant_id, id)` ON DELETE CASCADE, so a log can never point at another space's habit and deleting a habit deletes its days. Same RLS |
+| `health_weighins` | A weigh-in (H2): `weighed_on`, `kg` (20 to 320) | Unique `(tenant_id, weighed_on)`: one a day, a second save updates it. Kept in kilograms whatever the person reads (`core/body.ts` turns pounds both ways). The trend is never stored. Same RLS |
+| `health_weight_goals` | The goal (H2): `goal_kg` (20 to 320), `pace_kg` (0.1 to 1 a week) | One per space: `tenant_id` is the key. Lose or gain is never kept. Same RLS |
+| `health_measures` | A tape measure of the person's own (H2): `name` (1 to 40), `better` (`smaller`, `bigger` or null), `position` | Unique `(tenant_id, id)` for the composite key below. Names unique per space case-insensitively, checked in `createMeasure`/`updateMeasure`. At most 12 (`MEASURES_MAX`). Same RLS |
+| `health_measurements` | A tape measure taken on a day (H2): `measured_on`, `cm` (1 to 400) | Unique `(tenant_id, measure_id, measured_on)`. Composite FK `(tenant_id, measure_id)` → `health_measures (tenant_id, id)` ON DELETE CASCADE. Same RLS |
 
 ## Key files & seams
 
 - `src/modules/health/HealthModule.tsx` — Today, rendered at `/personal/m/health` by the `[slug]` page.
-- `src/modules/health/core/` — pure: `sleep.ts` (clock times to minutes, words), `plunge.ts` (timer face, typed time and water), `habits.ts`, `progress.ts` (the windows, `readRow`, `weekWords`, bars), `rows.ts` (Health's own rows), `errors.ts`.
-- `src/modules/health/log-ops.ts` (plunges, sleep), `habit-ops.ts`, `progress-ops.ts` (`ownRows`, `todayData`) — every read and write in the space's own transaction.
+- `src/modules/health/core/` — pure: `sleep.ts` (clock times to minutes, words), `plunge.ts` (timer face, typed time and water), `habits.ts`, `progress.ts` (the windows, `readRow`, `weekWords`, bars), `rows.ts` (Health's own rows), `body.ts` (H2: units, typed weights and tapes, the trend, the pace, the goal's words, the body's rows, the chart's scale), `days.ts` (H2: the days that can be filled in, `dayRefused`, day words), `errors.ts`.
+- `src/modules/health/log-ops.ts` (plunges, sleep), `habit-ops.ts`, `body-ops.ts` (H2: weigh-ins, the goal, tape measures and measurements), `progress-ops.ts` (`ownRows`, `dayData`) — every read and write in the space's own transaction.
 - `src/modules/health/actions.ts` — `requirePersonalSpace` + `requireModuleEnabled("health")` + zod; each returns `{ ok }` or `{ error }` with a sentence.
-- `src/modules/health/components/` — `sleep-card`, `plunge-card`, `plunge-timer` + `plunge-store`, `habit-chips`, `habit-manager`, `progress-view`, `score-scale`; `DayWatch` is `src/components/app/day-watch.tsx`, shared with Food.
-- `src/app/personal/(space)/m/health/{plunge,progress,habits}/page.tsx` — the three screens below Today.
+- `src/modules/health/components/` — `sleep-card`, `weight-card`, `plunge-card`, `plunge-timer` + `plunge-store`, `habit-chips`, `habit-manager`, `progress-view`, `score-scale`, and Body's `body-view`, `weight-chart`, `goal-card`, `measure-form`, `measure-manager`; `DayWatch` is `src/components/app/day-watch.tsx`, shared with Food.
+- `src/app/personal/(space)/m/health/{plunge,progress,habits,body,body/measure,body/measures}/page.tsx` — the screens below Today.
 - `src/lib/progress-sources/` — the slot: `types.ts` (contract, the only file a tool imports), `registry.ts` (the one file that names the sources), `resolve.ts` (what Health calls). ESLint keeps `registry`/`resolve` to Health (`PROGRESS_HOST`).
 - `src/modules/fitness/progress-source.ts` + `core/progress-rows.ts` — Workouts' filler.
-- `docs/help/health/` — `overview.md` (Today), `plunge.md`, `progress.md`, `habits.md`.
+- `docs/help/health/` — `overview.md` (Today), `plunge.md`, `progress.md`, `habits.md`, `body.md`, `measure.md`, `measures.md`.
 
 ## Decisions & gotchas
 
@@ -170,11 +245,41 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
   seen (a key string, compared during render). Name every page an action can
   change in `refresh()` (`actions.ts`), or the page it was called from is not
   re-rendered at all.
-- **Today only marks today.** `setHabitDay` and `saveSleep` accept other days
-  (the ops are ready for filling in a missed day); the actions refuse any day
-  but the space's today with `NEW_DAY`, because a page drawn yesterday would
-  otherwise file this morning under yesterday. `DayWatch` refreshes such a page
-  when it is looked at again.
+- **Today reaches two weeks back, and says when it was drawn as today** (H2,
+  ADR 0127; H1 marked today only). A write's day must be in reach
+  (`dayRefused`: today or the 14 days before, else `DAY`), and every write
+  carries `asToday`, true when the page showed its day as today; once the
+  space's day has moved on, such a write is refused (`NEW_DAY`), because a page
+  drawn yesterday would otherwise file this morning under yesterday, now a day
+  that may be filled in. `asToday` defaults to true, so a page from before H2
+  sending none keeps H1's rule. `DayWatch` refreshes a today page when it is
+  looked at again; an earlier day's page has none. The slot's cards are left
+  off an earlier day: their lines say "today".
+- **Weight is a trend, worked out on read** (ADR 0127): `weightTrend` moves a
+  tenth of the way to each weigh-in a day after the last (`1 - 0.9^n` after a
+  gap), from the first weigh-in; Today and Progress read 60 days before what
+  they show (`TREND_WARM_UP_DAYS`). It lags a steady loss by about a pound at a
+  pound a week, and Body's guide says so. The pace is the least-squares line
+  through 28 days (four weigh-ins, ten days apart, or none); the goal's date
+  comes from the trend and that pace, and "your recent pace" is the phrase,
+  because twelve days of weigh-ins once read as "the last 4 weeks" (the drive).
+- **Kept in kg and cm, read in lb and in.** Weigh-ins are typed to a tenth of a
+  pound and tapes to a hundredth of an inch; a pound turned to kilograms and
+  back leaves a trillionth over, so a goal's 70 days were 71 until
+  `readGoal`'s ceiling took a hair off (`- 1e-9`).
+- **A level is drawn across its range, not from zero** (`barHeights`, format
+  `measure`): the four weeks' range, at least 5 lb or 2 in, so a pound reads as
+  a step and not a cliff. Weight reads to a tenth, a tape to a hundredth.
+- **The chart is drawn at the card's measured width.** A fixed viewBox scaled
+  to a desktop card drew 17-pixel labels; `weight-chart.tsx` measures its box
+  (ResizeObserver) and draws in pixels at 11 px type.
+- **A weigh-in or a day's tape measures already kept can be changed whenever**:
+  Body's list changes or removes any weigh-in (`changeWeighin`, NOT_FOUND when
+  there is none), and Measure opens a day out of reach only when something was
+  kept on it. Adding stops at two weeks.
+- **A day's tape measures are all or nothing**: `saveMeasurements` checks every
+  measure is the space's own before writing any (NOT_FOUND), and null takes one
+  off the day.
 - **Coming soon, like Workouts and Food.** It reaches a superadmin's own space
   through the preview (`previewPersonalTools`), never the seed. Health data in
   a consumer app needs P1's privacy policy before anyone else gets it
@@ -184,6 +289,16 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 - **A watch or a ring.** Sleep and heart rate from a wearable, only if he wears
   one (his call).
-- **Not built:** logging a missed night or an earlier day's habits; reminders;
-  °C; a countdown plunge; spoken minutes; habit reorder and goals; more than
-  four weeks.
+- **Progress photos** (H2b, the founder's call): front and side, kept on the
+  phone only, as the posture check's are (ADR 0118), compared over time.
+- **The calorie check** (the founder's call: its own slice once a few weeks
+  are logged): what his eating (Food's log) and his trend say he burns a day,
+  and his calorie target against it. Needs days with everything eaten logged.
+- **Kilograms and centimeters**: a setting, never a migration (ADR 0127).
+- **A smart scale or Health Connect**: he types his in today.
+- **Adding a weigh-in older than two weeks** (an import of a paper log or a
+  scale's memory). Changing an old one works.
+- **Nobody has weighed in on a phone yet**: the drive was a desktop pane at
+  375 px; a real Android keyboard's decimal key is unwatched.
+- **Not built:** body fat; tape measure reorder; reminders; °C; a countdown
+  plunge; spoken minutes; habit reorder and goals; more than four weeks.

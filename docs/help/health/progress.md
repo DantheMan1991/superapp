@@ -1,6 +1,6 @@
 # Progress
 
-> How your sleep, cold plunges, habits and workouts have gone over the last four weeks, a week at a time, and which way each is heading.
+> How your weight, tape measures, sleep, cold plunges, habits, workouts and eating have gone over the last four weeks, a week at a time, and which way each is heading.
 > **Route:** /personal/m/health/progress
 > **Order:** 30
 
@@ -11,6 +11,8 @@ On Health, click {button:Progress|outline|chart-column}. Each row is one thing y
 - **{button:Health|ghost|arrow-left}.** Back to Health.
 - **`Progress`** {icon:chart-column}, the title, with the line `The last four weeks, from Sep 5. Each bar is seven days; the newest, on the right, ends today.` A week here is any seven days in a row, not Monday to Sunday, so the newest week is always a whole week: today and the six days before it.
 - **A row for each thing you track**, in this order:
+  - **`Weight`**: your trend at the last weigh-in that week, such as `185.7 lb`. See [Body](body.md#the-trend) for what the trend is. With a goal set on Body, the better way is towards it: down to lose, up to gain. Without a goal, or at it, neither way is better.
+  - **Each of your tape measures**, by its name, such as `Waist`: the average of the times you took it that week, such as `36.25 in`. The better way is the one you chose on [Your tape measures](measures.md).
   - **`Sleep a night`**: your average night that week, such as `7 h 12 min`, from the nights you logged.
   - **`How rested`**: the average of the numbers you gave your nights, such as `6.5 of 10`. Nights you gave no number are left out.
   - **`Cold plunges`**: how many plunges you took.
@@ -22,8 +24,9 @@ On Health, click {button:Progress|outline|chart-column}. Each row is one thing y
   - **`Days on your calorie target`** and **`Days on your protein target`**, once you set targets in Food: the days you hit each. A day is on its calorie target within a tenth of it, either way, and on its protein target at or above it.
 - **In each row:**
   - **The last 7 days**, such as `Last 7 days: 7 h 12 min`. With nothing logged in those days, it says `Nothing in the last 7 days`.
-  - **How it compares** with the weeks before, such as `up 25 min on the weeks before` with {icon:trending-up}, or `down 1.0 on the weeks before` with {icon:trending-down}. The weeks before are the average of the three earlier weeks. A week with no nights, no plunges or no workouts is left out of an average such as `Sleep a night`; for a count, such as `Cold plunges` or a habit's days, it counts as zero. The words are in Health's color when the change is the better way, such as more sleep or more plunges, and gray when it is not. A small change says `about the same as the weeks before`, with no arrow: under 10 minutes of sleep, 15 seconds in the cold, 0.3 on a score from 0 to 10, one day or one plunge, 50 calories, or 5 grams. When the weeks before have nothing to compare, such as in your first week of logging sleep, the line is left out.
+  - **How it compares** with the weeks before, such as `up 25 min on the weeks before` with {icon:trending-up}, or `down 1.0 on the weeks before` with {icon:trending-down}. The weeks before are the average of the three earlier weeks. A week with no nights, no plunges or no workouts is left out of an average such as `Sleep a night`; for a count, such as `Cold plunges` or a habit's days, it counts as zero. The words are in Health's color when the change is the better way, such as more sleep or more plunges, and gray when it is not. A small change says `about the same as the weeks before`, with no arrow: under 10 minutes of sleep, 15 seconds in the cold, 0.3 on a score from 0 to 10, one day or one plunge, 50 calories, 5 grams, 0.3 lb of weight, or 0.2 in on a tape. When the weeks before have nothing to compare, such as in your first week of logging sleep, the line is left out.
   - **Four bars**, one a week, the oldest on the left. The newest, on the right, is the darkest. Each is as tall as its week's number against the row's biggest week. A week with nothing logged, or a count of zero, is a flat line.
+  - **For your weight and tape measures**, the bars start at the lowest of the four weeks, not at zero, since 184 lb and 186 lb from zero would be two bars the same. They span at least 5 lb, or 2 in, so a small change stays a small step.
 
 The page keeps up with the day. Left open overnight, it fetches today's numbers the next time you look at it.
 
@@ -46,7 +49,7 @@ The page keeps up with the day. Left open overnight, it fetches today's numbers 
 
 - **More than four weeks.** Progress shows the last four. Ask us if you want a longer view.
 - **Sleep from a watch or a ring.** Not built. It comes later if you wear one.
-- **Changing a number.** Progress only reads. Fix a night or a plunge on Health, and a habit's name or unit on [Your habits](habits.md).
+- **Changing a number.** Progress only reads. Fix a night, a plunge or today's weigh-in on Health, an older weigh-in on [Body](body.md), a tape measure on [Measure](measure.md), and a habit's name or unit on [Your habits](habits.md).
 
 ## Who can do what
 

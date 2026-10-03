@@ -25,9 +25,11 @@ export interface ProgressWindow {
 /**
  * How a row's numbers read: `days` ("4 days"), `minutes` ("7 h 12 min"),
  * `seconds` ("3 min 10 s"), `score` (a 0-to-10 average, "7.2"), `count`
- * ("4"), `amount` (a number in the row's `unit`, "60 min").
+ * ("4"), `amount` (a number in the row's `unit`, "60 min"), `measure` (a
+ * level read to a tenth in the row's `unit`, "184.6 lb", where zero means
+ * nothing, so its bars span the weeks' range instead of starting at zero).
  */
-export type ProgressFormat = "days" | "minutes" | "seconds" | "score" | "count" | "amount";
+export type ProgressFormat = "days" | "minutes" | "seconds" | "score" | "count" | "amount" | "measure";
 
 export interface ProgressRow {
   /** Stable and unique: "fitness.days". */

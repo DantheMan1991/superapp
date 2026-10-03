@@ -30,9 +30,12 @@ export const habitDayInputSchema = z.object({
   /** Done (with its amount when counted), or not done. */
   done: z.boolean(),
   amount: z.number().positive().max(100_000).nullable(),
+  /** The page showed the day as today (H2, `core/days.ts`). */
+  asToday: z.boolean().default(true),
 });
 
-export type HabitDayInput = z.infer<typeof habitDayInputSchema>;
+/** What the ops keep: the page's `asToday` is the action's to check. */
+export type HabitDayInput = Omit<z.infer<typeof habitDayInputSchema>, "asToday">;
 
 /** An amount as typed, or null when it is not a positive number. */
 export function typedAmount(text: string): number | null {

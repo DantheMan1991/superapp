@@ -18,7 +18,7 @@ export function ProgressView({ rows, windows }: { rows: ProgressRow[]; windows: 
     <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">
       {rows.map((row) => {
         const reading = readRow(row);
-        const heights = barHeights(row.values);
+        const heights = barHeights(row.values, row.format, row.unit);
         return (
           <li key={row.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 px-4 py-3">
             <div className="min-w-0 text-sm">

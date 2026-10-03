@@ -13,12 +13,18 @@ import { useRunningPlunge } from "./plunge-store";
  * TODAY'S COLD PLUNGES (H1): any taken today, with Remove for one logged by
  * mistake (asked twice: a wet thumb finds the wrong button); how many this
  * week; and Start the timer, or Back to the timer when one is still running on
- * this phone.
+ * this phone. On a day being filled in (H2), that day's, and Type one in for
+ * it: a timer only runs now.
  */
 export function PlungeCard({
+  day,
+  asToday,
   plunges,
   thisWeek,
 }: {
+  day: string;
+  /** The page shows today (not a day being filled in). */
+  asToday: boolean;
   plunges: { id: string; seconds: number; waterF: number | null; feelAfter: number | null }[];
   /** In the seven days ending today. */
   thisWeek: number;
@@ -47,7 +53,7 @@ export function PlungeCard({
         <Snowflake className="size-4 text-module-accent" aria-hidden /> Cold plunge
       </h2>
       {listed.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{`Not yet today · ${week} in the last 7 days`}</p>
+        <p className="text-sm text-muted-foreground">{asToday ? `Not yet today · ${week} in the last 7 days` : "None that day."}</p>
       ) : (
         <ul className="space-y-1">
           {listed.map((p) => (
@@ -80,21 +86,27 @@ export function PlungeCard({
               )}
             </li>
           ))}
-          <li className="text-sm text-muted-foreground">{`${week} in the last 7 days`}</li>
+          {asToday && <li className="text-sm text-muted-foreground">{`${week} in the last 7 days`}</li>}
         </ul>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button asChild>
-          <Link href="/personal/m/health/plunge">
-            <Play aria-hidden /> {running ? "Back to the timer" : "Start the timer"}
-          </Link>
-        </Button>
-        {!running && (
-          <Button asChild variant="outline">
-            <Link href="/personal/m/health/plunge?typed=1">Type one in</Link>
+      {asToday ? (
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link href="/personal/m/health/plunge">
+              <Play aria-hidden /> {running ? "Back to the timer" : "Start the timer"}
+            </Link>
           </Button>
-        )}
-      </div>
+          {!running && (
+            <Button asChild variant="outline">
+              <Link href="/personal/m/health/plunge?typed=1">Type one in</Link>
+            </Button>
+          )}
+        </div>
+      ) : (
+        <Button asChild variant="outline">
+          <Link href={`/personal/m/health/plunge?typed=1&day=${day}`}>Type one in</Link>
+        </Button>
+      )}
     </section>
   );
 }

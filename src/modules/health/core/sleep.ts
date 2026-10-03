@@ -62,7 +62,10 @@ export const sleepInputSchema = z
     bedTime: z.string().regex(CLOCK),
     wokeTime: z.string().regex(CLOCK),
     rested: z.number().int().min(0).max(10).nullable(),
+    /** The page showed the morning as today's (H2, `core/days.ts`). */
+    asToday: z.boolean().default(true),
   })
   .refine((v) => sleepMinutes(v.bedTime, v.wokeTime) !== null, { message: "SAME_TIME" });
 
-export type SleepInput = z.infer<typeof sleepInputSchema>;
+/** What the ops keep: the page's `asToday` is the action's to check. */
+export type SleepInput = Omit<z.infer<typeof sleepInputSchema>, "asToday">;

@@ -81,6 +81,7 @@ import {
   Printer,
   RefreshCw,
   RotateCcw,
+  Ruler,
   Save,
   ScanLine,
   Search,
@@ -107,6 +108,7 @@ import {
   VolumeX,
   UserRound,
   Wallet,
+  Weight,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -255,6 +257,9 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   "megaphone-off": MegaphoneOff,
   // A personal register's card (ADR 0034) wears this instead of the bank mark.
   wallet: Wallet,
+  // Health's Weight card and Body page, and its tape measures (health.md, H2).
+  weight: Weight,
+  ruler: Ruler,
   x: X,
   // A warning drawn beside its words: Workouts' effort warning and a phase not
   // yet open (fitness.md, F3).

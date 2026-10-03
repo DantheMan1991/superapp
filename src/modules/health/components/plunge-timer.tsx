@@ -22,6 +22,7 @@ import {
   waterWords,
   wholeMinutes,
 } from "../core/plunge";
+import { dayName } from "../core/days";
 import { clearPlunge, finishPlunge, startPlunge, typedPlungeIdentity, useClock, useRunningPlunge } from "./plunge-store";
 import { ScoreScale } from "./score-scale";
 
@@ -36,12 +37,25 @@ const HOME = "/personal/m/health";
  *
  * The timer is kept on the phone (`plunge-store.ts`): leave the page, lock the
  * phone or reload, and it is still counting from when it started.
+ *
+ * For an earlier day (H2, from Today's day switcher), only typed in: the
+ * plunge goes on that day, and Save goes back to it.
  */
-export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: number | null; typed: boolean }) {
+export function PlungeTimer({
+  lastWaterF,
+  typed: startTyped,
+  day,
+}: {
+  lastWaterF: number | null;
+  typed: boolean;
+  /** An earlier day being filled in; null for now. */
+  day: string | null;
+}) {
   const router = useRouter();
   const running = useRunningPlunge();
   const now = useClock();
-  const [typed, setTyped] = useState(startTyped && !running);
+  const [typed, setTyped] = useState((startTyped && !running) || day !== null);
+  const home = day === null ? HOME : `${HOME}?day=${day}`;
   const [water, setWater] = useState(lastWaterF === null ? "" : String(lastWaterF));
   const [minutes, setMinutes] = useState("");
   const [seconds, setSeconds] = useState("");
@@ -82,7 +96,7 @@ export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: num
     startPlunge(waterValue === "" || waterValue === null ? null : waterValue);
   }
 
-  function save(input: { id: string; startedAt: string; seconds: number; waterF: number | null }) {
+  function save(input: { id: string; startedAt: string; seconds: number; waterF: number | null; takenOn?: string }) {
     startTransition(async () => {
       const outcome = await logPlungeAction({ ...input, feelAfter: feel });
       if ("error" in outcome) {
@@ -91,7 +105,8 @@ export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: num
       }
       if (!typed) clearPlunge();
       toast.success(`Plunge kept: ${plungeWords(input.seconds)}${input.waterF === null ? "" : ` in ${waterWords(input.waterF)}`}.`);
-      router.push(HOME);
+      // A typed plunge for an earlier day goes back to that day; a timed one is today's.
+      router.push(input.takenOn ? `${HOME}?day=${input.takenOn}` : HOME);
     });
   }
 
@@ -116,12 +131,17 @@ export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: num
     const total = typedSeconds(minutes, seconds);
     if (total === null || !waterOk) return;
     typedIdentity.current ??= typedPlungeIdentity();
-    save({ ...typedIdentity.current, seconds: total, waterF: waterValue === "" ? null : waterValue });
+    save({
+      ...typedIdentity.current,
+      seconds: total,
+      waterF: waterValue === "" ? null : waterValue,
+      ...(day === null ? {} : { takenOn: day }),
+    });
   }
 
   const back = (
     <Button asChild variant="ghost" size="sm" className="-ml-2">
-      <Link href={HOME}>
+      <Link href={home}>
         <ArrowLeft aria-hidden /> Health
       </Link>
     </Button>
@@ -210,13 +230,16 @@ export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: num
     );
   }
 
-  // Typed in: a plunge timed some other way.
+  // Typed in: a plunge timed some other way, or one on an earlier day.
   if (typed) {
     const total = typedSeconds(minutes, seconds);
     return (
       <div className="mx-auto w-full max-w-md space-y-5">
         {back}
-        <h1 className="font-heading text-2xl font-medium tracking-heading">Type in a plunge</h1>
+        <div className="space-y-1">
+          <h1 className="font-heading text-2xl font-medium tracking-heading">Type in a plunge</h1>
+          {day !== null && <p className="text-muted-foreground">{`For ${dayName(day)}`}</p>}
+        </div>
         <div className="flex items-end gap-3">
           <div className="space-y-1">
             <Label htmlFor="minutes">Minutes</Label>
@@ -236,9 +259,11 @@ export function PlungeTimer({ lastWaterF, typed: startTyped }: { lastWaterF: num
           <Button className="h-12 flex-1 text-base" onClick={saveTyped} disabled={pending || total === null || !waterOk}>
             {pending ? "Saving…" : "Save"}
           </Button>
-          <Button variant="outline" className="h-12" onClick={() => setTyped(false)} disabled={pending}>
-            Use the timer
-          </Button>
+          {day === null && (
+            <Button variant="outline" className="h-12" onClick={() => setTyped(false)} disabled={pending}>
+              Use the timer
+            </Button>
+          )}
         </div>
       </div>
     );

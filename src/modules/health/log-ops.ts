@@ -33,7 +33,9 @@ export async function logPlunge(tx: Tx, ctx: TenantContext, input: PlungeInput, 
   if (startedAt.getTime() > now.getTime() + 60_000 || startedAt.getTime() < now.getTime() - PLUNGE_BACK_DAYS * 86_400_000) {
     throw new HealthError("INVALID");
   }
-  const takenOn = dateInTimezone(startedAt, ctx.tenant.timezone);
+  // Typed in for an earlier day, it goes on that day (the action checked the
+  // day can be filled in); otherwise on the day it started.
+  const takenOn = input.takenOn ?? dateInTimezone(startedAt, ctx.tenant.timezone);
   const [row] = await tx
     .insert(t.healthPlunges)
     .values({
@@ -165,13 +167,16 @@ export async function sleepBetween(tx: Tx, tenantId: string, from: string, to: s
     .orderBy(t.healthSleep.wokeOn);
 }
 
-/** The latest night kept: a new morning's form starts from its times. */
-export async function lastSleep(tx: Tx, tenantId: string): Promise<SleepRow | null> {
+/**
+ * The latest night kept on or before a morning: a new morning's form starts
+ * from its times, and it is that morning's own night when it was kept then.
+ */
+export async function lastSleep(tx: Tx, tenantId: string, onOrBefore: string): Promise<SleepRow | null> {
   const t = schema;
   const [row] = await tx
     .select(sleepColumns)
     .from(t.healthSleep)
-    .where(eq(t.healthSleep.tenantId, tenantId))
+    .where(and(eq(t.healthSleep.tenantId, tenantId), lte(t.healthSleep.wokeOn, onOrBefore)))
     .orderBy(desc(t.healthSleep.wokeOn))
     .limit(1);
   return row ?? null;

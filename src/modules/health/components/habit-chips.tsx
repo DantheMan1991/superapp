@@ -29,13 +29,17 @@ function marksKey(marks: Record<string, number | null>): string {
  * moment they differ from the ones last seen.
  */
 export function HabitChips({
-  today,
+  day,
+  asToday,
   habits,
   done,
 }: {
-  today: string;
+  /** Today, or a day being filled in (H2). */
+  day: string;
+  /** The page shows today (not a day being filled in). */
+  asToday: boolean;
   habits: { id: string; name: string; unit: string | null }[];
-  /** Today's marks: habit id to its amount (null when it is not counted). */
+  /** That day's marks: habit id to its amount (null when it is not counted). */
   done: Record<string, number | null>;
 }) {
   const [marks, setMarks] = useState(done);
@@ -56,7 +60,7 @@ export function HabitChips({
     setMarks(next);
     setAsking(null);
     startTransition(async () => {
-      const outcome = await setHabitDayAction({ habitId, day: today, done: isDone, amount: value });
+      const outcome = await setHabitDayAction({ habitId, day, done: isDone, amount: value, asToday });
       if ("error" in outcome) {
         toast.error(outcome.error);
         setMarks(before);
@@ -147,7 +151,9 @@ export function HabitChips({
               </Button>
             </form>
           )}
-          <p className="text-xs text-muted-foreground">Tap one to mark it done today. Tap it again to undo.</p>
+          <p className="text-xs text-muted-foreground">
+            {asToday ? "Tap one to mark it done today. Tap it again to undo." : "Tap one to mark it done that day. Tap it again to undo."}
+          </p>
         </>
       )}
     </section>

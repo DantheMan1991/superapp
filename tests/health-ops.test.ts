@@ -28,7 +28,7 @@ import {
   saveSleep,
   sleepBetween,
 } from "../src/modules/health/log-ops";
-import { ownRows, todayData } from "../src/modules/health/progress-ops";
+import { dayData, ownRows } from "../src/modules/health/progress-ops";
 import type { ProgramInput } from "../src/modules/fitness/core/program";
 import { beginSession, finishExercise, finishSession, recordSet } from "../src/modules/fitness/core/session";
 import { loadProgram, saveProgram, sessionPlan } from "../src/modules/fitness/program-ops";
@@ -132,6 +132,9 @@ d("health (db)", () => {
       await tx.delete(schema.healthPlunges).where(eq(schema.healthPlunges.tenantId, tenant.id));
       await tx.delete(schema.healthSleep).where(eq(schema.healthSleep.tenantId, tenant.id));
       await tx.delete(schema.healthHabits).where(eq(schema.healthHabits.tenantId, tenant.id));
+      await tx.delete(schema.healthWeighins).where(eq(schema.healthWeighins.tenantId, tenant.id));
+      await tx.delete(schema.healthWeightGoals).where(eq(schema.healthWeightGoals.tenantId, tenant.id));
+      await tx.delete(schema.healthMeasures).where(eq(schema.healthMeasures.tenantId, tenant.id));
     });
   });
 
@@ -213,14 +216,17 @@ d("health (db)", () => {
       expect(await inTenant((tx) => sleepBetween(tx, tenant.id, "2026-01-01", TODAY))).toHaveLength(1);
     });
 
-    it("finds the latest night kept, and removes one", async () => {
+    it("finds the latest night kept on or before a morning, and removes one", async () => {
       await inTenant(async (tx) => {
         await saveSleep(tx, ctx, night("2026-09-30"), NOW);
         await saveSleep(tx, ctx, night("2026-10-01", "23:00"), NOW);
       });
-      expect(await inTenant((tx) => lastSleep(tx, tenant.id))).toMatchObject({ wokeOn: "2026-10-01", minutes: 450 });
+      expect(await inTenant((tx) => lastSleep(tx, tenant.id, TODAY))).toMatchObject({ wokeOn: "2026-10-01", minutes: 450 });
+      // A day being filled in starts from the night before it, not a later one (H2).
+      expect(await inTenant((tx) => lastSleep(tx, tenant.id, "2026-09-30"))).toMatchObject({ wokeOn: "2026-09-30" });
+      expect(await inTenant((tx) => lastSleep(tx, tenant.id, "2026-09-29"))).toBeNull();
       await inTenant((tx) => deleteSleep(tx, tenant.id, "2026-10-01"));
-      expect(await inTenant((tx) => lastSleep(tx, tenant.id))).toMatchObject({ wokeOn: "2026-09-30", minutes: 480 });
+      expect(await inTenant((tx) => lastSleep(tx, tenant.id, TODAY))).toMatchObject({ wokeOn: "2026-09-30", minutes: 480 });
     });
   });
 
@@ -292,7 +298,7 @@ d("health (db)", () => {
   describe("Today and Progress", () => {
     it("Today has this morning's night or the last one kept, today's plunges against the week's, and today's marks", async () => {
       await inTenant((tx) => saveSleep(tx, ctx, night("2026-09-30", "23:15", "06:45"), NOW));
-      const before = await inTenant((tx) => todayData(tx, tenant.id, TODAY));
+      const before = await inTenant((tx) => dayData(tx, tenant.id, TODAY));
       expect(before.night).toBeNull();
       expect(before.lastNight).toMatchObject({ wokeOn: "2026-09-30", bedTime: "23:15:00" });
 
@@ -310,7 +316,7 @@ d("health (db)", () => {
         await setHabitDay(tx, tenant.id, { habitId: stretch.id, day: "2026-10-01", done: true, amount: null }, NOW);
       });
 
-      const today = await inTenant((tx) => todayData(tx, tenant.id, TODAY));
+      const today = await inTenant((tx) => dayData(tx, tenant.id, TODAY));
       expect(today.night).toMatchObject({ wokeOn: TODAY, minutes: 480, rested: 8 });
       expect(today.lastNight).toMatchObject({ wokeOn: TODAY });
       expect(today.plunges.map((p) => p.startedAt.toISOString())).toEqual([
@@ -319,7 +325,16 @@ d("health (db)", () => {
       ]);
       expect(today.plungesThisWeek).toBe(3);
       expect(today.habits.map((h) => h.name)).toEqual(["Sauna", "Stretch"]);
-      expect(today.doneToday).toEqual([{ habitId: sauna.id, doneOn: TODAY, amount: 20 }]);
+      expect(today.doneThatDay).toEqual([{ habitId: sauna.id, doneOn: TODAY, amount: 20 }]);
+
+      // A day being filled in (H2): its own night (none), the last one before it, its plunges
+      // against the seven days ending it (the 25th and 26th), and its marks.
+      const oct1 = await inTenant((tx) => dayData(tx, tenant.id, "2026-10-01"));
+      expect(oct1.night).toBeNull();
+      expect(oct1.lastNight).toMatchObject({ wokeOn: "2026-09-30" });
+      expect(oct1.plunges).toEqual([]);
+      expect(oct1.plungesThisWeek).toBe(2);
+      expect(oct1.doneThatDay).toEqual([{ habitId: stretch.id, doneOn: "2026-10-01", amount: null }]);
     });
 
     it("Progress adds up four weeks of what is kept", async () => {
@@ -341,7 +356,10 @@ d("health (db)", () => {
         "health.plunges": [0, 0, 0, 2],
         "health.plunge-time": [null, null, null, 180],
         [`health.habit.${walk.id}`]: [0, 0, 0, 30],
+        // The body comes first (H2): no weigh-ins, so no weeks.
+        "health.weight": [null, null, null, null],
       });
+      expect(rows[0].key).toBe("health.weight");
     });
   });
 

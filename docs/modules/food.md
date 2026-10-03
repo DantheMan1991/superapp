@@ -82,8 +82,12 @@ snacks.
   `tests/isolation/food-eating.test.ts`.
 - `DayWatch` moved to `src/components/app/day-watch.tsx`, shared with Health:
   Today refreshes itself when the day has moved on.
-- **Applied to dev only**: `0443`-`0445` and the seed (the food list, and
-  Food's catalogue line, which mentions eating now). Production on his word.
+- **On dev and production, before the merge.** Production's ledger was read
+  first (it ended at `0442`, with exactly `0443`-`0445` pending); they went on
+  at the founder's word, `db:verify-rls` is green on both databases (266
+  tables), and the recipe key reads `ON DELETE SET NULL (recipe_id)` in
+  `pg_constraint`. The seed loaded the 5,431 foods and Food's catalogue line
+  on both, and `db:verify-modules` is green on both.
 - **Driven on dev (a production build, his space).** Targets set (a number
   out of range refused, "2,200" with its comma taken); a banana, Greek yogurt
   by the cup and coffee logged to breakfast, the coffee undone; a drawn
@@ -662,9 +666,6 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 - **The cook history is a count and a day.** Undo works right after logging;
   older logs cannot be seen or changed. What was EATEN is D4a's log, which
   cook mode's last screen opens (Log what you ate).
-- **D4a: production.** `0443`-`0445` and the seed (the food list, and the
-  catalogue line) are on dev only; on his word, before the merge: read the
-  prod ledger, migrate, `db:verify-rls`, `db:seed`, `db:verify-modules`.
 - **No brands or barcodes.** FNDDS is everyday foods. USDA's branded list
   (an API key, the search sent to USDA) or Open Food Facts (ODbL) would add
   packaged foods and a barcode scan; neither is chosen.

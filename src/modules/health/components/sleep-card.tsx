@@ -25,7 +25,8 @@ function nightKey(night: Night | null): string {
  * LAST NIGHT'S SLEEP on Today (H1; the founder's call: bed and wake times,
  * filled in from the night before, so most mornings it is one tap; the hours
  * worked out; how rested, 0 to 10). Kept, it reads "7 h 20 min · rested 8 of
- * 10" with Change; not yet, it is the form, already filled in.
+ * 10" with Change; not yet, it is the form, already filled in. On a day being
+ * filled in (H2), it is the night before that morning.
  *
  * The card shows the night it just saved at once. A server action answers
  * before the page it re-rendered has streamed in (seconds, on a slow line),
@@ -35,12 +36,19 @@ function nightKey(night: Night | null): string {
  * differs from the one last seen (the save landing, a new day, another tab).
  */
 export function SleepCard({
-  today,
+  day,
+  asToday,
+  title,
   night,
   start,
 }: {
-  today: string;
-  /** This morning's night, when it has been kept. */
+  /** The morning the night ended: today, or a day being filled in. */
+  day: string;
+  /** The page shows today (not a day being filled in). */
+  asToday: boolean;
+  /** "Last night's sleep", or "The night before Thursday, Oct 2". */
+  title: string;
+  /** That morning's night, when it has been kept. */
   night: Night | null;
   /** The times the form starts from: this morning's, the last night kept, or a usual night. */
   start: { bedTime: string; wokeTime: string; rested: number | null };
@@ -62,7 +70,7 @@ export function SleepCard({
     if (minutes === null) return;
     const kept = { bedTime, wokeTime, minutes, rested };
     startTransition(async () => {
-      const outcome = await saveSleepAction({ wokeOn: today, bedTime, wokeTime, rested });
+      const outcome = await saveSleepAction({ wokeOn: day, bedTime, wokeTime, rested, asToday });
       if ("error" in outcome) {
         toast.error(outcome.error);
         return;
@@ -74,7 +82,7 @@ export function SleepCard({
 
   function remove() {
     startTransition(async () => {
-      const outcome = await deleteSleepAction({ wokeOn: today });
+      const outcome = await deleteSleepAction({ wokeOn: day });
       if ("error" in outcome) {
         toast.error(outcome.error);
         return;
@@ -88,7 +96,7 @@ export function SleepCard({
     <section className="space-y-3 rounded-2xl bg-card px-4 py-3 shadow-elevation-1">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 font-medium">
-          <Moon className="size-4 text-module-accent" aria-hidden /> Last night&apos;s sleep
+          <Moon className="size-4 text-module-accent" aria-hidden /> {title}
         </h2>
         {shown && !editing && (
           <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>

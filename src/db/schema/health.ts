@@ -6,9 +6,11 @@
  *
  * H1 logs cold plunges (timed on the phone), sleep (bed and wake times, how
  * rested) and the person's own habits (a sauna, stretching, a supplement).
- * Workouts already logs the workouts; the Progress page reads them through a
- * slot Workouts fills (`src/lib/progress-sources`), never from here. Every table
- * is an ordinary tenant table in a PERSONAL space; RLS knows nothing about that.
+ * H2 adds the body: weigh-ins, a goal weight, and the tape measures the person
+ * chooses. Workouts already logs the workouts; the Progress page reads them
+ * through a slot Workouts fills (`src/lib/progress-sources`), never from here.
+ * Every table is an ordinary tenant table in a PERSONAL space; RLS knows
+ * nothing about that.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -147,7 +149,115 @@ export const healthHabitLogs = pgTable(
   ],
 );
 
+/**
+ * A weigh-in (H2, the founder's calls 2026-10-03): one a day, typed in, kept
+ * in kilograms whatever the person reads (`core/body.ts` turns pounds both
+ * ways), so a later setting for kilograms changes words, not rows. Read as a
+ * trend through the days, never one reading on its own.
+ */
+export const healthWeighins = pgTable(
+  "health_weighins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The space's own day. */
+    weighedOn: date("weighed_on").notNull(),
+    kg: doublePrecision("kg").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("health_weighins_tenant_day_idx").on(t.tenantId, t.weighedOn),
+    check("health_weighins_kg_range", sql`${t.kg} between 20 and 320`),
+  ],
+);
+
+/**
+ * The weight the person is working towards, and about how fast (H2, the
+ * founder's call: a goal weight and a pace). One per space. Whether it is to
+ * lose or to gain is never kept: it is wherever the goal is from the trend.
+ */
+export const healthWeightGoals = pgTable(
+  "health_weight_goals",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    goalKg: doublePrecision("goal_kg").notNull(),
+    /** About how much a week, either way: 0.1 to 1 kg (a quarter pound to two). */
+    paceKg: doublePrecision("pace_kg").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("health_weight_goals_goal_range", sql`${t.goalKg} between 20 and 320`),
+    check("health_weight_goals_pace_range", sql`${t.paceKg} between 0.1 and 1`),
+  ],
+);
+
+/**
+ * A tape measure of the person's own (H2, the founder's call: the waist, and
+ * the others they pick): a name, and which way is better for it, or neither
+ * (an arm can be meant to grow).
+ */
+export const healthMeasures = pgTable(
+  "health_measures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** "smaller" or "bigger"; null when neither is better. */
+    better: text("better"),
+    /** Where it sits on Body, the Measure page and Progress. */
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("health_measures_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("health_measures_tenant_position_idx").on(t.tenantId, t.position),
+    check("health_measures_name_length", sql`char_length(${t.name}) between 1 and 40`),
+    check("health_measures_better_value", sql`${t.better} is null or ${t.better} in ('smaller', 'bigger')`),
+  ],
+);
+
+/** A tape measure taken on a day: once a day each, in centimetres whatever the person reads. */
+export const healthMeasurements = pgTable(
+  "health_measurements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    measureId: uuid("measure_id").notNull(),
+    /** The space's own day. */
+    measuredOn: date("measured_on").notNull(),
+    cm: doublePrecision("cm").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("health_measurements_tenant_measure_day_idx").on(t.tenantId, t.measureId, t.measuredOn),
+    index("health_measurements_tenant_day_idx").on(t.tenantId, t.measuredOn),
+    foreignKey({
+      name: "health_measurements_measure_fk",
+      columns: [t.tenantId, t.measureId],
+      foreignColumns: [healthMeasures.tenantId, healthMeasures.id],
+    }).onDelete("cascade"),
+    check("health_measurements_cm_range", sql`${t.cm} between 1 and 400`),
+  ],
+);
+
 export type HealthPlunge = typeof healthPlunges.$inferSelect;
 export type HealthSleep = typeof healthSleep.$inferSelect;
 export type HealthHabit = typeof healthHabits.$inferSelect;
 export type HealthHabitLog = typeof healthHabitLogs.$inferSelect;
+export type HealthWeighin = typeof healthWeighins.$inferSelect;
+export type HealthWeightGoal = typeof healthWeightGoals.$inferSelect;
+export type HealthMeasure = typeof healthMeasures.$inferSelect;
+export type HealthMeasurement = typeof healthMeasurements.$inferSelect;

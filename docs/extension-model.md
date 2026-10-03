@@ -289,7 +289,11 @@ transaction of its own, because a failed query aborts the transaction it ran
 in, and a failure costs only that tool's rows
 ([ADR 0125](decisions/0125-health-reads-progress-from-the-tools-through-a-slot-a-week-at-a-time.md)).
 Food filled it second (D4a, 2026-10-03): its eating log's calories and macros
-a day, and its own card, with no change to Health but a registry line.
+a day, and its own card, with no change to Health but a registry line. The
+contract gained a format with Health's own weight and tape measures (H2,
+2026-10-03): `measure`, a level whose bars span the weeks' range rather than
+starting at zero, which any source may use
+([ADR 0127](decisions/0127-weight-is-read-as-a-trend-and-kept-in-kilograms.md)).
 
 ---
 

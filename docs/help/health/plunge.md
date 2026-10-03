@@ -4,7 +4,7 @@
 > **Route:** /personal/m/health/plunge
 > **Order:** 20
 
-On Health, click {button:Start the timer|primary|play} under `Cold plunge`. The timer is kept on this phone: lock the phone, open another app or reload the page, and it is still counting from when you started. To log a plunge you timed some other way, click {button:Type one in|outline} instead.
+On Health, click {button:Start the timer|primary|play} under `Cold plunge`. The timer is kept on this phone: lock the phone, open another app or reload the page, and it is still counting from when you started. To log a plunge you timed some other way, click {button:Type one in|outline} instead. For a plunge on an earlier day, step back to that day on Health and click {button:Type one in|outline} there.
 
 ## What you see
 
@@ -39,12 +39,12 @@ There is no back button while you are in the water. If you leave the page anyway
 For a plunge you timed with another clock, or forgot to time.
 
 - **{button:Health|ghost|arrow-left}.** Back to Health, nothing saved.
-- **`Type in a plunge`**, the title.
+- **`Type in a plunge`**, the title. Opened from an earlier day on Health, the day is under it, such as `For Friday, Oct 2`.
 - **`Minutes`** and **`Seconds`.** Whole numbers. Leave one empty for none, so 45 seconds is `Seconds` 45 alone. A plunge is up to 60 minutes, and seconds go from 0 to 59. Anything else shows `Up to 60 minutes, and seconds 0 to 59.` in red.
 - **`Water temperature, °F`.** The same as above: optional, from 28 to 110.
 - **`How did you feel after?`**, from `0` to `10`, optional.
-- **{button:Save|primary}.** Keeps the plunge as today's, at the time you save it. It stays grayed out until the time is right. You see `Plunge kept: 2 min in 50°F.` and land back on Health.
-- **{button:Use the timer|outline}.** Back to the timer.
+- **{button:Save|primary}.** Keeps the plunge as today's, or on the day under the title. It stays grayed out until the time is right. You see `Plunge kept: 2 min in 50°F.` and land back on Health, on that day.
+- **{button:Use the timer|outline}.** Back to the timer. Not on an earlier day: the timer only times a plunge now.
 
 ## How to time a plunge
 
@@ -64,12 +64,12 @@ For a plunge you timed with another clock, or forgot to time.
 | `Up to 60 minutes, and seconds 0 to 59.` | The typed time is not one Health keeps. Fix the minutes or the seconds. |
 | `The plunge could not be kept. Try again.` | Saving did not work, often because the phone lost its signal. The plunge is still on the screen. Click {button:Save|primary} again. A plunge saved twice is kept once. |
 | `Something in that was not right. Check it and try again.` | Health could not accept the plunge. The usual cause is the phone's clock: check its date and time, then save again. |
+| `You can fill in today and the two weeks before it.` | The day under the title is more than two weeks back now. Go back to Health and choose the day again. |
 
 ## Not on this page
 
 - **Plunges in Celsius.** The temperature is in °F. Ask us if you want °C.
 - **A countdown to a target time.** The timer counts up. Ask us if you want it to count down to a time you choose.
-- **Typing in a plunge from an earlier day.** A typed plunge is kept as today's.
 - **Spoken minutes.** The timer sounds a tone; it does not speak.
 
 ## Who can do what

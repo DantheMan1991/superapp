@@ -57,11 +57,25 @@ export function valueWords(value: number, format: ProgressFormat, unit?: string)
       if (value >= 10) return `${Math.round(value).toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`;
       return amountWords(Math.round(value * 10) / 10, unit ?? null);
     }
+    case "measure":
+      // A level (H2): a weight to a tenth, as the scale reads it ("184.6 lb"); a
+      // tape to a hundredth, the zeros left off, as Body writes it ("36.25 in").
+      return unit === "lb"
+        ? `${(Math.round(value * 10) / 10).toFixed(1)} lb`
+        : `${String(Math.round(value * 100) / 100)}${unit ? ` ${unit}` : ""}`;
   }
 }
 
 /** The smallest change worth calling a change, per format: below it, "about the same". */
-const NOTICEABLE: Record<ProgressFormat, number> = { days: 1, minutes: 10, seconds: 15, score: 0.3, count: 1, amount: 0.0001 };
+const NOTICEABLE: Record<ProgressFormat, number> = {
+  days: 1,
+  minutes: 10,
+  seconds: 15,
+  score: 0.3,
+  count: 1,
+  amount: 0.0001,
+  measure: 0.1,
+};
 
 /**
  * An amount's smallest change depends on what it counts: fifty calories or
@@ -69,8 +83,16 @@ const NOTICEABLE: Record<ProgressFormat, number> = { days: 1, minutes: 10, secon
  */
 const NOTICEABLE_BY_UNIT: Record<string, number> = { kcal: 50, g: 5, mg: 100 };
 
+/**
+ * A level's smallest change, by what it measures (H2): a weight's trend moves
+ * less than a third of a pound in a week from noise alone, and a tape read
+ * twice can differ by a fifth of an inch.
+ */
+const MEASURE_NOTICEABLE_BY_UNIT: Record<string, number> = { lb: 0.3, in: 0.2 };
+
 function noticeable(row: ProgressRow): number {
   if (row.format === "amount" && row.unit && row.unit in NOTICEABLE_BY_UNIT) return NOTICEABLE_BY_UNIT[row.unit];
+  if (row.format === "measure" && row.unit && row.unit in MEASURE_NOTICEABLE_BY_UNIT) return MEASURE_NOTICEABLE_BY_UNIT[row.unit];
   return NOTICEABLE[row.format];
 }
 
@@ -119,9 +141,30 @@ export function readRow(row: ProgressRow): RowReading {
   };
 }
 
-/** Each value as a share of the row's largest, for the bars: 0 to 1, null for none. */
-export function barHeights(values: readonly (number | null)[]): (number | null)[] {
-  const top = Math.max(0, ...values.filter((v): v is number => v !== null));
+/** The least a level's bar is drawn at, so its lowest week still shows. */
+const LEVEL_FLOOR = 0.2;
+
+/**
+ * The least range a level's bars span, by unit: drawn across the weeks' own
+ * range alone, a pound lost read as a bar five times shorter (the drive,
+ * 2026-10-03). Five pounds, two inches.
+ */
+const LEVEL_SPAN_BY_UNIT: Record<string, number> = { lb: 5, in: 2 };
+
+/**
+ * Each value as a share of the row's largest, for the bars: 0 to 1, null for
+ * none. A level (`measure`) is drawn across the weeks' range instead (at
+ * least its unit's span), its top week full and the floor of the span at a
+ * fifth, since 184 lb against 186 lb from zero is two bars the same (H2).
+ */
+export function barHeights(values: readonly (number | null)[], format?: ProgressFormat, unit?: string): (number | null)[] {
+  const present = values.filter((v): v is number => v !== null);
+  if (format === "measure") {
+    const high = Math.max(...present);
+    const span = Math.max(high - Math.min(...present), (unit && LEVEL_SPAN_BY_UNIT[unit]) || 0);
+    return values.map((v) => (v === null ? null : span === 0 ? 1 : LEVEL_FLOOR + ((1 - LEVEL_FLOOR) * (v - (high - span))) / span));
+  }
+  const top = Math.max(0, ...present);
   return values.map((v) => (v === null ? null : top === 0 ? 0 : v / top));
 }
 

@@ -87,9 +87,10 @@ export default async function PersonalHomePage() {
                 week&apos;s meals and the shopping list.
               </p>
               <p>
-                Health keeps your cold plunges, your sleep and your own habits, and
-                shows your progress across them and your workouts, week by week. Each
-                tool appears on this page and in the sidebar as soon as it is ready.
+                Health keeps your sleep, your weight and tape measures, your cold
+                plunges and your own habits, and shows your progress across them, your
+                workouts and what you eat, week by week. Each tool appears on this page
+                and in the sidebar as soon as it is ready.
               </p>
             </>
           ) : (

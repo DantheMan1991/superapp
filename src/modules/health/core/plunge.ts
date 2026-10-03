@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dayField } from "./days";
 
 /**
  * A COLD PLUNGE (H1, docs/modules/health.md; the founder's call): timed on the
@@ -25,6 +26,11 @@ export const plungeInputSchema = z.object({
   seconds: z.number().int().min(1).max(PLUNGE_SECONDS_MAX),
   waterF: z.number().min(WATER_F_MIN).max(WATER_F_MAX).nullable(),
   feelAfter: z.number().int().min(0).max(10).nullable(),
+  /**
+   * A plunge typed in for an earlier day (H2): the day it goes on. Without
+   * it, the day is the one it started on (`startedAt`, the time typed in).
+   */
+  takenOn: dayField.optional(),
 });
 
 export type PlungeInput = z.infer<typeof plungeInputSchema>;

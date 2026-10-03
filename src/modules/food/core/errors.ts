@@ -21,6 +21,12 @@ export type FoodErrorCode =
   | "READ_FAILED"
   | "PHOTO"
   | "STORAGE"
+  | "FOOD_MISSING"
+  | "PORTION"
+  | "EATEN_MISSING"
+  | "DAY"
+  | "PLATE_EMPTY"
+  | "PLATE_FAILED"
   | "INVALID";
 
 const MESSAGES: Record<FoodErrorCode, string> = {
@@ -40,6 +46,12 @@ const MESSAGES: Record<FoodErrorCode, string> = {
   READ_FAILED: "The recipe could not be read this time. Try again, or type it in.",
   PHOTO: "That photo could not be used. Try another one, a JPEG or PNG.",
   STORAGE: "Photos cannot be kept right now. Save the recipe without one, and add it later.",
+  FOOD_MISSING: "That food is not on the list any more. Search for it again.",
+  PORTION: "That amount is not one this food can be logged in. Choose another.",
+  EATEN_MISSING: "That is not in your log any more. Reload the page.",
+  DAY: "You can log today and the two weeks before it.",
+  PLATE_EMPTY: "No food was found in that photo. Try another one, or search for the foods.",
+  PLATE_FAILED: "The photo could not be read this time. Try again, or search for the foods.",
   INVALID: "Something in that was not right. Check it and try again.",
 };
 

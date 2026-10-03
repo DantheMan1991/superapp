@@ -31,7 +31,7 @@ export function DeleteRecipeButton({ recipeId, title }: { recipeId: string; titl
       }
       setOpen(false);
       toast.success("Recipe deleted");
-      router.push("/personal/m/food");
+      router.push("/personal/m/food/recipes");
       router.refresh();
     });
   }

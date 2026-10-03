@@ -11,7 +11,7 @@ import { todayInTimezone } from "@/lib/timezone";
 import { clockOf, USUAL_NIGHT } from "./core/sleep";
 import { HEALTH_HOME } from "./log-ops";
 import { todayData } from "./progress-ops";
-import { DayWatch } from "./components/day-watch";
+import { DayWatch } from "@/components/app/day-watch";
 import { HabitChips } from "./components/habit-chips";
 import { PlungeCard } from "./components/plunge-card";
 import { SleepCard } from "./components/sleep-card";

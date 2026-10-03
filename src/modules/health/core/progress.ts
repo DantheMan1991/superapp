@@ -51,13 +51,28 @@ export function valueWords(value: number, format: ProgressFormat, unit?: string)
       return (Math.round(value * 10) / 10).toFixed(1);
     case "count":
       return String(Math.round(value));
-    case "amount":
+    case "amount": {
+      // Ten and up reads whole, with its thousands marked, as Food's Today writes them:
+      // "2,010 kcal", "35 g" (D4a). Below ten, a tenth, so a small amount is not nothing.
+      if (value >= 10) return `${Math.round(value).toLocaleString("en-US")}${unit ? ` ${unit}` : ""}`;
       return amountWords(Math.round(value * 10) / 10, unit ?? null);
+    }
   }
 }
 
 /** The smallest change worth calling a change, per format: below it, "about the same". */
 const NOTICEABLE: Record<ProgressFormat, number> = { days: 1, minutes: 10, seconds: 15, score: 0.3, count: 1, amount: 0.0001 };
+
+/**
+ * An amount's smallest change depends on what it counts: fifty calories or
+ * five grams a day is noise, where any change in a habit's minutes is not.
+ */
+const NOTICEABLE_BY_UNIT: Record<string, number> = { kcal: 50, g: 5, mg: 100 };
+
+function noticeable(row: ProgressRow): number {
+  if (row.format === "amount" && row.unit && row.unit in NOTICEABLE_BY_UNIT) return NOTICEABLE_BY_UNIT[row.unit];
+  return NOTICEABLE[row.format];
+}
 
 /** A week's value on its own, where a score needs its scale: "6.5 of 10", "7 h 12 min". */
 export function weekWords(value: number, format: ProgressFormat, unit?: string): string {
@@ -91,7 +106,7 @@ export function readRow(row: ProgressRow): RowReading {
   if (before.length === 0) return { latest: latestWords, change: null, moved: null, direction: null };
   const average = before.reduce((sum, v) => sum + v, 0) / before.length;
   const diff = latest - average;
-  if (Math.abs(diff) < NOTICEABLE[row.format]) {
+  if (Math.abs(diff) < noticeable(row)) {
     return { latest: latestWords, change: "about the same as the weeks before", moved: null, direction: "same" };
   }
   const up = diff > 0;

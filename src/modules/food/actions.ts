@@ -11,7 +11,17 @@ import { recipeInputSchema } from "./core/recipe";
 import { discardImport, readLink, readPhotos, readText, takeImport, type ReadResult } from "./import-ops";
 import { discardPhoto, storeRecipePhoto, type StoredPhoto } from "./photo-ops";
 import { logCook, undoCook } from "./cook-ops";
-import { FOOD_HOME, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
+import { FOOD_HOME, FOOD_RECIPES, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
+import {
+  changeEatenSchema,
+  logFoodSchema,
+  logPlateSchema,
+  logRecipeSchema,
+  targetsSchema,
+} from "./core/eating";
+import { plateRequestSchema } from "./core/plate";
+import { changeEaten, deleteEaten, logFood, logPlate, logRecipe, setTargets } from "./eating-ops";
+import { readPlate, type PlateDraftItem } from "./plate-ops";
 
 /**
  * FOOD'S SERVER ACTIONS. Each one: the personal space's own door
@@ -34,8 +44,18 @@ function failure(err: unknown, fallback: string): { error: string } {
   return { error: fallback };
 }
 
-function readOutcome(result: ReadResult): Outcome<{ importId: string }> & { importId?: string } {
+/**
+ * The Food pages an action can change. Today is Food's front page since D4a
+ * and the recipes moved to their own; an action re-renders the page it was
+ * called from only when that page is named here.
+ */
+function refreshFood() {
   revalidatePath(FOOD_HOME);
+  revalidatePath(FOOD_RECIPES);
+}
+
+function readOutcome(result: ReadResult): Outcome<{ importId: string }> & { importId?: string } {
+  refreshFood();
   return "error" in result ? result : { ok: true, importId: result.importId };
 }
 
@@ -136,7 +156,7 @@ export async function saveRecipeAction(input: unknown): Promise<Outcome<{ recipe
     );
     stored = null;
     for (const pathname of letGo) await discardPhoto(pathname);
-    revalidatePath(FOOD_HOME);
+    refreshFood();
     return { ok: true, recipeId: id };
   } catch (err) {
     // No row vouches for it: the new photo goes too.
@@ -156,7 +176,7 @@ export async function deleteRecipeAction(input: unknown): Promise<Outcome> {
       role: ctx.role,
     });
     await discardPhoto(photo);
-    revalidatePath(FOOD_HOME);
+    refreshFood();
     return { ok: true };
   } catch (err) {
     return failure(err, "The recipe could not be deleted. Try again.");
@@ -174,7 +194,7 @@ export async function discardImportAction(input: unknown): Promise<Outcome> {
       role: ctx.role,
     });
     await discardPhoto(photo);
-    revalidatePath(FOOD_HOME);
+    refreshFood();
     return { ok: true };
   } catch (err) {
     return failure(err, "The draft could not be discarded. Try again.");
@@ -197,7 +217,7 @@ export async function logCookAction(input: unknown): Promise<Outcome<{ madeOn: s
     const parsed = logCookInput.safeParse(input);
     if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
     const { madeOn } = await withTenant(ctx.tenant.id, (tx) => logCook(tx, ctx, parsed.data), { role: ctx.role });
-    revalidatePath(FOOD_HOME);
+    refreshFood();
     revalidatePath(recipeHref(parsed.data.recipeId));
     return { ok: true, madeOn };
   } catch (err) {
@@ -213,10 +233,114 @@ export async function undoCookAction(input: unknown): Promise<Outcome> {
     const parsed = undoCookInput.safeParse(input);
     if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
     await withTenant(ctx.tenant.id, (tx) => undoCook(tx, ctx.tenant.id, parsed.data.cookId), { role: ctx.role });
-    revalidatePath(FOOD_HOME);
+    refreshFood();
     revalidatePath(recipeHref(parsed.data.recipeId));
     return { ok: true };
   } catch (err) {
     return failure(err, "It could not be undone. Try again.");
+  }
+}
+
+/* -- what was eaten (D4a) ------------------------------------------------- */
+
+/** Log a food from the list. Its id is the phone's: an Add sent twice is one row. */
+export async function logFoodAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = logFoodSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => logFood(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be logged. Try again.");
+  }
+}
+
+/** Log a saved recipe by servings. */
+export async function logRecipeAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = logRecipeSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => logRecipe(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be logged. Try again.");
+  }
+}
+
+/**
+ * Read a photo of the plate (D4a): Claude names the foods and their grams,
+ * each is matched on the food list, and the draft comes back to be checked.
+ * Nothing is written, and the photo is kept nowhere. A read takes up to half
+ * a minute; the Log food page sets `maxDuration` for it.
+ */
+export async function readPlateAction(input: unknown): Promise<Outcome<{ items: PlateDraftItem[] }>> {
+  try {
+    const ctx = await gate();
+    const parsed = plateRequestSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("PHOTO")) };
+    return { ok: true, items: await readPlate(ctx, parsed.data.jpeg) };
+  } catch (err) {
+    return failure(err, "The photo could not be read this time. Try again, or search for the foods.");
+  }
+}
+
+/** Log a plate the person checked: all its items, or none. */
+export async function logPlateAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = logPlateSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => logPlate(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be logged. Try again.");
+  }
+}
+
+/** Change how much, or which meal. */
+export async function changeEatenAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = changeEatenSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => changeEaten(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be changed. Try again.");
+  }
+}
+
+const eatenIdInput = z.object({ id: z.string().uuid() });
+
+export async function deleteEatenAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = eatenIdInput.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => deleteEaten(tx, ctx.tenant.id, parsed.data.id), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be removed. Try again.");
+  }
+}
+
+/** The daily targets for calories and protein; either may be cleared. */
+export async function setTargetsAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = targetsSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => setTargets(tx, ctx.tenant.id, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "The targets could not be saved. Try again.");
   }
 }

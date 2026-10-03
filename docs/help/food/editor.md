@@ -14,7 +14,7 @@ You reach this screen three ways. After {button:Read it|primary} on Add a recipe
 - **Name.** What the recipe is called. It is the one thing a recipe must have.
 - **Makes.** How many one batch makes: a number, and the word for what it counts, such as `4` `servings`, `24` `cookies` or `1` `loaf`. With a number and no word, it is servings. The number is what the recipe's page scales from when you change the servings. Leave both empty when the recipe does not say; the recipe then shows as written and does not scale.
 - **Prep (min)**, **Cook (min)** and **Total (min).** Whole minutes, each one optional. When Total is empty, the list shows prep and cook added together.
-- **Tags.** Each tag shows with {button:×|ghost|x} to take it off. Type a new one in **Add a tag** and press Enter, or type a comma; a few at once can be typed with commas between them. Under the box, suggestions to add with one click, such as `+ Dinner`: the tags your recipes already use, or, before you have any, Breakfast, Lunch, Dinner, Snack, Dessert, High protein and Quick. The Food page lets you see one tag's recipes at a time.
+- **Tags.** Each tag shows with {button:×|ghost|x} to take it off. Type a new one in **Add a tag** and press Enter, or type a comma; a few at once can be typed with commas between them. Under the box, suggestions to add with one click, such as `+ Dinner`: the tags your recipes already use, or, before you have any, Breakfast, Lunch, Dinner, Snack, Dessert, High protein and Quick. Your recipes can be shown one tag at a time.
 - **Ingredients.** One per line. A line that ends with a colon, like `For the sauce:`, starts a group and shows as a heading.
   - When the lines are filled in, they show as the app reads them: the amount at the start of each line and its unit in colour, and `does not scale` beside a line with no amount at its start. Click {button:Edit the lines|ghost|pencil} to change them in a box, then {button:Done|outline} to see them read again.
   - An empty recipe opens straight on the box.
@@ -24,7 +24,7 @@ You reach this screen three ways. After {button:Read it|primary} on Add a recipe
 - **Source link.** Where the recipe came from. A recipe read from a link has it already. The recipe's page shows the site's name, and clicking it opens the page.
 - **`Fix these before saving:`** with a list, in red, when something stops the save. Each line is one of the messages below.
 - **The bar at the bottom**, which stays in view as you scroll:
-  - {button:Cancel|ghost}, when typing a recipe in or editing one. It leaves without saving: to the Food page, or back to the recipe.
+  - {button:Cancel|ghost}, when typing a recipe in or editing one. It leaves without saving: to your recipes, or back to the recipe.
   - {button:Discard draft|ghost}, when checking a draft. It asks `Discard this draft?` first. See [Food](overview.md).
   - {button:Save recipe|primary}. Reads `Saving…` while it works, then says `Recipe saved` and opens the recipe.
 
@@ -45,7 +45,7 @@ What scales is read from the start of each ingredient line, every time the recip
 2. Check every ingredient line, its amount and its unit above all. A line marked `does not scale` will stay as it is whatever the servings.
 3. Read the steps in order.
 4. Add or change the photo and the tags if you like.
-5. Click {button:Save recipe|primary}. The draft becomes your recipe and leaves the Food page's Drafts.
+5. Click {button:Save recipe|primary}. The draft becomes your recipe and leaves the Drafts in your recipes.
 
 ## A draft that is still being read, or that failed
 
@@ -76,7 +76,7 @@ What scales is read from the start of each ingredient line, every time the recip
 | `Recipe saved` | The recipe is saved, and its page opens. |
 | `The recipe could not be saved. Try again.` | Something went wrong on the way. Nothing was saved, and a new photo was not kept. Try again. |
 | `That recipe is not here any more.` | The recipe was deleted while you were editing it. |
-| `That draft is not here any more.` | The draft was saved or discarded already, maybe in another tab. Your recipes are on the Food page. |
+| `That draft is not here any more.` | The draft was saved or discarded already, maybe in another tab. Your recipes are under `Recipes` in Food. |
 | `That draft is still being read. Wait for it to finish.` | You tried to discard or save a draft Claude is still reading. |
 | `Something in that was not right. Check it and try again.` | What was sent could not be read as a recipe. Reload the page and try again. |
 

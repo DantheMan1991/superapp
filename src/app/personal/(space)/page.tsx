@@ -82,8 +82,9 @@ export default async function PersonalHomePage() {
                 own, with the exercise videos playing right here.
               </p>
               <p>
-                Food comes with it: your recipes from a link, a photo of a page or
-                typed in, then the week&apos;s meals and the shopping list.
+                Food comes with it: what you eat, counted against your targets, and
+                your recipes from a link, a photo of a page or typed in; then the
+                week&apos;s meals and the shopping list.
               </p>
               <p>
                 Health keeps your cold plunges, your sleep and your own habits, and

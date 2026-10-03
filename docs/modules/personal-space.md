@@ -14,6 +14,14 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-03 — Food logs what was eaten (`claude/food-d4a`)
+
+Food's D4a ([food.md](food.md), ADR 0126) makes what was eaten Food's front
+page, and the space's home says so under what is coming ("what you eat,
+counted against your targets"), as does `docs/help/personal/overview.md` and
+Food's catalogue line. Nothing in the container changed; the progress slot
+carries Food's numbers to Health.
+
 ### 2026-10-02 — The third tool: Health (`claude/health-h1`)
 
 The founder chose Health after Workouts' hands-free merged (#692), and made
@@ -198,8 +206,8 @@ No code yet. This entry is the plan; the slices are below and in
 | P0 | The container | A person has one personal space, can switch to it and back, nobody can be invited into it, support view refuses it, and the isolation suite says so |
 | P1 | The consumer door | A new sign-up is asked "for my business, or just for me", and "just for me" never sees the business setup |
 | F1–F6 | Fitness | See [fitness.md](fitness.md) |
-| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), the week, the shopping list, nutrition. See [food.md](food.md) |
-| H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. H1 built 2026-10-02 from a mockup: cold plunges timed on the phone, sleep as bed and wake times, his own habits, and progress by week across them and his workouts, read through a slot the tools fill (ADR 0125). Eating joins when Food logs it (D4); a watch or ring only if he wears one. See [health.md](health.md) |
+| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), eating logged (D4a, built 2026-10-03: from USDA's food list, a recipe or a photo of the plate, against calorie and protein targets, ADR 0126), the week, the shopping list, a recipe's nutrition worked out. See [food.md](food.md) |
+| H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. H1 built 2026-10-02 from a mockup: cold plunges timed on the phone, sleep as bed and wake times, his own habits, and progress by week across them and his workouts, read through a slot the tools fill (ADR 0125). Eating joined with Food's D4a (2026-10-03); a watch or ring only if he wears one. See [health.md](health.md) |
 
 ### P0 — the container, as built
 

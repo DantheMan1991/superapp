@@ -96,6 +96,7 @@ import {
   Table2,
   Tablet,
   Tag,
+  Target,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -235,6 +236,8 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   table: Table2,
   tablet: Tablet,
   tag: Tag,
+  // Food's Set targets and Change targets on Today (food.md, D4a).
+  target: Target,
   trash: Trash2,
   "trending-up": TrendingUp,
   "trending-down": TrendingDown,

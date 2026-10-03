@@ -16,6 +16,20 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-03 — Food joins the progress slot (`claude/food-d4a`)
+- Food's eating log (D4a, [food.md](food.md)) fills the slot: Progress gains
+  `Calories a day`, `Protein a day`, `Carbs a day` and `Fat a day` (averaged
+  over the days something was logged) and, once targets are set in Food, the
+  days on each; Today gains an `Eating` card. Registered after Workouts.
+- `valueWords` writes an amount of ten or more whole, with thousands
+  marked ("2,010 kcal"), and an amount's smallest change depends on its unit:
+  50 kcal, 5 g, 100 mg (`NOTICEABLE_BY_UNIT`); a habit's minutes keep the old,
+  tiny threshold.
+- `DayWatch` moved to `src/components/app/day-watch.tsx`, where Food's Today
+  uses it too.
+- The slot test (`tests/health-ops.test.ts`) expects Food's rows and card
+  beside Workouts', since the preview switches every personal tool on.
+
 ### 2026-10-02 — H1: plunges, sleep, habits, and progress by week (`claude/health-h1`)
 - **The founder's calls, from a mockup (2026-10-02).** A cold plunge is a
   timer counting up, with a soft tone each minute, kept as the time in the
@@ -101,7 +115,7 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 - `src/modules/health/core/` — pure: `sleep.ts` (clock times to minutes, words), `plunge.ts` (timer face, typed time and water), `habits.ts`, `progress.ts` (the windows, `readRow`, `weekWords`, bars), `rows.ts` (Health's own rows), `errors.ts`.
 - `src/modules/health/log-ops.ts` (plunges, sleep), `habit-ops.ts`, `progress-ops.ts` (`ownRows`, `todayData`) — every read and write in the space's own transaction.
 - `src/modules/health/actions.ts` — `requirePersonalSpace` + `requireModuleEnabled("health")` + zod; each returns `{ ok }` or `{ error }` with a sentence.
-- `src/modules/health/components/` — `sleep-card`, `plunge-card`, `plunge-timer` + `plunge-store`, `habit-chips`, `habit-manager`, `progress-view`, `score-scale`, `day-watch`.
+- `src/modules/health/components/` — `sleep-card`, `plunge-card`, `plunge-timer` + `plunge-store`, `habit-chips`, `habit-manager`, `progress-view`, `score-scale`; `DayWatch` is `src/components/app/day-watch.tsx`, shared with Food.
 - `src/app/personal/(space)/m/health/{plunge,progress,habits}/page.tsx` — the three screens below Today.
 - `src/lib/progress-sources/` — the slot: `types.ts` (contract, the only file a tool imports), `registry.ts` (the one file that names the sources), `resolve.ts` (what Health calls). ESLint keeps `registry`/`resolve` to Health (`PROGRESS_HOST`).
 - `src/modules/fitness/progress-source.ts` + `core/progress-rows.ts` — Workouts' filler.
@@ -168,8 +182,6 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 ## Open items
 
-- **Eating.** Food's source fills the slot when Food logs meals (D4): a row
-  per week and a line on Today.
 - **A watch or a ring.** Sleep and heart rate from a wearable, only if he wears
   one (his call).
 - **Not built:** logging a missed night or an earlier day's habits; reminders;

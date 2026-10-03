@@ -1,12 +1,14 @@
 # Food
 
-> The second personal tool (ADR 0111): the person's own recipes, brought in from
-> a link, a photo of a page, pasted text or typed in, checked before they are
-> saved, and scaled to any number of servings; then the week's meals, the
-> shopping list and nutrition. The founder's goal for it (2026-10-01) is part of
-> a larger one: to track his progress from what he does, workouts, eating, cold
-> plunges and sleep among it. Lives in a personal space beside
-> [fitness](fitness.md); the container is [personal-space](personal-space.md).
+> The second personal tool (ADR 0111): what the person eats, logged from USDA's
+> food list, their own recipes or a photo of the plate and counted against
+> their targets (D4a); and their own recipes, brought in from a link, a photo
+> of a page, pasted text or typed in, checked before they are saved, and
+> scaled to any number of servings; then the week's meals and the shopping
+> list. The founder's goal for it (2026-10-01) is part of a larger one: to
+> track his progress from what he does, workouts, eating, cold plunges and
+> sleep among it, which [Health](health.md) shows. Lives in a personal space
+> beside [fitness](fitness.md); the container is [personal-space](personal-space.md).
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -14,6 +16,97 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — D4a: eating, logged (`claude/food-d4a`)
+
+He chose it after Health H1 merged (#693, #694), over the week and the
+shopping list, Workouts' F5 and the consumer door: the one input his health
+goal still lacked. **His calls, from a mockup (2026-10-03):** ways in are a
+search of a food list, his own recipes, and a photo of the plate (he did not
+pick typing the numbers in); count calories AND all three macros, shown
+alike; daily targets for calories and protein; breakfast, lunch, dinner and
+snacks.
+
+- **The food list** (ADR 0126): USDA FoodData Central's survey foods (FNDDS
+  2021-2023, the 2024-10-31 release), the foods people report eating, 5,431
+  of them, each with its seven numbers per 100 g and its household portions
+  ("1 banana", 126 g). Chosen over SR Legacy (lab names: "Chicken, broilers or
+  fryers, breast, meat only") and branded foods (400,000 and more, a key, the
+  search sent to USDA). Built by `scripts/build-usda-foods.ts` from a file
+  pinned by URL and SHA-256, "NS as to" and "NFS" spelled out, committed as
+  `scripts/data/usda-foods.json` (966 KB, a food a line), and loaded by
+  `npm run db:seed` into `food_usda_foods`, so every database gets the same
+  list with no network. `db:verify-modules` now fails a database without it.
+- **Search as you type**, each word a prefix, through a generated tsvector
+  (as documents' 0026) and a GET (`/api/food/search`) the box can cancel. A
+  food with more of the words first, so the nearest is found when none has
+  them all; then the plain food first: a name that is the words before its first comma ("Rice,
+  white, cooked" for rice), then one whose second part is them ("Fish, salmon,
+  raw" for salmon), then a category of that name, then a name starting with
+  the first word; rank and a shorter name break ties. Tuned on dev against
+  banana, rice, salmon, egg, steak, almonds, avocado and more.
+- **Today** is Food's front page now (`FoodModule.tsx`): the day's calories,
+  protein, carbs and fat as four tiles alike, a bar under calories and protein
+  for the targets, and each meal with what is in it; tap a thing to change
+  its amount, portion or meal, or remove it. Arrows step back two weeks, to
+  log a forgotten meal. The recipes moved one tab over, to
+  `/personal/m/food/recipes`, under a `Today` / `Recipes` strip (`food-nav.tsx`).
+- **Log food** (`/personal/m/food/log`, `components/log-food.tsx`): the meal,
+  the search, what was logged lately and the recipes cooked lately under the
+  box, a card to say how much with the numbers live, and Add; you stay to add
+  the next thing, with Undo on each. **A photo of the plate**: Claude names
+  each food and estimates its grams (`plate-model.ts`, forced tool, adaptive
+  thinking); each is matched on the list by its words (`plate-ops.ts`); the
+  person checks, changes or removes each, and Add all logs them in one
+  transaction. Claude never says what a food contains; the photo is kept
+  nowhere. Opened with a recipe chosen from the recipe page (Log it) and from
+  cook mode's last screen (Log what you ate).
+- **The numbers are kept as worked out when logged**, so an edited or deleted
+  recipe, or a new release of the list, never rewrites a day already eaten.
+  A change of amount scales those numbers; it never reads the list again.
+- **Health** shows Food through the progress slot (`progress-source.ts`,
+  `core/progress-rows.ts`): calories, protein, carbs and fat a day, averaged
+  over the days logged, the days on each target set, and an Eating card on
+  Health's Today. Health's Progress now writes an amount of ten or more
+  whole, with thousands marked ("2,010 kcal"), and calls under 50 kcal, 5 g or
+  100 mg "about the same".
+- Three tables (`0443`, RLS and the search column in `0444`), and `0445`:
+  `food_eaten.created_at` defaults to `clock_timestamp()`, because a plate's
+  rows share one transaction, where `now()` gave them one instant and "most
+  recent" became a coin toss (the db test found it).
+- Guides: `overview.md` is Today's manual now; the recipe list's moved to
+  `recipes.md`; new `log.md`; `recipe.md`, `cook.md`, `add.md` and
+  `editor.md` say "your recipes" for what was "the Food page"; Health's
+  overview and progress gain Eating. Tests: `tests/food-eating.test.ts`
+  (pure), `tests/food-eating-ops.test.ts` (the database), and
+  `tests/isolation/food-eating.test.ts`.
+- `DayWatch` moved to `src/components/app/day-watch.tsx`, shared with Health:
+  Today refreshes itself when the day has moved on.
+- **On dev and production, before the merge.** Production's ledger was read
+  first (it ended at `0442`, with exactly `0443`-`0445` pending); they went on
+  at the founder's word, `db:verify-rls` is green on both databases (266
+  tables), and the recipe key reads `ON DELETE SET NULL (recipe_id)` in
+  `pg_constraint`. The seed loaded the 5,431 foods and Food's catalogue line
+  on both, and `db:verify-modules` is green on both.
+- **Driven on dev (a production build, his space).** Targets set (a number
+  out of range refused, "2,200" with its comma taken); a banana, Greek yogurt
+  by the cup and coffee logged to breakfast, the coffee undone; a drawn
+  breakfast plate read in 7 s as a fried egg, bacon, toast and "butter on
+  toast"; one item corrected by hand and the plate added to lunch in its
+  order; an entry moved to breakfast at two slices, another to a tablespoon,
+  one removed, each at once; Health's Eating card and Food's six rows on its
+  Progress; 375 px with no sideways scroll. It found:
+  - **"Butter on toast" was matched to a peanut butter and jelly sandwich,**
+    and "bacon strips cooked" or "butter on toast" typed in found nothing,
+    because a food had to have every word. A food with more of the words now
+    comes first and a search no food has every word of finds the nearest
+    (`searchFoods`); and the plate prompt asks for words the way the list
+    names a food, with no shape words and a spread as a food of its own.
+  - Progress wrote "35.5 g" where Today wrote "35 g": an amount of ten or
+    more is whole in both now.
+  - A script that clicked Undo while the last Add was still finishing hit a
+    disabled button: the page is right (one transition at a time), the
+    script was early.
 
 ### 2026-10-02 — D1c: hands-free (`claude/food-d1c`)
 
@@ -388,15 +481,16 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | D1c | **Hands-free** | Each step read aloud in the coach's recorded voice, and "next step", "go back", "repeat", "start timer", "stop timer" and "ingredients" heard on the phone (his calls: reading aloud comes with the voice commands; the listener on the phone; short phrases). **Built** |
 | D2 | **The week** | Recipes on days and meals, moved about, a past week repeated |
 | D3 | **The shopping list** | Built from the week, the same food added up across recipes (`core/amounts.ts` reads every line), ticked off in the shop on a phone |
-| D4 | **Nutrition** | Per recipe and per day, worked out from the ingredients and labelled as worked out, beside the recipe's own numbers. Moved up by his health goal; it needs a food database (USDA FoodData Central is public domain) |
+| D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
+| D4 | **Nutrition of a recipe** | Per recipe, worked out from its ingredients against the food list (D4a's) and labelled as worked out, beside the recipe's own numbers, so a recipe that states none can be counted |
 
 **His health goal (2026-10-01)**, in his words: "track progress based on things
 i am doing with the workout, eating/diet, cold plunge, sleep etc." That is a
 layer over the personal tools, not a part of Food: habits logged (a cold
 plunge, a night's sleep), next to what Workouts already logs and what Food will
-know was eaten, and progress shown across them. Not designed; ask him before
-any of it, after D1. What D1 leaves for it: recipes as structured lines a
-food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
+know was eaten, and progress shown across them. Built as [Health](health.md)
+(H1, 2026-10-02), which reads what Food knows through the progress slot
+(ADR 0125); what was eaten is D4a's.
 
 ## Data model
 
@@ -404,6 +498,9 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 | --- | --- | --- |
 | `food_recipes` | A person's recipe: title, what it makes (`yield_amount` double, `yield_unit`), prep, cook and total minutes, `tags` text[], `ingredients` and `steps` jsonb (`{ text, heading? }[]`, kept as written), `notes`, `nutrition` jsonb (per serving, as the recipe states it: calories, protein, carbs, fat, fiber, sugar g; sodium mg), `source_url`, the photo (`photo_pathname`, width, height), `created_by_clerk_user_id` | D1, `0437`. RLS member + superadmin (`0438`). `food_recipes_tenant_id_id_idx` is the composite key later slices point at. CHECKs: a title, yield > 0, minutes 0–10,080, a photo all or nothing |
 | `food_cooks` | A time a recipe was cooked (D1b): `made_on` (the space's day), `servings` (what it was made for), the phone's id | `0439`/`0440`. Composite key to `food_recipes` (`(tenant_id, recipe_id)`, ON DELETE CASCADE). The recipe's count and last day are read from it |
+| `food_eaten` | What was eaten (D4a): `eaten_on` (the space's day), `meal` (enum `food_meal`: breakfast, lunch, dinner, snack), `source` (enum `food_eaten_source`: food, recipe, photo), `fdc_id` or `recipe_id`, `name` as it was, `amount` of `portion` ("1 banana", "g", "oz", or "serving"), `grams` (a food's; null for a recipe), and the seven numbers as worked out when logged (null where a recipe states none) | `0443`, RLS member + superadmin (`0444`). The id is the phone's (`ON CONFLICT DO NOTHING`). `fdc_id` → `food_usda_foods` ON DELETE SET NULL; composite `(tenant_id, recipe_id)` → `food_recipes` ON DELETE SET NULL ("recipe_id"), hand-edited to the column-list form, so a deleted recipe leaves the row and its numbers. CHECKs: amount 0–100,000, grams for foods and none for recipes, numbers not negative. `created_at` defaults to `clock_timestamp()` (`0445`), so a plate's rows keep their order. Index `(tenant_id, eaten_on)` |
+| `food_targets` | The daily targets: `calories` (500–10,000) and `protein_g` (10–500), either null | `0443`/`0444`. One row a space (`tenant_id` the key). A day is judged against the targets as they are now |
+| `food_usda_foods` | The food list (D4a, ADR 0126): FNDDS 2021-2023, 5,431 foods, `name`, `category` (WWEIA), the seven numbers per 100 g, `portions` jsonb (`{ label, grams }[]`), `release` | `0443`; REFERENCE DATA with no tenant: `modules`' two policies (superadmin all, any member reads) in `0444`, with `search_tsv`, a generated tsvector (name A, category B) not modelled in the schema, GIN-indexed. Written only by the seed from `scripts/data/usda-foods.json` |
 | `food_imports` | A recipe on its way in: `kind` (`link`, `text`, `photo`), `source_url` (a link's), `status` (`reading`, `draft`, `failed`), the `draft` (a recipe input, its name allowed empty), `error`, the page's photo for a link | D1, `0437`/`0438`. Deleted on save or discard. CHECKs: a link has its URL; a photo all or nothing. Nothing points at it |
 
 ## Key files & seams
@@ -446,6 +543,21 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 - `src/modules/food/components/` — `recipe-list`, `add-recipe`,
   `recipe-editor`, `recipe-view`, the delete and discard buttons,
   `refresh-while-reading`, `shrink-photo` (the phone's resize).
+
+- Eating (D4a): `core/eating.ts` (meals by the time of day, a food's numbers
+  for its grams and a recipe's for its servings, the day added up, the
+  targets, the inputs' schemas), `core/plate.ts` (the plate's prompt, tool and
+  reader), `core/progress-rows.ts` (what Health is told); `eating-ops.ts` (the
+  list's search, the log, its changes, recent, targets), `plate-model.ts` (the
+  Claude call), `plate-ops.ts` (a plate read and matched), `progress-source.ts`
+  (the slot's filler); `components/eaten-day.tsx` (Today's day),
+  `log-food.tsx` (Log food), `food-nav.tsx` (the Today / Recipes strip),
+  `new-id.ts`; `src/app/api/food/search/route.ts`; the pages
+  `src/app/personal/(space)/m/food/log` and `.../recipes` (the list's page).
+- The food list: `scripts/build-usda-foods.ts` (pinned download, readable
+  names), `scripts/data/usda-foods.json` (the committed list),
+  `scripts/lib/usda-foods.ts` (the seed's loader); `scripts/seed.ts` loads it,
+  `scripts/verify-modules.ts` checks it.
 
 ## Decisions & gotchas
 
@@ -506,6 +618,36 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
   photo, for a link, is stored when its draft is made and handed over or
   deleted with the draft.
 
+- **The numbers come from the list or the recipe, never from a model**
+  (ADR 0126). On a plate, Claude names each food and estimates its grams; the
+  list says what those grams contain, and the person checks the amounts.
+- **What was eaten keeps its numbers as logged.** A recipe edited or deleted,
+  or a new release of the list, never rewrites a day already eaten. Changing
+  an amount scales the kept numbers by grams (a food) or servings (a recipe);
+  it never reads the list again, so a food no longer on it can still change.
+- **A recipe with no stated nutrition is logged without numbers**, and the day
+  says how many such things it has, rather than guessing or blocking. D4
+  works a recipe's numbers out from its ingredients.
+- **Calories on target means within a tenth either way; protein, at or
+  above.** Calories are neither better nor worse in Health's colours, since
+  one person's goal is less and another's more.
+- **A week averages the days logged.** A day with nothing logged is not a day
+  of zero calories; it is left out, as Health leaves out a week with no night.
+- **The search is a GET, not a server action.** Actions run one behind
+  another; a search box must drop the answer to an old keystroke. The words
+  are reduced to letters and digits before they reach the tsquery, the LIKE
+  patterns and the regex, so nothing typed changes the query's shape.
+- **`clock_timestamp()` on `food_eaten.created_at`.** `now()` is the
+  transaction's start, so a plate's foods, written in one transaction, shared
+  one instant, and their order (and "most recent") was arbitrary.
+- **Today is the front page; the list moved.** `FOOD_HOME` still names
+  `/personal/m/food`, which is Today; `FOOD_RECIPES` is the list. Every action
+  revalidates both (`refreshFood`), since an action re-renders the page it was
+  called from only when that page is named.
+- **Show what was just done.** Today keeps its own copy of the day and the
+  targets and adopts the server's when it differs, as Health's cards do
+  (health.md): an action answers before its re-rendered page streams in.
+
 ## Open items
 
 - **No bot check has been met in a drive.** `BLOCKED` is proven by the tests;
@@ -522,8 +664,19 @@ food log can point at (`(tenant_id, recipe_id)`), and nutrition per serving.
 - **A timer cannot sound with cook mode off the screen.** Notifications (the
   app's, or the browser's) would let it; not built.
 - **The cook history is a count and a day.** Undo works right after logging;
-  older logs cannot be seen or changed. What was EATEN (a serving, not a
-  batch) is the food log, with nutrition (D4).
+  older logs cannot be seen or changed. What was EATEN is D4a's log, which
+  cook mode's last screen opens (Log what you ate).
+- **No brands or barcodes.** FNDDS is everyday foods. USDA's branded list
+  (an API key, the search sent to USDA) or Open Food Facts (ODbL) would add
+  packaged foods and a barcode scan; neither is chosen.
+- **No numbers typed in.** He did not pick it; a meal out is the nearest food
+  or a recipe with the nutrition it states.
+- **Fiber, sugar and sodium are kept, not shown.**
+- **No per-space budget for plate reads**, as for recipe reads (above):
+  before Food opens to everyone.
+- **Nobody has photographed a plate on a phone.** The drive fed a photo to
+  the pane; a real plate, a phone's camera and the estimate's quality are
+  unwatched.
 - **A pasted list of several recipes** reads as the first (or the main) one.
 - **A recipe in another language** is copied in its language; nothing
   translates.

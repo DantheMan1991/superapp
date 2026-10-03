@@ -1,49 +1,75 @@
 # Food
 
-> Your recipes in one place: bring one in from a link, a photo of a page or text you pasted, or type it in, then cook from it at any number of servings.
+> What you ate today, with its calories, protein, carbs and fat, against your targets; and your recipes, one tab over.
 > **Route:** /personal/m/food/**
 > **Order:** 0
 
-Open **Food** {icon:utensils} in the sidebar of your personal space. This page shows any recipe still on its way in, then all your recipes. To add one, click {button:Add a recipe|primary|plus}.
+Open **Food** {icon:utensils} in the sidebar of your personal space. This page is the day: what you ate, meal by meal, and how the day adds up. To add something, click {button:Log food|primary|plus}, or {button:Add|ghost|plus} beside a meal. Your recipes are under `Recipes`.
 
 ## What you see
 
-- **`Food`**, the title, with the line `Your recipes in one place: from a link, a photo of a page, pasted text, or typed in.`
-- **{button:Add a recipe|primary|plus}.** Opens Add a recipe. See [Adding a recipe](add.md).
-- **Drafts.** Shown only while a recipe is on its way in. Each row says where it came from: the site's name for a link, `Pasted text`, or `Photos of a page`, and the recipe's own name once it has been read. Under it, one of these:
-  - `Reading, started just now`, with a turning circle, while Claude reads it. That takes up to a minute. You can leave the page; the reading carries on.
-  - `Ready to check`, with {button:Check it|primary}. It opens the draft in the editor, where you check it and save it. See [Typing in and editing a recipe](editor.md).
-  - The reason it could not be read, in red, such as `No recipe was found there. Copy it and use Paste the text, or type it in.`
-  - {button:Discard draft|outline} beside a draft or a failure. It asks `Discard this draft?` with `Nothing from it is kept. To try again, add the recipe again.` Click {button:Discard draft|destructive} to throw it away, or {button:Keep it|ghost} to leave it.
-- **The search box**, `Search recipes or ingredients`. Type one word or several. A recipe stays in the list when every word is in its name, its tags or its ingredient lines, so `lemon chicken` finds a recipe with both.
-- **The tags.** {button:All|outline} and a button for each tag your recipes use, in alphabetical order. Click a tag to see only the recipes that have it; click All to see every recipe again. The tag and the search box work together.
-- **A row for each recipe**, in alphabetical order by name: its photo, or a grey picture when it has none; its name; its time and what it makes, such as `35 min · 4 servings`; and its tags, and `made 3×` once you have logged cooking it. Click a row to open the recipe. See [Cooking from a recipe](recipe.md).
-- **`No recipe matches.`** when the search and the tag leave nothing to show.
-- **With no recipes and no drafts**, the page says `No recipes yet`, with `Add one from a link, a photo of a cookbook page, text you pasted, or type it in. You check it before it is saved.` and {button:Add a recipe|primary|plus}.
+- **`Food`**, the title, with the line `What you ate, and your recipes.`
+- **The {icon:circle-question-mark}**, which opens this guide beside the page.
+- **{button:Log food|primary|plus}.** Opens Log food for this day, on the meal the time of day suggests: breakfast from 4 in the morning, lunch from 11, snacks from 3 in the afternoon, dinner from 5, and snacks again from 10 at night. On an earlier day it starts on dinner. See [Logging what you ate](log.md).
+- **`Today` and `Recipes`**, Food's two sections. You are on `Today`. `Recipes` is your recipes: see [Your recipes](recipes.md).
+- **The day**, between two arrows: `Today`, `Yesterday`, or a date such as `Thursday, Oct 1`. {button:|ghost|chevron-left} goes to the day before, back to two weeks ago, so you can log a meal you forgot. {button:|ghost|chevron-right} goes to the day after, up to today.
+- **The day's numbers**, four of them, the same size: `Calories`, `Protein`, `Carbs` and `Fat`, everything logged on the day added up.
+  - **Your targets**, when you set them: a bar under `Calories` and under `Protein`, and how far along, such as `1,640 of 2,200 kcal` and `128 of 150 g`. The bar stops at full when you go over.
+  - **Something with no nutrition**: a recipe that states none is logged without numbers, and the card says so, such as `1 thing has no nutrition: its recipe states none. Add it in the recipe's editor, and log it again.`
+  - **{button:Set targets|ghost|target}**, or {button:Change targets|ghost|target} once you have some. It opens two boxes in the card:
+    - `Calories a day`, a whole number from 500 to 10,000.
+    - `Protein a day, g`, a whole number from 10 to 500.
+    - `Leave a box empty for no target. A day is on its calorie target within a tenth of it, either way, and on its protein target at or above it.`
+    - {button:Save targets|primary} keeps them, and {button:Cancel|ghost} closes the boxes unchanged. A number out of range shows `Calories between 500 and 10,000.` or `Protein between 10 and 500 g.` in red, and Save targets stays grayed out.
+- **A card for each meal**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`, each with its calories beside the name and {button:Add|ghost|plus}, which opens Log food for that meal and this day. A meal with nothing in it says `Nothing yet`.
+  - **Each thing you logged**, in the order you logged it: its name ({icon:chef-hat} before a recipe of yours), how much, such as `1 banana`, `150 g` or `1.5 servings`, its protein, carbs and fat, and its calories on the right. A recipe that states no nutrition says `no nutrition` instead of calories.
+  - **Tap a thing** to change it. Its card opens:
+    - `How much`, a number above 0.
+    - Beside it, what the number counts. For a food: its own portions from the food list, such as `1 banana` or `1 cup`, then `g` and `oz`. For a recipe: `servings`.
+    - The meal buttons, `Breakfast`, `Lunch`, `Dinner` and `Snacks`, to move it to another meal.
+    - Its numbers for the new amount, as you type. They are worked out from the numbers it was logged with, so a recipe you changed since keeps counting as it was when you ate it.
+    - {button:Save|primary} keeps the change. {button:Cancel|ghost} closes it unchanged. {button:Remove|ghost} asks `Remove it?`: click {button:Remove|destructive} to take it off the day, or {button:Keep it|ghost}.
+    - A number that is not one shows `Type how much, a number above 0.`, and a portion the food cannot be counted in shows `That amount is not one this food can be logged in.` Save stays grayed out for both.
 
-## How to find a recipe
+Every change shows at once. If it could not be kept, it goes back as it was and a message says why. The page keeps up with the day: if you leave it open overnight, it fetches the new day the next time you look at it.
 
-1. Type a word from its name, a tag or an ingredient in the search box. The list narrows as you type.
-2. Or click a tag to see only the recipes that have it.
-3. Click the recipe's row to open it.
+## How to log what you ate
+
+1. Click {button:Log food|primary|plus}, or {button:Add|ghost|plus} beside the meal.
+2. Find the food or your recipe, say how much, and add it. See [Logging what you ate](log.md).
+3. Click {button:Done|outline} to come back here. The meal shows what you added, and the day's numbers include it.
+
+## How to log a meal you forgot
+
+1. Click {button:|ghost|chevron-left} until the day shows, up to two weeks back.
+2. Click {button:Add|ghost|plus} beside the meal, and log it as usual. It goes on that day.
+
+## How to set your targets
+
+1. Click {button:Set targets|ghost|target}.
+2. Type the calories and the protein you aim for each day. Leave one empty to have no target for it.
+3. Click {button:Save targets|primary}. The bars appear under `Calories` and `Protein`, and Health's Progress counts the days you hit them.
 
 ## Messages
 
 | Message | What it means |
 | --- | --- |
-| `Reading, started just now` | Claude is reading a recipe you added. The row changes by itself when you come back to the page, to `Ready to check` or to the reason it failed. |
-| `Ready to check` | The recipe was read. Click {button:Check it|primary}, check it against the original, and save it. Nothing is saved until you do. |
-| `The reading was interrupted before it finished. Discard it and try again.` | The reading ran for more than five minutes, or an update to Yosher cut it off. Nothing will finish it now. Discard it and add the recipe again. |
-| `Draft discarded` | The draft and any photo read with it are gone. |
-| `The draft could not be discarded. Try again.` | Something went wrong while throwing it away. It is still there. Try again in a moment. |
-
-The reasons a recipe could not be read are listed in [Adding a recipe](add.md).
+| `Nothing yet` | Nothing is logged in that meal on this day. Click {button:Add|ghost|plus} to log something. |
+| `You can log today and the two weeks before it.` | The day is more than two weeks back, or a page left open has fallen behind. Reload the page. |
+| `That amount is not one this food can be logged in. Choose another.` | The portion is not one of this food's. Choose another, or use `g` or `oz`. |
+| `That is not in your log any more. Reload the page.` | It was removed, perhaps in another tab. Reload to see the day as it is. |
+| `It could not be changed. Try again.` | Saving the change did not work. It went back as it was. Try again. |
+| `It could not be removed. Try again.` | Removing it did not work. It is back on the day. Try again. |
+| `The targets could not be saved. Try again.` | Saving the targets did not work. They went back as they were. Try again. |
+| `Something in that was not right. Check it and try again.` | What was sent was not something Food keeps. Reload the page and try again. |
 
 ## Not on this page
 
-- **The week's meals and the shopping list.** They come next.
-- **Working out nutrition from the ingredients.** Not built. A recipe shows the nutrition it states, when it states it.
-- **Sharing a recipe with somebody.** Not built.
+- **Fiber, sugar and sodium.** They are kept for every food on the list, but not shown yet.
+- **Brands and barcodes.** The food list is USDA's everyday foods. Packaged foods by brand, and scanning a barcode, are not built.
+- **The week's meals and the shopping list.** They come next, in Food.
+- **Nutrition worked out from a recipe's ingredients.** Not built. A recipe counts with the nutrition it states.
+- **Progress over weeks.** It is in Health, with your workouts, sleep and plunges.
 
 ## Who can do what
 

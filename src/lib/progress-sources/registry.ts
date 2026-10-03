@@ -1,5 +1,6 @@
 import "server-only";
 import { fitnessProgressSource } from "@/modules/fitness/progress-source";
+import { foodProgressSource } from "@/modules/food/progress-source";
 import type { ProgressSource } from "./types";
 
 /**
@@ -11,6 +12,6 @@ import type { ProgressSource } from "./types";
  * slot through `resolve.ts`; a tool imports `types.ts` and never this.
  *
  * Registration order is the order on Health's Progress page, after Health's
- * own rows. Food's eating joins here when it is built (D4).
+ * own rows: Workouts, then Food's eating (D4a).
  */
-export const progressSources: readonly ProgressSource[] = [fitnessProgressSource];
+export const progressSources: readonly ProgressSource[] = [fitnessProgressSource, foodProgressSource];

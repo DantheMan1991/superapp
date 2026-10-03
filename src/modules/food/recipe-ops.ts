@@ -14,7 +14,10 @@ import { photoVersion, type StoredPhoto } from "./photo-ops";
  * and an edit can never leave half a recipe behind.
  */
 
+/** Food's front page: what was eaten today (D4a). */
 export const FOOD_HOME = "/personal/m/food";
+/** The recipes, their own page since D4a made Today the front. */
+export const FOOD_RECIPES = "/personal/m/food/recipes";
 
 export function recipeHref(recipeId: string): string {
   return `${FOOD_HOME}/recipes/${recipeId}`;

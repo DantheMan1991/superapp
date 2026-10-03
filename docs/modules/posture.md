@@ -17,6 +17,28 @@
 Newest first. One entry per session/PR that touched this area. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-03 — The lock and three helpers shared with Health's photos (`claude/health-h2b`)
+
+Health's progress photos (ADR 0128) are locked as these pages are. Nothing
+about the posture check changed; where its pieces now live did:
+
+- `src/lib/posture-lock.ts` holds **areas**: the posture pages (with
+  `'wasm-unsafe-eval'`) and `/personal/m/health/photos` (without).
+  `lockCrossing` and `lockCsp` are the general functions the proxy calls;
+  `postureCrossing` (an alias) and `postureCsp` keep ADR 0122's names for the
+  posture tests. A crossing between two areas also loads the page whole.
+- The guard is `src/components/app/page-lock-guard.tsx` (`PageLockGuard`,
+  by area); `PostureLockGuard` wraps it.
+- `parseCameraLabel` and `CameraFacing` moved to `src/lib/camera-label.ts`
+  (with `mainBackCamera`, which the photos use); `core/camera.ts` re-exports
+  them. `useScreenPrivacy` is `src/lib/screen-privacy.ts` and `cameraMessage`
+  `src/lib/camera-message.ts`; `client/screen-privacy.ts` and
+  `components/camera-message.ts` re-export them, so no posture import moved.
+
+`tests/posture-lock.test.ts` gained the photos' area (its policy without
+WebAssembly, its edge, the crossing between areas); `posture-camera` and
+`posture-privacy` pass unchanged.
+
 ### 2026-09-30 — The lockdown: the posture pages locked to this site (`claude/posture-lockdown`)
 
 The founder's "yes, do the lockdown": ADR 0118's second lock, open since

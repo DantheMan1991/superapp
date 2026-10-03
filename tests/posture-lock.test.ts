@@ -3,6 +3,9 @@ import {
   clerkFrontendApi,
   fetchedByScript,
   isPosturePath,
+  lockCrossing,
+  lockCsp,
+  lockedArea,
   newNonce,
   postureCrossing,
   postureCsp,
@@ -177,5 +180,51 @@ describe("the pages' edge", () => {
     expect(sameSitePath("https://evil.example/personal/m/fitness/posture", "yosherapp.com")).toBeNull();
     expect(sameSitePath("not a url", "yosherapp.com")).toBeNull();
     expect(sameSitePath(null, "yosherapp.com")).toBeNull();
+  });
+});
+
+describe("Health's progress photos, under the same lock (ADR 0128)", () => {
+  const photos = "/personal/m/health/photos";
+  const health = "/personal/m/health";
+  const posture = "/personal/m/fitness/posture";
+  const go = (pathname: string, fromPath: string | null, fetched = true, method = "GET") =>
+    lockCrossing({ pathname, method, fetched, fromPath });
+
+  it("are the photos' own page and everything under it, an area of their own", () => {
+    for (const path of [photos, `${photos}/take`]) expect(lockedArea(path), path).toBe("health-photos");
+    for (const path of [health, `${health}/body`, `${health}/photos-notes`, `${health}/progress`]) {
+      expect(lockedArea(path), path).toBeNull();
+    }
+    expect(lockedArea(`${posture}/check`)).toBe("posture");
+    expect(isPosturePath(`${photos}/take`)).toBe(false);
+  });
+
+  it("get the posture pages' policy without WebAssembly, which they never run", () => {
+    const policy = parse(lockCsp({ nonce: "n", clerk: "clerk.yosherapp.com", devSocket: null, area: "health-photos" }));
+    expect(policy["script-src"]).toEqual(["'self'", "'nonce-n'", "https://clerk.yosherapp.com"]);
+    expect(policy["connect-src"]).toEqual(["'self'", "https://clerk.yosherapp.com"]);
+    expect(policy["img-src"]).toEqual(["'self'", "blob:", "data:", "https://img.clerk.com"]);
+    expect(policy["frame-src"]).toEqual(["'none'"]);
+    expect(policy["frame-ancestors"]).toEqual(["'none'"]);
+    // The posture pages keep theirs.
+    expect(parse(postureCsp({ nonce: "n", clerk: null, devSocket: null }))["script-src"]).toContain("'wasm-unsafe-eval'");
+  });
+
+  it("are locked on a page load, loaded whole across their edge, and free between their own pages", () => {
+    expect(go(photos, null, false)).toBe("lock");
+    expect(go(`${photos}/take`, `${health}/body`, false)).toBe("lock");
+    expect(go(photos, `${health}/body`)).toBe("full-load");
+    expect(go(`${health}/body`, photos)).toBe("full-load");
+    expect(go(`${photos}/take`, photos)).toBe("pass");
+    expect(go(photos, `${photos}/take`)).toBe("pass");
+    // Two locked areas have two policies: between them is a crossing too.
+    expect(go(photos, `${posture}/check`)).toBe("full-load");
+    expect(go(posture, `${photos}/take`)).toBe("full-load");
+    // The countdown's voice is an API on this site, not a crossing.
+    expect(go("/api/health/voice", `${photos}/take`)).toBe("pass");
+  });
+
+  it("keep ADR 0122's name for the crossing", () => {
+    expect(postureCrossing).toBe(lockCrossing);
   });
 });

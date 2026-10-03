@@ -7,6 +7,24 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-10-03 — A button can be its icon alone (`claude/health-h2b`)
+
+Health H2b's drive opened a guide in the help panel and found
+`{button:|ghost|chevron-left}` printed as it was typed. The grammar wanted words
+before the first bar, so a button drawn as its icon alone never parsed, and no
+test noticed: `controlMarkers` found nothing, so nothing was checked. **23 such
+markers in eight guides had reached readers as raw text** (Food's log and
+Today, Health's Today, habits, Body and tape measures, the new photos guide,
+and Jobs' estimate outlines).
+
+- `controlMarkers` (`guides-core.ts`) takes an empty label for a button with
+  an icon (`{button:|ghost|x}`); any other empty label is still no marker.
+- `GuideControl` draws it, and does not offer to point at it: there are no
+  words to find on the screen.
+- `tests/guides.test.ts`: every `{button:`, `{badge:`, `{icon:` or `{kbd:` in a
+  guide (outside inline code) must be a marker the renderer draws; run against
+  the old grammar, it named all 23. `_TEMPLATE.md` shows the form.
+
 ### 2026-09-27 — A personal space has a "?" too (`claude/personal-space-p0`)
 
 Personal spaces (ADR 0111) live under `/personal`, outside the business

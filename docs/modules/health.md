@@ -2,7 +2,8 @@
 
 > The third personal tool (ADR 0111): the person's cold plunges, sleep, own
 > habits, weight and tape measures, logged in a few taps, beside today's
-> workout and what they ate, and their progress across all of it, week by week. It answers the founder's
+> workout and what they ate, and their progress across all of it, week by week;
+> and progress photos, kept on the phone only (ADR 0128). It answers the founder's
 > goal (2026-10-01): "track progress based on things i am doing with the
 > workout, eating/diet, cold plunge, sleep etc." Health keeps what no other
 > tool knows, and reads the rest through the progress slot
@@ -15,6 +16,69 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — H2b: progress photos, kept on the phone (`claude/health-h2b`)
+- **The founder's calls, from a mockup (2026-10-03, after H2 #696 merged).**
+  Progress photos next (his H2 call: a slice of their own). **Propped up, on a
+  timer** (back camera, ten seconds, a voice that says when to turn), **front,
+  side and back**, a **Save a copy** button per photo, and a **reminder every
+  four weeks** as a line on Today's Weight card. Kept on the phone only, as the
+  posture check's are.
+- **Take photos** (`/personal/m/health/photos/take`, `photos/photo-take.tsx`):
+  Open the camera (the main back lens, found by name: `src/lib/camera-label.ts`,
+  shared with the posture check); the outline of last time's photo of the pose
+  at 35% over the picture; Start, then `Ten seconds. Step back and face the
+  phone.`, a beep at 3, 2, 1 and a click, `Turn a quarter to your right.` and
+  five seconds, `Turn again, so your back is to the phone.` and five, then the
+  three to check, each taken again on its own, and Keep or Discard (asked
+  twice). The screen stays on; the app blocks screenshots.
+- **Compare** (`/personal/m/health/photos`, `photos/photo-compare.tsx`): a pose,
+  the first and the latest day side by side, the trend on each and how far it
+  moved between them, arrows to step either day, Save a copy under each, and
+  the days on this phone, each deleted with a second tap.
+- **Body's card** (`photos/photos-card.tsx`) and **Today's line**
+  (`photos/photo-nudge.tsx`, four weeks after the latest day this phone holds)
+  read which days the phone holds, never a picture.
+- **On the phone, never sent** (ADR 0128): IndexedDB `yosher-health-photos`,
+  `[owner, day, pose]` (`photos/store.ts`); no table, no migration, no seed;
+  `tests/health-photos-privacy.test.ts` reads the code for every way out but
+  the three files it names. The countdown's lines come in the coach's recorded
+  voice through `/api/health/voice` (the shared handler), words only.
+- **The lock, for a second area** (`src/lib/posture-lock.ts`, `src/proxy.ts`):
+  areas (posture with WebAssembly, the photos without), a crossing between any
+  two areas loads the page whole, and `PageLockGuard`
+  (`src/components/app/page-lock-guard.tsx`) is shared; `useScreenPrivacy`
+  and `cameraMessage` moved to `src/lib`, the posture check's files re-export
+  them.
+- **Save a copy**: Downloads in a browser; Documents, under `Yosher`, in the
+  app through `@capacitor/filesystem` (app **1.0.9**, `APP_FILES_VERSION`; see
+  [mobile-app.md](mobile-app.md)); an older app is told to update.
+- Tests: `tests/health-photos.test.ts` (pure), `health-photos-privacy`,
+  `posture-lock` (the photos' area), `native-app` and `mobile-shell` (1.0.9).
+  Guides: `photos.md`, `photos-take.md`; Body and Today updated.
+- **Driven on dev (a production build, his space)**, the camera a stand-in fed
+  to the page (a drawn figure; the camera list with the ultrawide first): the
+  move into the photo pages a full load with the policy on (a request and an
+  image to another site refused), the ultrawide passed over for the main lens,
+  the whole run timed (the voice at 10, beeps at 3, 2, 1, a click, five
+  seconds a turn), Take again on the side alone, Keep (three JPEGs under his
+  space), Compare across three days with the trend on each, Save a copy in a
+  browser (a download, caught before the disk) and in a simulated 1.0.9 and
+  1.0.8 app, deleting two days, Today's line at four weeks, the outline at 375
+  px, and leaving the lock behind on the way out. It found:
+  - **The store held its database open for good**, so a delete of it (or a
+    later upgrade from another tab) waited until the page went: it lets go on
+    `versionchange` now.
+  - Compare showed the photos without blocking screenshots in the app: it
+    does now. And one line of a guide said a private window has no storage,
+    which is not so.
+  - **The guides' icon-only buttons were raw text**: `{button:|ghost|chevron-left}`
+    never parsed, in this guide and 22 places in seven others (Health's
+    Today, habits, Body and tape measures among them). The grammar takes them
+    now, and a test fails on any marker-looking text it would skip
+    ([guides.md](guides.md)).
+- Drive data deleted: the phone's photo storage in the pane, and the two
+  weigh-ins on dev.
 
 ### 2026-10-03 — H2: weight and the body, and earlier days (`claude/health-h2`)
 - **The founder's calls, from a mockup (2026-10-03, after D4a #695 merged).**
@@ -191,10 +255,11 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 - `src/modules/health/log-ops.ts` (plunges, sleep), `habit-ops.ts`, `body-ops.ts` (H2: weigh-ins, the goal, tape measures and measurements), `progress-ops.ts` (`ownRows`, `dayData`) — every read and write in the space's own transaction.
 - `src/modules/health/actions.ts` — `requirePersonalSpace` + `requireModuleEnabled("health")` + zod; each returns `{ ok }` or `{ error }` with a sentence.
 - `src/modules/health/components/` — `sleep-card`, `weight-card`, `plunge-card`, `plunge-timer` + `plunge-store`, `habit-chips`, `habit-manager`, `progress-view`, `score-scale`, and Body's `body-view`, `weight-chart`, `goal-card`, `measure-form`, `measure-manager`; `DayWatch` is `src/components/app/day-watch.tsx`, shared with Food.
+- `src/modules/health/photos/` (H2b, ADR 0128) — client code only, read by `tests/health-photos-privacy.test.ts`: `store.ts` (IndexedDB), `camera.ts`, `capture.ts`, `draw.ts`, `save-copy.ts`, `voice.ts`, and the screens `photo-take`, `photo-compare`, `photos-card`, `photo-nudge`. Pure: `core/photos.ts`. The pages are under `photos/` with a locked `layout.tsx`; the voice is `src/app/api/health/voice/route.ts`.
 - `src/app/personal/(space)/m/health/{plunge,progress,habits,body,body/measure,body/measures}/page.tsx` — the screens below Today.
 - `src/lib/progress-sources/` — the slot: `types.ts` (contract, the only file a tool imports), `registry.ts` (the one file that names the sources), `resolve.ts` (what Health calls). ESLint keeps `registry`/`resolve` to Health (`PROGRESS_HOST`).
 - `src/modules/fitness/progress-source.ts` + `core/progress-rows.ts` — Workouts' filler.
-- `docs/help/health/` — `overview.md` (Today), `plunge.md`, `progress.md`, `habits.md`, `body.md`, `measure.md`, `measures.md`.
+- `docs/help/health/` — `overview.md` (Today), `plunge.md`, `progress.md`, `habits.md`, `body.md`, `measure.md`, `measures.md`, `photos.md`, `photos-take.md`.
 
 ## Decisions & gotchas
 
@@ -280,6 +345,17 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 - **A day's tape measures are all or nothing**: `saveMeasurements` checks every
   measure is the space's own before writing any (NOT_FOUND), and null takes one
   off the day.
+- **Progress photos are the phone's alone** (H2b, ADR 0128): taken by the page,
+  kept in IndexedDB under the space, never sent; the server knows nothing of
+  them, so the reminder is the phone's (the latest day it holds). Their pages
+  are a locked area (ADR 0122's policy, no WebAssembly). A picture is drawn
+  through `createImageBitmap` onto a canvas the screen owns, never an object
+  URL; the only object URL is Save a copy's download, revoked after.
+- **An IndexedDB connection held open blocks a delete or an upgrade**: the
+  store closes on `versionchange` (the drive's delete waited on Body's card).
+- **The countdown runs on the screen's own one-second steps** (a timeout per
+  second, `useEffectEvent`): the screen is kept on, so the page is visible and
+  its timers are not held back. The photo is the frame on screen at zero.
 - **Coming soon, like Workouts and Food.** It reaches a superadmin's own space
   through the preview (`previewPersonalTools`), never the seed. Health data in
   a consumer app needs P1's privacy policy before anyone else gets it
@@ -289,8 +365,13 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 - **A watch or a ring.** Sleep and heart rate from a wearable, only if he wears
   one (his call).
-- **Progress photos** (H2b, the founder's call): front and side, kept on the
-  phone only, as the posture check's are (ADR 0118), compared over time.
+- **Progress photos have met no real camera**: the drive fed a drawn figure.
+  The S25's back camera, its portrait frames, the outline at 2 to 3 metres and
+  the voice across a room are unwatched; and Save a copy in the app waits on
+  1.0.9 being installed (the Filesystem write into Documents is unwatched on
+  a handset).
+- **No backup of the photos**: a new phone starts with none, by design (ADR
+  0128); Save a copy is the backup.
 - **The calorie check** (the founder's call: its own slice once a few weeks
   are logged): what his eating (Food's log) and his trend say he burns a day,
   and his calorie target against it. Needs days with everything eaten logged.

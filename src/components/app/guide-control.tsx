@@ -70,7 +70,8 @@ export function GuideControl({ kind, label, variant, icon }: GuideControlProps) 
         {label}
       </>
     );
-    if (pointer) {
+    // An icon-only button has no words to find on the screen, so it is drawn and not pointed to.
+    if (pointer && label !== "") {
       return (
         <Button
           type="button"

@@ -72,6 +72,9 @@ screenshot does:
   {button:New bill|primary}            a button. Looks: primary, outline (the
   {button:Void|outline|trash}          default), ghost, destructive, secondary,
                                        link. An icon name may follow the look.
+  {button:|ghost|x}                    a button drawn as its icon alone (no
+                                       words before the first bar); it needs
+                                       the icon, and the panel cannot ring it.
   {badge:Overdue 3 days|destructive}   a status badge. Looks: primary, secondary,
                                        outline (the default), destructive,
                                        success, warning.
@@ -87,8 +90,9 @@ icon-registry.ts. Write the look the screen actually uses, not the one that
 reads best. In the help panel a drawn button and every chip are live: the reader clicks
 one and the real thing on the screen is ringed, matched by its text (something
 clickable first, then a label or heading), so spell the label exactly as
-rendered. tests/guides.test.ts fails on a modifier it cannot place
-or an icon nobody registered.
+rendered. tests/guides.test.ts fails on a modifier it cannot place,
+an icon nobody registered, or anything that looks like a marker and is not
+one (it would reach the reader as raw text).
 
 VOICE. Talk to the reader, and tell them what to do:
   "Click {button:Approve|primary}. You see `Approved and posted.`"

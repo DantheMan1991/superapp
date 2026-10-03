@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import app from "../mobile/app.json";
 import {
   APP_CAMERA_VERSION,
+  APP_FILES_VERSION,
   compareVersions,
   isNativeAppUserAgent,
   nativeAppInfo,
@@ -121,5 +122,27 @@ describe("the shell and the web agree", () => {
     const build = readFileSync(shell(path.join("android", "app", "capacitor.build.gradle")), "utf8");
     expect(build).toContain("project(':capacitor-privacy-screen')");
     expect(build).toContain("project(':capacitor-community-keep-awake')");
+  });
+
+  /**
+   * "SAVE A COPY" of a progress photo (docs/modules/health.md, H2b; ADR 0128):
+   * a WebView ignores a download, so the shell writes the file, and the web
+   * tells an app older than APP_FILES_VERSION to update. Writing into
+   * Documents needs a permission only up to Android 10, never past it.
+   */
+  it("carries the file plugin, wired in, the storage permission held to Android 10, and a version the web knows can save", () => {
+    const pkg = JSON.parse(readFileSync(shell("package.json"), "utf8")) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies["@capacitor/filesystem"]).toBeTruthy();
+    const settings = readFileSync(shell(path.join("android", "capacitor.settings.gradle")), "utf8");
+    expect(settings).toContain(":capacitor-filesystem");
+    const build = readFileSync(shell(path.join("android", "app", "capacitor.build.gradle")), "utf8");
+    expect(build).toContain("project(':capacitor-filesystem')");
+    const manifest = readFileSync(
+      shell(path.join("android", "app", "src", "main", "AndroidManifest.xml")),
+      "utf8",
+    );
+    expect(manifest).toMatch(/android\.permission\.WRITE_EXTERNAL_STORAGE"\s+android:maxSdkVersion="29"/);
+    expect(manifest).toContain('android:requestLegacyExternalStorage="true"');
+    expect(compareVersions(app.version, APP_FILES_VERSION)).toBeGreaterThanOrEqual(0);
   });
 });

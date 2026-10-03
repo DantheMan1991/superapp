@@ -1,6 +1,6 @@
 # Body
 
-> Your weigh-ins and the trend through them, your goal weight and when you get there, and your tape measures.
+> Your weigh-ins and the trend through them, your goal weight and when you get there, your progress photos and your tape measures.
 > **Route:** /personal/m/health/body
 > **Order:** 10
 
@@ -23,6 +23,10 @@ On Health, click {button:Body|ghost|chevron-right} on the `Weight` card. This pa
   - **Without a goal:** `A goal weight and about how fast. Body shows when you get there at your real pace, and Progress shows which way is better for you.`, and {button:Set a goal|outline|target}, which opens the form.
   - **With a goal:** what it is, such as `Lose to 175 lb, about 1 lb a week`, and a line on where you stand, such as `10.7 lb to go. At your recent pace (0.9 lb a week), 175 lb around Dec 20.` See [What the goal says](#what-the-goal-says). {button:Change|ghost|pencil} opens the form with the goal in it. {button:Remove|ghost} asks `Remove the goal? Your weigh-ins stay.`, with {button:Remove|destructive} to remove it and {button:Keep it|ghost} to leave it.
   - **The form:** `Goal weight`, in pounds, from 50 to 700; anything else shows `Type a weight between 50 and 700 lb.` in red. `About how fast`: `0.25 lb a week`, `0.5`, `0.75`, `1`, `1.5` or `2 lb a week`; it starts at 1 lb a week. Under them, `Losing or gaining is worked out from where the goal is against your trend.` {button:Save|primary} keeps it (it reads `Saving…` while it works, and stays grayed out until the weight is right). {button:Cancel|outline} closes the form unchanged.
+- **`Progress photos`** {icon:images}.
+  - **When the last were taken on this phone** and which poses, such as `Last taken Oct 3: front, side, back`, and how many days of photos this phone holds, such as `6 days of photos on this phone`. Before any, `Front, side and back, taken on a timer with the phone propped up, and compared over the weeks.`
+  - **{button:Take photos|primary|camera}** opens [Taking progress photos](photos-take.md). **{button:Compare|outline|images}**, once there are photos, opens [Progress photos](photos.md).
+  - Under them: `On this phone only, never uploaded. A new phone starts with none.` {icon:lock} The card reads which days this phone holds, never a photo; on another phone or a laptop it shows none.
 - **`Tape measures`** {icon:ruler}.
   - **{button:Measure|outline}** opens [Measure](measure.md) for today. **{button:Change|ghost|settings-2}** opens [Your tape measures](measures.md), where you choose them. Before you have any, only {button:Choose|ghost|settings-2} shows, and the card says `Choose what you measure, such as your waist, and take them whenever you like. Once a week is plenty.`
   - **Each tape measure**, by name, with its latest and the day, such as `36.25 in, Oct 3`. Under it, how it has moved since the first time you took it, such as `down 0.5 in since Sep 26`, in Health's color when that is its better way. Before you take one, `Not taken yet`.
@@ -88,7 +92,6 @@ The trend, the chart and the numbers at the top change with it.
 - **Kilograms and centimeters.** Pounds and inches only. Ask us if you want metric.
 - **A smart scale.** Not built: you type the number in.
 - **Body fat.** Not kept.
-- **Progress photos.** Coming in a slice of their own, kept on your phone only.
 - **What your eating and your trend say you burn a day.** Coming once you have a few weeks of weigh-ins.
 
 ## Who can do what

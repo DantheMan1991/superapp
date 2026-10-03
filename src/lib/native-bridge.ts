@@ -108,6 +108,14 @@ export interface NativeBridge {
    * check runs, where a WebView's own Screen Wake Lock is not to be relied on.
    */
   keepAwake: KeepAwakePlugin | null;
+  /**
+   * Null in a browser, and on any app build before 1.0.9.
+   *
+   * A file written where the person can find it: Health's progress photos'
+   * "Save a copy" (ADR 0128), into the phone's Documents. A WebView ignores a
+   * download link, so inside the app only the shell can save one.
+   */
+  files: FilesPlugin | null;
 }
 
 /** What the shell offers for saying something out loud. */
@@ -126,6 +134,18 @@ export interface PrivacyScreenPlugin {
 export interface KeepAwakePlugin {
   keepAwake(): Promise<void>;
   allowSleep(): Promise<void>;
+}
+
+/** The subset of @capacitor/filesystem the page uses: one file written, from base64. */
+export interface FilesPlugin {
+  writeFile(options: {
+    path: string;
+    /** The file's bytes as base64, with no `data:` prefix. */
+    data: string;
+    /** `DOCUMENTS`: the phone's public Documents folder, which the Files app shows. */
+    directory: "DOCUMENTS";
+    recursive?: boolean;
+  }): Promise<{ uri?: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,6 +194,8 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
   const awake = plugins && isRecord(plugins.KeepAwake) ? plugins.KeepAwake : null;
   const awakeUsable =
     awake !== null && typeof awake.keepAwake === "function" && typeof awake.allowSleep === "function";
+  const files = plugins && isRecord(plugins.Filesystem) ? plugins.Filesystem : null;
+  const filesUsable = files !== null && typeof files.writeFile === "function";
 
   return {
     platform,
@@ -183,6 +205,7 @@ export function readNativeBridge(w: unknown): NativeBridge | null {
     speak: voiceUsable ? (voice as unknown as SpeakPlugin) : null,
     privacy: privacyUsable ? (privacy as unknown as PrivacyScreenPlugin) : null,
     keepAwake: awakeUsable ? (awake as unknown as KeepAwakePlugin) : null,
+    files: filesUsable ? (files as unknown as FilesPlugin) : null,
   };
 }
 

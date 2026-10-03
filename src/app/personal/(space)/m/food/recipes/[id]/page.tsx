@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, Pencil } from "lucide-react";
+import { ExternalLink, Pencil, Plus } from "lucide-react";
 import { withTenant } from "@/db";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +49,11 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
         description={times.length > 0 ? times.join(" · ") : undefined}
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/personal/m/food/log?recipe=${row.id}`}>
+                <Plus aria-hidden /> Log it
+              </Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <Link href={`/personal/m/food/recipes/${row.id}/edit`}>
                 <Pencil aria-hidden /> Edit

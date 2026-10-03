@@ -10,7 +10,7 @@ import { todayInTimezone } from "@/lib/timezone";
 import { progressWindows, weekLabel } from "@/modules/health/core/progress";
 import { HEALTH_HOME } from "@/modules/health/log-ops";
 import { ownRows } from "@/modules/health/progress-ops";
-import { DayWatch } from "@/modules/health/components/day-watch";
+import { DayWatch } from "@/components/app/day-watch";
 import { ProgressView } from "@/modules/health/components/progress-view";
 
 export const dynamic = "force-dynamic";

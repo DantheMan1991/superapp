@@ -4,7 +4,7 @@
 > **Route:** /personal/m/food/add
 > **Order:** 10
 
-Click {button:Add a recipe|primary|plus} on the Food page. Pick how the recipe comes in, fill in its box, and click {button:Read it|primary}. When it has been read, the editor opens on it so you can check it and save it. See [Typing in and editing a recipe](editor.md).
+Click {button:Add a recipe|primary|plus} on Food's `Recipes`. Pick how the recipe comes in, fill in its box, and click {button:Read it|primary}. When it has been read, the editor opens on it so you can check it and save it. See [Typing in and editing a recipe](editor.md).
 
 ## What you see
 
@@ -18,14 +18,14 @@ Click {button:Add a recipe|primary|plus} on the Food page. Pick how the recipe c
   - For a link: **Link**, showing `https://` until you paste, and the line `Copy the address of the recipe's page and paste it here.`
   - For text: **The recipe**, a large box for the paste, and a count such as `1,250 of 30,000 characters.`
   - For photos: **Photos**, the line `Up to 4, in order, when a recipe runs over pages. They are read and not kept.`, and {button:Choose photos|outline|camera}. Each photo you choose shows as a small picture with {button:×|ghost|x} in its corner to take it out again, and the button becomes {button:Add another|outline|camera} until you have four.
-- **{button:Read it|primary}.** While it works it says `Reading…`, with the line `This can take up to a minute. You can leave: the draft will wait on the Food page.` If something stops it, the reason shows above the button in red.
+- **{button:Read it|primary}.** While it works it says `Reading…`, with the line `This can take up to a minute. You can leave: the draft will wait in your recipes.` If something stops it, the reason shows above the button in red.
 
 ## How a link is read
 
 1. On the recipe's page, copy its address: from the address bar, or with Share and then Copy link on a phone.
 2. Pick **From a link**, paste the address into **Link**, and click {button:Read it|primary}.
 3. Most recipe sites put the recipe on the page twice: once for people, and once as data for search engines. When the page has that data, the recipe is read from it exactly, in a second or two, with the page's photo and the nutrition per serving if the page lists it.
-4. When a page has no such data, Claude reads the page's words and takes the recipe out of them. That takes up to a minute, and you can leave meanwhile: the draft waits under **Drafts** on the Food page.
+4. When a page has no such data, Claude reads the page's words and takes the recipe out of them. That takes up to a minute, and you can leave meanwhile: the draft waits under **Drafts** in your recipes.
 5. The editor opens on the recipe, marked `Read from` and the site's name.
 
 Some sites check that a visitor is a person before they show the page, with a "Just a moment" page or a puzzle to solve. Yosher does not try to get past those. When a site does that, copy the recipe from the page yourself and use **Paste the text**.

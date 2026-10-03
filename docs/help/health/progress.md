@@ -18,9 +18,11 @@ On Health, click {button:Progress|outline|chart-column}. Each row is one thing y
   - **Each of your habits**, by its name. A habit you mark done or not shows the days you did it, such as `5 days`. A counted habit shows the total, such as `60 min`.
   - **`Workout days`**, when Workouts is switched on in your space: the days you logged at least one set, in any program. Two workouts on one day are one day.
   - **`Feel after a workout`**, when Workouts is switched on: the average of how you felt after your workouts, such as `7.0 of 10`.
+  - **`Calories a day`**, **`Protein a day`**, **`Carbs a day`** and **`Fat a day`**, when Food is switched on: each the average of the days you logged anything, such as `2,010 kcal` or `131 g`. A day you logged nothing is left out, not counted as zero. More calories is neither better nor worse, so that row is never in Health's color; more protein is the better way.
+  - **`Days on your calorie target`** and **`Days on your protein target`**, once you set targets in Food: the days you hit each. A day is on its calorie target within a tenth of it, either way, and on its protein target at or above it.
 - **In each row:**
   - **The last 7 days**, such as `Last 7 days: 7 h 12 min`. With nothing logged in those days, it says `Nothing in the last 7 days`.
-  - **How it compares** with the weeks before, such as `up 25 min on the weeks before` with {icon:trending-up}, or `down 1.0 on the weeks before` with {icon:trending-down}. The weeks before are the average of the three earlier weeks. A week with no nights, no plunges or no workouts is left out of an average such as `Sleep a night`; for a count, such as `Cold plunges` or a habit's days, it counts as zero. The words are in Health's color when the change is the better way, such as more sleep or more plunges, and gray when it is not. A small change says `about the same as the weeks before`, with no arrow: under 10 minutes of sleep, 15 seconds in the cold, 0.3 on a score from 0 to 10, or one day or one plunge. When the weeks before have nothing to compare, such as in your first week of logging sleep, the line is left out.
+  - **How it compares** with the weeks before, such as `up 25 min on the weeks before` with {icon:trending-up}, or `down 1.0 on the weeks before` with {icon:trending-down}. The weeks before are the average of the three earlier weeks. A week with no nights, no plunges or no workouts is left out of an average such as `Sleep a night`; for a count, such as `Cold plunges` or a habit's days, it counts as zero. The words are in Health's color when the change is the better way, such as more sleep or more plunges, and gray when it is not. A small change says `about the same as the weeks before`, with no arrow: under 10 minutes of sleep, 15 seconds in the cold, 0.3 on a score from 0 to 10, one day or one plunge, 50 calories, or 5 grams. When the weeks before have nothing to compare, such as in your first week of logging sleep, the line is left out.
   - **Four bars**, one a week, the oldest on the left. The newest, on the right, is the darkest. Each is as tall as its week's number against the row's biggest week. A week with nothing logged, or a count of zero, is a flat line.
 
 The page keeps up with the day. Left open overnight, it fetches today's numbers the next time you look at it.
@@ -38,12 +40,11 @@ The page keeps up with the day. Left open overnight, it fetches today's numbers 
 | --- | --- |
 | `Nothing in the last 7 days` | Nothing was logged for that row in the newest week. The bars still show the weeks before. |
 | `about the same as the weeks before` | The newest week is within a small step of the weeks before. |
-| `Workouts could not be read just now. Reload the page to try again.` | Health could not read your workouts this time, so their rows are missing. Your workouts are fine. Reload the page. |
+| `Workouts could not be read just now. Reload the page to try again.` | Health could not read your workouts this time, so their rows are missing. Your workouts are fine. Reload the page. The same line names `Food`, or `Workouts and Food`, when it is those. |
 
 ## Not on this page
 
 - **More than four weeks.** Progress shows the last four. Ask us if you want a longer view.
-- **What you ate.** It comes from Food when Food logs meals, and then gets its own rows here.
 - **Sleep from a watch or a ring.** Not built. It comes later if you wear one.
 - **Changing a number.** Progress only reads. Fix a night or a plunge on Health, and a habit's name or unit on [Your habits](habits.md).
 

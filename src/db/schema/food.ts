@@ -124,7 +124,7 @@ export const foodImportStatus = pgEnum("food_import_status", ["reading", "draft"
 /**
  * A RECIPE ON ITS WAY IN (D1): read from a link, pasted text or a photo of a
  * page. The row exists from the moment reading starts, so a person who leaves
- * while Claude reads still finds the draft on the Food page, as Workouts'
+ * while Claude reads still finds the draft in their recipes, as Workouts'
  * imports do. A photo of a page is read and never kept; the page's own photo,
  * from a link, is prepared at once and held here until the recipe takes it or
  * the draft is discarded.
@@ -200,6 +200,154 @@ export const foodCooks = pgTable(
   ],
 );
 
+/** A household measure of a food and what it weighs: "1 banana", 126 g. */
+export interface FoodPortion {
+  label: string;
+  grams: number;
+}
+
+/**
+ * THE FOOD LIST (D4a, ADR 0126): USDA FoodData Central's survey foods (FNDDS),
+ * the foods people report eating, each with its nutrients PER 100 G and its
+ * household portions. Reference data, the same in every space, so no tenant:
+ * read by any member (the `modules` table's policy), written only by the seed
+ * (`scripts/data/usda-foods.json`, made by `scripts/build-usda-foods.ts`).
+ *
+ * Searched through `search_tsv`, a generated column made in the migration and
+ * not modelled here, as `documents.search_tsv` is (0026): drizzle has no
+ * tsvector type, and a column it cannot see is safe from a spurious DROP.
+ */
+export const foodUsdaFoods = pgTable(
+  "food_usda_foods",
+  {
+    /** FoodData Central's id: stable across releases while the food is in them. */
+    fdcId: integer("fdc_id").primaryKey(),
+    /** As a person reads it ("NS as to" and "NFS" spelled out). */
+    name: text("name").notNull(),
+    /** USDA's WWEIA category: "Bananas", "Chicken, whole pieces". */
+    category: text("category").notNull(),
+    calories: doublePrecision("calories").notNull(),
+    proteinG: doublePrecision("protein_g").notNull(),
+    carbsG: doublePrecision("carbs_g").notNull(),
+    fatG: doublePrecision("fat_g").notNull(),
+    fiberG: doublePrecision("fiber_g").notNull(),
+    sugarG: doublePrecision("sugar_g").notNull(),
+    sodiumMg: doublePrecision("sodium_mg").notNull(),
+    portions: jsonb("portions").$type<FoodPortion[]>().notNull(),
+    /** Which release the row came from, so a new one can be told apart. */
+    release: text("release").notNull(),
+  },
+  (t) => [
+    check(
+      "food_usda_foods_nutrients_positive",
+      sql`${t.calories} >= 0 and ${t.proteinG} >= 0 and ${t.carbsG} >= 0 and ${t.fatG} >= 0
+        and ${t.fiberG} >= 0 and ${t.sugarG} >= 0 and ${t.sodiumMg} >= 0`,
+    ),
+  ],
+);
+
+/** Which meal something was eaten in (D4a, the founder's call). */
+export const foodMeal = pgEnum("food_meal", ["breakfast", "lunch", "dinner", "snack"]);
+
+/** How an eaten thing came in: found on the food list, a saved recipe, or read from a photo of the plate. */
+export const foodEatenSource = pgEnum("food_eaten_source", ["food", "recipe", "photo"]);
+
+/**
+ * WHAT WAS EATEN (D4a, the founder's calls 2026-10-03): one food or one recipe,
+ * on a day, in a meal, with what it came to. The numbers are kept as they were
+ * worked out when it was logged, so a recipe changed later, or a new release of
+ * the food list, never rewrites a day already eaten; a recipe that states no
+ * nutrition leaves them null, and the day says so.
+ *
+ * The id is the phone's, so an Add sent twice is one row. A food points at the
+ * list (`fdc_id`) and a recipe at the person's own (`recipe_id`, a composite
+ * key); deleting the recipe keeps the row and its numbers, with the name it
+ * had (`ON DELETE SET NULL ("recipe_id")`, hand-edited in the migration).
+ */
+export const foodEaten = pgTable(
+  "food_eaten",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The space's own day it was eaten. */
+    eatenOn: date("eaten_on").notNull(),
+    meal: foodMeal("meal").notNull(),
+    source: foodEatenSource("source").notNull(),
+    fdcId: integer("fdc_id").references(() => foodUsdaFoods.fdcId, { onDelete: "set null" }),
+    recipeId: uuid("recipe_id"),
+    /** What it was called when it was logged: the food's name or the recipe's title. */
+    name: text("name").notNull(),
+    /** How many of `portion`: 1.5 (servings), 150 (g), 2 ("1 egg"). */
+    amount: doublePrecision("amount").notNull(),
+    /** "g", "oz", "1 banana", or "serving" for a recipe. */
+    portion: text("portion").notNull(),
+    /** What a food came to, in grams; null for a recipe, whose servings have no weight. */
+    grams: doublePrecision("grams"),
+    calories: doublePrecision("calories"),
+    proteinG: doublePrecision("protein_g"),
+    carbsG: doublePrecision("carbs_g"),
+    fatG: doublePrecision("fat_g"),
+    fiberG: doublePrecision("fiber_g"),
+    sugarG: doublePrecision("sugar_g"),
+    sodiumMg: doublePrecision("sodium_mg"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    /**
+     * `clock_timestamp()`, not `now()`: a plate's foods are written in one
+     * transaction, where `now()` is one instant for every row, and the day
+     * lists a meal in the order things were logged (0445).
+     */
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("food_eaten_tenant_day_idx").on(t.tenantId, t.eatenOn),
+    // Hand-edited in the migration to the column-list form `ON DELETE SET NULL ("recipe_id")`:
+    // a bare SET NULL would try to null tenant_id too and can never run on a composite key.
+    foreignKey({
+      name: "food_eaten_recipe_fk",
+      columns: [t.tenantId, t.recipeId],
+      foreignColumns: [foodRecipes.tenantId, foodRecipes.id],
+    }).onDelete("set null"),
+    check("food_eaten_amount_range", sql`${t.amount} > 0 and ${t.amount} <= 100000`),
+    check("food_eaten_grams_for_foods", sql`(${t.source} = 'recipe') = (${t.grams} is null)`),
+    check("food_eaten_grams_positive", sql`${t.grams} is null or ${t.grams} > 0`),
+    check("food_eaten_name_length", sql`char_length(${t.name}) between 1 and 300`),
+    check(
+      "food_eaten_nutrients_positive",
+      sql`coalesce(${t.calories}, 0) >= 0 and coalesce(${t.proteinG}, 0) >= 0 and coalesce(${t.carbsG}, 0) >= 0
+        and coalesce(${t.fatG}, 0) >= 0 and coalesce(${t.fiberG}, 0) >= 0 and coalesce(${t.sugarG}, 0) >= 0
+        and coalesce(${t.sodiumMg}, 0) >= 0`,
+    ),
+  ],
+);
+
+/**
+ * A PERSON'S DAILY TARGETS (D4a, the founder's call: calories and protein).
+ * One row a space; either may be left unset. A day is judged against the
+ * targets as they are now, not as they were that day.
+ */
+export const foodTargets = pgTable(
+  "food_targets",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    calories: integer("calories"),
+    proteinG: integer("protein_g"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("food_targets_calories_range", sql`${t.calories} is null or ${t.calories} between 500 and 10000`),
+    check("food_targets_protein_range", sql`${t.proteinG} is null or ${t.proteinG} between 10 and 500`),
+  ],
+);
+
 export type FoodRecipe = typeof foodRecipes.$inferSelect;
 export type FoodCook = typeof foodCooks.$inferSelect;
 export type FoodImport = typeof foodImports.$inferSelect;
+export type FoodUsdaFood = typeof foodUsdaFoods.$inferSelect;
+export type FoodEatenRow = typeof foodEaten.$inferSelect;

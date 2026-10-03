@@ -160,7 +160,9 @@ and skipped by the build-docs walker:
   needs `npm run db:seed -- --dev` and `npm run db:seed`, in the same
   before-the-merge ritual as a migration, then **`npm run db:verify-modules`**
   (and `-- --dev`) to prove the database's registry matches the code's. It exits
-  1 and names what is missing. `tests/module-catalogue.test.ts` covers the other
+  1 and names what is missing. The seed also loads Food's food list
+  (`scripts/data/usda-foods.json`, ADR 0126), and the same check fails a
+  database without it. `tests/module-catalogue.test.ts` covers the other
   half — that every registered pack HAS a row in the first place.
 - `npm run db:create-role` — creates/rotates the `app_user` role the app
   connects as. Required: Neon's owner role has BYPASSRLS, so the app must

@@ -38,7 +38,7 @@ export function DiscardDraftButton({
       }
       setOpen(false);
       toast.success("Draft discarded");
-      router.push("/personal/m/food");
+      router.push("/personal/m/food/recipes");
       router.refresh();
     });
   }

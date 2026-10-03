@@ -33,7 +33,7 @@ type PhotoState = { kind: "keep"; url: string | null } | { kind: "none" } | { ki
 /**
  * THE RECIPE EDITOR (docs/help/food/editor.md): typing a recipe in, checking a
  * draft that was read from a link, a paste or photos, and editing a saved one.
- * Nothing is saved until Save recipe; a draft waits on the Food page until it
+ * Nothing is saved until Save recipe; a draft waits in the recipes until it
  * is saved or discarded.
  */
 export function RecipeEditor({
@@ -390,7 +390,7 @@ export function RecipeEditor({
           <DiscardDraftButton importId={mode.importId} />
         ) : (
           <Button asChild variant="ghost">
-            <Link href={mode.kind === "edit" ? `${HOME}/recipes/${mode.recipeId}` : HOME}>Cancel</Link>
+            <Link href={mode.kind === "edit" ? `${HOME}/recipes/${mode.recipeId}` : `${HOME}/recipes`}>Cancel</Link>
           </Button>
         )}
         <Button onClick={save} disabled={pending || photoBusy}>

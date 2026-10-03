@@ -102,7 +102,7 @@ export function AddRecipe() {
       }
       if ("error" in outcome) {
         setError(outcome.error);
-        // The person has seen why; a failed draft need not wait on the Food page too.
+        // The person has seen why; a failed draft need not wait in their recipes too.
         if (outcome.importId) void discardImportAction({ importId: outcome.importId });
         return;
       }
@@ -245,7 +245,7 @@ export function AddRecipe() {
           </Button>
           {pending && (
             <p className="text-sm text-muted-foreground">
-              This can take up to a minute. You can leave: the draft will wait on the Food page.
+              This can take up to a minute. You can leave: the draft will wait in your recipes.
             </p>
           )}
         </div>

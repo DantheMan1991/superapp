@@ -22,6 +22,7 @@ Open a recipe and click {button:Cook|primary|chef-hat}. Cook mode opens on the i
 - **A timer that ends**: a red box at the top, such as `Step 4 · 25–30 min: time's up`, with `Check it now. It can take up to 30 min.` for a time the recipe gave as a range, or `Done.` for one time. It chimes, and buzzes on an Android phone, every second and a half until you click {button:Stop|primary}, or {button:1 min|outline|plus} for one more minute.
 - **Done. Enjoy it.**, after the last step:
   - {button:Log that you made it|primary}, with `The recipe shows how many times you have made it, and when last.` Once logged it says, for example, `Logged: made today, for 12 wedges.`, with {button:Undo|ghost|undo} if you logged it by mistake.
+  - {button:Log what you ate|outline}. Opens Log food with this recipe chosen, to log the servings you ate on a meal. Logging that you made it counts the batch; this is what you ate. See [Logging what you ate](log.md).
   - {button:Back|outline}, to the last step, and {button:Back to the recipe|outline}.
 
 ## How to cook a recipe
@@ -113,7 +114,7 @@ Any phrase but “ingredients” closes the ingredient list if it is open. Say t
 - Your place, your ticks and your timers are kept on this phone, for this recipe, for 12 hours. Another phone does not see them. After 12 hours, cook mode starts afresh.
 - While a cook is under way, the recipe page says {button:Back to cooking|primary|chef-hat} with where you are. A cook under way keeps the servings it started with: to cook for a different number, click {button:Start over|ghost} on the recipe page, set the servings, and click {button:Cook|primary|chef-hat}.
 - {button:Back to the recipe|outline} on the last screen clears them, unless a timer is still running: then they wait for the next time you open cook mode.
-- What you log is kept in your account. The recipe page says how often, such as `Made 3 times, last on Sep 30.`, and the Food page shows `made 3×` on the recipe's row.
+- What you log is kept in your account. The recipe page says how often, such as `Made 3 times, last on Sep 30.`, and your recipes show `made 3×` on its row.
 
 ## Messages
 

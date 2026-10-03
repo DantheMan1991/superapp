@@ -7,6 +7,7 @@ import { configureNeonForLocalProxy } from "./lib/neon-local";
 import * as schema from "../src/db/schema";
 import { MODULES } from "./seed-catalogue";
 import { enablePersonalToolsEverywhereSql } from "../src/lib/personal-tools-sql";
+import { seedUsdaFoods } from "./lib/usda-foods";
 
 
 /**
@@ -97,6 +98,15 @@ async function main() {
       (personalToolRows > 0
         ? ` Switched on ${personalToolRows} personal tool row${personalToolRows === 1 ? "" : "s"}.`
         : ""),
+  );
+
+  // The food list Food's eating log searches (D4a, ADR 0126): the same
+  // release in every database, from the committed file, no network.
+  const foods = await seedUsdaFoods(db);
+  console.log(
+    foods.loaded > 0
+      ? `Loaded ${foods.loaded} foods (${foods.release})${foods.removed > 0 ? `, removed ${foods.removed} no longer in it` : ""}.`
+      : `The food list is current (${foods.release}).`,
   );
   await pool.end();
 }

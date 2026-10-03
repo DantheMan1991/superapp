@@ -4,14 +4,15 @@
 > **Route:** /personal/m/food/recipes/*
 > **Order:** 30
 
-Open **Food** and click a recipe. Change the servings with {button:−|outline|minus} and {button:+|outline|plus}, and the amounts follow.
+Open **Food**, click `Recipes`, and click a recipe. Change the servings with {button:−|outline|minus} and {button:+|outline|plus}, and the amounts follow.
 
 ## What you see
 
 - **The recipe's name**, the title, with its times under it, such as `35 min · Prep 15 min · Cook 20 min`.
 - **How often you have made it**, once you have logged it from cook mode, such as `Made 3 times, last on Sep 30.`
+- **{button:Log it|outline|plus}.** Opens Log food with this recipe chosen, to log the servings you ate on a meal. See [Logging what you ate](log.md).
 - **{button:Edit|outline|pencil}.** Opens the recipe in the editor. See [Typing in and editing a recipe](editor.md).
-- **{button:Delete|outline|trash}.** Asks `Delete` and the recipe's name, with `The recipe and its photo are deleted. This cannot be undone.` Click {button:Delete recipe|destructive} to delete it, or {button:Keep it|ghost}. After a delete it says `Recipe deleted` and opens the Food page.
+- **{button:Delete|outline|trash}.** Asks `Delete` and the recipe's name, with `The recipe and its photo are deleted. This cannot be undone.` Click {button:Delete recipe|destructive} to delete it, or {button:Keep it|ghost}. After a delete it says `Recipe deleted` and opens your recipes.
 - **`From` and the site's name**, with {icon:external-link}, when the recipe has a source link. Click it to open the page it came from, in a new tab.
 - **The tags**, after the source.
 - **The photo**, when the recipe has one.

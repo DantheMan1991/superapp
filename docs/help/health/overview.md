@@ -4,7 +4,7 @@
 > **Route:** /personal/m/health/**
 > **Order:** 0
 
-Open **Health** {icon:heart-pulse} in the sidebar of your personal space. This page is today: last night's sleep, today's cold plunges, today's workout, and your own habits to mark. Most mornings, logging your sleep is one tap on {button:Save|primary}. To see how things are going over the last four weeks, click {button:Progress|outline|chart-column}.
+Open **Health** {icon:heart-pulse} in the sidebar of your personal space. This page is today: last night's sleep, today's cold plunges, today's workout, what you ate, and your own habits to mark. Most mornings, logging your sleep is one tap on {button:Save|primary}. To see how things are going over the last four weeks, click {button:Progress|outline|chart-column}.
 
 ## What you see
 
@@ -24,6 +24,7 @@ Open **Health** {icon:heart-pulse} in the sidebar of your personal space. This p
   - **{button:Start the timer|primary|play}.** Opens the plunge timer. See [The cold plunge timer](plunge.md). While a plunge is being timed on this phone, it reads {button:Back to the timer|primary|play} instead.
   - **{button:Type one in|outline}.** For a plunge you timed some other way: type its minutes and seconds. It is hidden while the timer is running.
 - **`Workout`** {icon:dumbbell}, when Workouts is switched on in your space. It says `Not yet today`, or what you did today, such as `Worked out · 4 exercises · 22 min`, and how your last workout of the day left you, such as `Felt 4 before, 7 after`. A workout here is any session in which you logged at least one set, in any program. {button:Open|ghost} opens Workouts.
+- **`Eating`** {icon:utensils}, when Food is switched on in your space. It says `Nothing logged today`, or the day so far, such as `1,640 kcal · protein 128 g · carbs 150 g · fat 52 g`. With targets set in Food, how far along each, such as `Protein 128 of 150 g · calories 1,640 of 2,200`. When a recipe you logged states no nutrition, it says so, such as `1 thing has no nutrition stated`. {button:Open|ghost} opens Food, where you log what you ate.
 - **`Your habits`**, the things you added yourself, such as a sauna or stretching. {button:Change|ghost|settings-2} opens [Your habits](habits.md), where you add, rename and delete them. Before you have any, the button reads {button:Add|ghost|settings-2}, and the card says `Add your own, such as a sauna, stretching or a supplement, to mark them done here each day.` with the link `Add a habit` {icon:list-plus}.
   - **A button for each habit.** Tap one to mark it done today: it fills in, with a {icon:check}. Tap it again to undo.
   - **A counted habit** (one with a unit, such as minutes) asks how much first, such as `Sauna: how much, in min?`. Type the amount and click {button:Done|primary}, or {button:Cancel|ghost}. {button:Done|primary} stays grayed out until the amount is a number above 0. The button then says the amount, such as `Sauna · 20 min`.
@@ -57,13 +58,12 @@ To fix it later in the day, click {button:Change|ghost|pencil}, change it, and c
 | `That could not be kept. Try again.` | Marking the habit did not work. Nothing changed. Tap it again. |
 | `It could not be removed. Try again.` | Removing the night or the plunge did not work. It is still there. Try again in a moment. |
 | `Something in that was not right. Check it and try again.` | What was sent was not something Health keeps. Reload the page and try again. |
-| `Workouts could not be read just now. Reload the page to try again.` | Your workouts are fine, but Health could not read them this time. Everything else on the page is up to date. |
+| `Workouts could not be read just now. Reload the page to try again.` | Your workouts are fine, but Health could not read them this time. Everything else on the page is up to date. The same line names `Food`, or `Workouts and Food`, when it is those. |
 
 ## Not on this page
 
 - **Logging an earlier night or day.** You log this morning's night and mark today's habits. A night you missed cannot be filled in yet. Ask us if you need it.
 - **Sleep from a watch or a ring.** Not built. It comes later if you wear one.
-- **What you ate.** It comes from Food when Food logs meals, and then shows here and on Progress.
 - **Reminders.** Health does not remind you to plunge or to log your sleep.
 
 ## Who can do what

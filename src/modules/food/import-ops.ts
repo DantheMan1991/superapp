@@ -31,7 +31,7 @@ import { ReadModelError, callReadModel, type ReadModel } from "./read-model";
  * AN IMPORT: a recipe on its way in, from a link, pasted text or photos of a
  * page (src/db/schema/food.ts). `reading` → `draft`, or `failed`; saving or
  * discarding it deletes the row. It exists from the moment Claude starts, so
- * a person who leaves while it reads still finds the draft on the Food page.
+ * a person who leaves while it reads still finds the draft in their recipes.
  *
  * Every read happens OUTSIDE a transaction, between short ones: a row held
  * open for a minute of Claude reading would be a lock held for a minute.

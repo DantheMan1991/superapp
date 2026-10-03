@@ -2,6 +2,7 @@ import "dotenv/config";
 import { neonConfig, Pool } from "@neondatabase/serverless";
 import ws from "ws";
 import { MODULES } from "./seed-catalogue";
+import { readUsdaFoodFile } from "./lib/usda-foods";
 
 /**
  * `npm run db:verify-modules` — prove a database's module registry matches the
@@ -42,6 +43,11 @@ import { MODULES } from "./seed-catalogue";
  * there for spaces made before it shipped. So a space missing one is the seed
  * not having run, the same fault as a missing catalogue row, and it fails the
  * same way.
+ *
+ * **And the food list** Food's eating log searches (D4a, ADR 0126): the seed
+ * loads it from `scripts/data/usda-foods.json`, so a database without all of
+ * the file's foods, of the file's release, is the seed not having run, and a
+ * food search there finds nothing.
  */
 
 function resolveTarget(): { url: string; label: string } | null {
@@ -106,6 +112,18 @@ async function main() {
        )
      group by m.id
   `);
+  const foodFile = readUsdaFoodFile();
+  // A database the food list's migration has not reached has no table to count.
+  const { rows: tables } = await pool.query<{ there: boolean }>(
+    `select to_regclass('public.food_usda_foods') is not null as there`,
+  );
+  const foodTable = tables[0].there;
+  const { rows: foodList } = foodTable
+    ? await pool.query<{ total: number; current: number }>(
+        `select count(*)::int as total, count(*) filter (where release = $1)::int as current from food_usda_foods`,
+        [foodFile.release],
+      )
+    : { rows: [{ total: 0, current: 0 }] };
   await pool.end();
 
   const liveById = new Map(live.map((r) => [r.id, r]));
@@ -159,6 +177,21 @@ async function main() {
     console.error("\nFix with:  npm run db:seed" + (process.argv.includes("--dev") ? " -- --dev" : ""));
   }
 
+  const foods = foodList[0];
+  const foodsOk = foods.total === foodFile.foods.length && foods.current === foodFile.foods.length;
+  if (foodsOk) {
+    console.log(`✓ the food list has all ${foodFile.foods.length} foods of ${foodFile.release}.`);
+  } else if (!foodTable) {
+    console.error("\n✗ the food list's table is not there: its migration has not run on this database.");
+    console.error("\nFix with:  npm run db:migrate" + (process.argv.includes("--dev") ? " -- --dev" : "") + ", then the seed.");
+  } else {
+    console.error(
+      `\n✗ the food list is not the code's: ${foods.current} of its ${foodFile.foods.length} foods of ${foodFile.release}, ` +
+        `${foods.total} foods in all. Food's search finds nothing it does not have.`,
+    );
+    console.error("\nFix with:  npm run db:seed" + (process.argv.includes("--dev") ? " -- --dev" : ""));
+  }
+
   if (extra.length > 0) {
     console.log(
       `\nNote: ${extra.length} row(s) in the database the code no longer defines — ` +
@@ -166,7 +199,7 @@ async function main() {
     );
   }
 
-  process.exit(missing.length + drifted.length + toolGaps.length === 0 ? 0 : 1);
+  process.exit(missing.length + drifted.length + toolGaps.length === 0 && foodsOk ? 0 : 1);
 }
 
 main().catch((err) => {

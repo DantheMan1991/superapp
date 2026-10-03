@@ -288,6 +288,8 @@ all alike, so a tool ships no component. Each source is asked in a
 transaction of its own, because a failed query aborts the transaction it ran
 in, and a failure costs only that tool's rows
 ([ADR 0125](decisions/0125-health-reads-progress-from-the-tools-through-a-slot-a-week-at-a-time.md)).
+Food filled it second (D4a, 2026-10-03): its eating log's calories and macros
+a day, and its own card, with no change to Health but a registry line.
 
 ---
 

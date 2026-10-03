@@ -5,12 +5,13 @@ import { useEffect, useRef } from "react";
 import { todayInTimezone } from "@/lib/timezone";
 
 /**
- * TODAY STAYS TODAY (H1). A phone keeps a page open for days; Today drawn
- * yesterday would mark yesterday's habits and show yesterday's night. So when
- * the page is looked at again, and once a minute while it is, it asks the
- * space's own day, and fetches the page afresh when that has moved on. The
- * actions refuse a day that is not today as well (`NEW_DAY`): this is the
- * page keeping up, that is the backstop.
+ * TODAY STAYS TODAY (Health H1; Food's Today, D4a). A phone keeps a page open
+ * for days; a Today drawn yesterday would mark yesterday's habits, show
+ * yesterday's night, and log a meal against yesterday. So when the page is
+ * looked at again, and once a minute while it is, it asks the space's own
+ * day, and fetches the page afresh when that has moved on. Health's actions
+ * refuse a day that is not today as well (`NEW_DAY`): this is the page
+ * keeping up, that is the backstop. Render it only on a page showing today.
  *
  * Once per day the phone reaches: a phone whose clock is wrong would otherwise
  * fetch the page every minute, since the server's day never catches it up.

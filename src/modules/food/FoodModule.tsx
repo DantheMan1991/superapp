@@ -1,105 +1,119 @@
 import Link from "next/link";
-import { Camera, ClipboardList, Link2, Loader2, Plus, TriangleAlert, UtensilsCrossed } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, UtensilsCrossed } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
+import { DayWatch } from "@/components/app/day-watch";
 import { PageHeader } from "@/components/app/page-header";
-import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
-import { describeAgo } from "@/lib/last-seen";
-import { hostOf } from "./core/recipe";
-import { importDraft, listImports } from "./import-ops";
-import { FOOD_HOME, listRecipes } from "./recipe-ops";
-import { DiscardDraftButton } from "./components/discard-draft-button";
-import { RecipeList } from "./components/recipe-list";
+import { addDays, localHourInTimezone, todayInTimezone } from "@/lib/timezone";
+import { LOG_BACK_DAYS, mealAt } from "./core/eating";
+import { dayEaten, getTargets } from "./eating-ops";
+import { FOOD_HOME } from "./recipe-ops";
+import { EatenDay } from "./components/eaten-day";
+import { FoodNav } from "./components/food-nav";
+
+/** "Today", "Yesterday", or "Thursday, Oct 1". */
+function dayWords(day: string, today: string): string {
+  if (day === today) return "Today";
+  if (day === addDays(today, -1)) return "Yesterday";
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 /**
- * FOOD, the tool's front page (docs/help/food/overview.md): any draft still
- * waiting (being read, ready to check, or failed), then the recipes with a
- * search box and their tags. A personal tool: this only ever renders inside a
- * personal space, behind `requirePersonalSpace` and a module gate that
- * refuses it anywhere else (ADR 0111).
+ * FOOD, TODAY (D4a, docs/help/food/overview.md; the founder's calls
+ * 2026-10-03): what was eaten on a day, its calories and macros, the targets,
+ * and each meal; Log food to add. Food's front page since D4a; the recipes
+ * moved one tab over (`/personal/m/food/recipes`). The last two weeks can be
+ * stepped back through with `?day=`, to log a meal forgotten. A personal
+ * tool: this only ever renders inside a personal space, behind
+ * `requirePersonalSpace` and a module gate (ADR 0111).
  */
-export async function FoodModule({ ctx }: { ctx: TenantContext }) {
-  const now = new Date();
-  const [recipes, imports] = await withTenant(
+export async function FoodModule({
+  ctx,
+  searchParams,
+}: {
+  ctx: TenantContext;
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const today = todayInTimezone(ctx.tenant.timezone);
+  const earliest = addDays(today, -LOG_BACK_DAYS);
+  const asked = typeof searchParams?.day === "string" ? searchParams.day : null;
+  const day = asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today && asked >= earliest ? asked : today;
+  const [entries, targets] = await withTenant(
     ctx.tenant.id,
-    (tx) => Promise.all([listRecipes(tx, ctx.tenant.id), listImports(tx, ctx.tenant.id)]),
+    async (tx) => [await dayEaten(tx, ctx.tenant.id, day), await getTargets(tx, ctx.tenant.id)] as const,
     { role: ctx.role },
   );
-
-  const add = (
-    <Button asChild size="sm">
-      <Link href={`${FOOD_HOME}/add`}>
-        <Plus aria-hidden /> Add a recipe
-      </Link>
-    </Button>
-  );
+  const meal = day === today ? mealAt(localHourInTimezone(ctx.tenant.timezone)) : "dinner";
+  const dayHref = (d: string) => (d === today ? FOOD_HOME : `${FOOD_HOME}?day=${d}`);
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6">
+    <div className="mx-auto w-full max-w-3xl space-y-4">
+      {day === today && <DayWatch today={today} timeZone={ctx.tenant.timezone} />}
       <PageHeader
         title="Food"
-        description="Your recipes in one place: from a link, a photo of a page, pasted text, or typed in."
+        description="What you ate, and your recipes."
         icon={<UtensilsCrossed />}
-        actions={add}
+        actions={
+          <Button asChild size="sm">
+            <Link href={`${FOOD_HOME}/log?meal=${meal}&day=${day}`}>
+              <Plus aria-hidden /> Log food
+            </Link>
+          </Button>
+        }
       />
+      <FoodNav />
 
-      {imports.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="font-heading font-medium tracking-heading">Drafts</h2>
-          <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card shadow-elevation-1">
-            {imports.map((row) => {
-              const Icon = row.kind === "link" ? Link2 : row.kind === "photo" ? Camera : ClipboardList;
-              const title =
-                (row.status === "draft" ? importDraft(row)?.title : null) ||
-                (row.kind === "link" ? hostOf(row.sourceUrl) : row.kind === "photo" ? "Photos of a page" : "Pasted text");
-              return (
-                <li key={row.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <Icon className="size-5 shrink-0 text-module-accent" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{title}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {row.status === "reading" && (
-                        <span className="inline-flex items-center gap-1">
-                          <Loader2 className="size-3.5 animate-spin" aria-hidden /> Reading, started{" "}
-                          {describeAgo(row.createdAt, now)}
-                        </span>
-                      )}
-                      {row.status === "draft" && "Ready to check"}
-                      {row.status === "failed" && (
-                        <span className="inline-flex items-start gap-1 text-destructive">
-                          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                          {row.error ?? "The recipe could not be read."}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {row.status === "draft" && (
-                    <Button asChild size="sm">
-                      <Link href={`${FOOD_HOME}/drafts/${row.id}`}>Check it</Link>
-                    </Button>
-                  )}
-                  {row.status !== "reading" && <DiscardDraftButton importId={row.id} variant="outline" size="sm" />}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+      <nav className="flex items-center justify-between gap-2" aria-label="Day">
+        {day > earliest ? (
+          <Button asChild variant="ghost" size="icon" aria-label="The day before">
+            <Link href={dayHref(addDays(day, -1))}>
+              <ChevronLeft aria-hidden />
+            </Link>
+          </Button>
+        ) : (
+          <span className="size-9" />
+        )}
+        <span className="font-medium">{dayWords(day, today)}</span>
+        {day < today ? (
+          <Button asChild variant="ghost" size="icon" aria-label="The day after">
+            <Link href={dayHref(addDays(day, 1))}>
+              <ChevronRight aria-hidden />
+            </Link>
+          </Button>
+        ) : (
+          <span className="size-9" />
+        )}
+      </nav>
 
-      {recipes.length === 0 ? (
-        imports.length === 0 && (
-          <EmptyState
-            panel
-            icon={<UtensilsCrossed />}
-            title="No recipes yet"
-            description="Add one from a link, a photo of a cookbook page, text you pasted, or type it in. You check it before it is saved."
-            action={add}
-          />
-        )
-      ) : (
-        <RecipeList recipes={recipes} />
-      )}
+      <EatenDay
+        key={day}
+        day={day}
+        targets={targets}
+        entries={entries.map((e) => ({
+          id: e.id,
+          meal: e.meal,
+          source: e.source,
+          name: e.name,
+          amount: e.amount,
+          portion: e.portion,
+          grams: e.grams,
+          portions: e.portions,
+          calories: e.calories,
+          proteinG: e.proteinG,
+          carbsG: e.carbsG,
+          fatG: e.fatG,
+          fiberG: e.fiberG,
+          sugarG: e.sugarG,
+          sodiumMg: e.sodiumMg,
+        }))}
+      />
     </div>
   );
 }

@@ -378,10 +378,21 @@ d("health (db)", () => {
 
       const rows = await contributedRows(tenant.id, windows, "owner");
       expect(rows.failed).toEqual([]);
-      expect(rows.found.map((r) => [r.key, r.values])).toEqual([
+      // In registration order: Workouts, then Food (D4a), which the preview switched on too
+      // and which has nothing logged, so its weeks are empty and it has no target rows.
+      const foodKeys = ["food.calories", "food.protein", "food.carbs", "food.fat"];
+      expect(rows.found.map((r) => r.key)).toEqual(["fitness.days", "fitness.feel", ...foodKeys]);
+      expect(rows.found.slice(0, 2).map((r) => [r.key, r.values])).toEqual([
         ["fitness.days", [0, 0, 0, 2]],
         ["fitness.feel", [null, null, null, (7 + 5 + 8) / 3]],
       ]);
+      const eating = {
+        key: "food",
+        title: "Eating",
+        icon: "utensils",
+        lines: ["Nothing logged today"],
+        href: "/personal/m/food",
+      };
       const cards = await contributedToday(tenant.id, TODAY, "owner");
       expect(cards).toEqual({
         found: [
@@ -392,6 +403,7 @@ d("health (db)", () => {
             lines: ["Worked out · 2 exercises · 25 min", "Felt 4 before, 8 after"],
             href: "/personal/m/fitness",
           },
+          eating,
         ],
         failed: [],
       });
@@ -400,7 +412,9 @@ d("health (db)", () => {
       const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
       const broken = vi.spyOn(fitnessProgressSource, "rows").mockRejectedValueOnce(new Error("boom"));
       try {
-        expect(await contributedRows(tenant.id, windows, "owner")).toEqual({ found: [], failed: ["Workouts"] });
+        const partly = await contributedRows(tenant.id, windows, "owner");
+        expect(partly.failed).toEqual(["Workouts"]);
+        expect(partly.found.map((r) => r.key)).toEqual(foodKeys);
       } finally {
         broken.mockRestore();
         quiet.mockRestore();
@@ -413,7 +427,7 @@ d("health (db)", () => {
           .set({ enabled: false })
           .where(and(eq(schema.tenantModules.tenantId, tenant.id), eq(schema.tenantModules.moduleId, "fitness"))),
       );
-      expect(await contributedToday(tenant.id, TODAY, "owner")).toEqual({ found: [], failed: [] });
+      expect(await contributedToday(tenant.id, TODAY, "owner")).toEqual({ found: [eating], failed: [] });
     });
   });
 });

@@ -448,6 +448,10 @@ export function CookMode({
               </p>
             </div>
           )}
+          {/* What you ATE is a serving, not the batch (D4a): it goes on the day's log. */}
+          <Button asChild variant="outline" className="h-12 w-full text-base">
+            <Link href={`/personal/m/food/log?recipe=${recipeId}`}>Log what you ate</Link>
+          </Button>
         </section>
       )}
 

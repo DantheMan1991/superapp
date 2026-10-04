@@ -5,7 +5,7 @@ name: CI
 #
 #   checks  — lint, types, build, and the PURE tests. No database, so it is safe
 #             to run many at once and safe to cancel when a newer push
-#             supersedes it. ~3 minutes. THIS is what gates a merge.
+#             supersedes it. ~5 minutes. THIS is what gates a merge.
 #   migrations
 #           — refuses a pull request that ADDS a drizzle/*.sql without the
 #             `full-tests` label. Seconds, no database. It exists because

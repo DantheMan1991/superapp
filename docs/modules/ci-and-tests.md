@@ -51,6 +51,37 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-10-03 — The two comments the docs fix left alone (branch `claude/ci-comments-postgres-in-runner`)
+
+**The `ci.yml` header and `vitest.config.ts` now say what the job does.** The
+entry below changed docs only, so it named both and left them. The header's job
+list had `tests` sharing *"ONE Neon branch with every other run"*, serialised
+repo-wide and never to be cancelled midway, at ~12 minutes, while the comment
+inside the same job said the opposite. The header now agrees with that comment:
+Postgres 18 built inside the job's own runner, nothing shared with another run,
+so not serialised and safe to cancel, run after a merge or on a PR labelled
+`full-tests`. `vitest.config.ts` gave the `db` project's reason for running one
+file at a time as *"share one Neon branch"*. It now reads *one database*, as
+`docs/conventions.md` §7 and `tests/db-backed-files.ts` already do. Comments
+only: no step, trigger or condition changed.
+
+**~7 minutes, not the 2m52s the 2026-08-15 entry measured.** The last five
+`Test suite` jobs on `main`, up to #700's, took 6m23s to 8m37s. In #700's run
+the suite step alone was 335s of the 6m23s, against 117s of vitest on
+2026-08-15, so it is the suite that grew, not the setup. The Open item on
+parallelising the `db` project still reasons from 2m52s and was not re-examined
+here. Nor was the header's ~3 minutes for `checks`, whose same five runs took
+3m48s to 6m26s.
+
+**What still says "one Neon branch" or "serialised repo-wide" says it as
+history.** Re-grepped after the edit, wrapped lines included. In `ci.yml`: the
+dated 2026-08-09 rationale, with its ~12 minutes, and the comment inside the
+job, which says the suite *used to* share one and be serialised. In this
+dossier: the 2026-08-08 and 2026-08-15 entries, the entry below and this one,
+which quote the old wording, and the Decisions bullet on why the `db-tests`
+group once existed. The #78 note in `ci.yml` keeps its repo-wide `db-tests`
+slot for the same reason.
+
 ### 2026-10-03 — The docs catch up with the database in the runner (branch `claude/ci-docs-postgres-in-runner`)
 
 **Six bullets under Decisions & gotchas still described CI as it ran before

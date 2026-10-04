@@ -12,9 +12,10 @@ name: CI
 #             nothing in the deploy applies migrations and nothing here can
 #             tell whether a person did — see ADR 0014, and the block above
 #             the job itself.
-#   tests   — the database suite. Shares ONE Neon branch with every other run, so
-#             it is serialised repo-wide and must never be cancelled midway.
-#             ~12 minutes, and it now runs AFTER a merge rather than before.
+#   tests   — the database suite, on Postgres 18 built inside its own runner.
+#             Shares NOTHING with any other run, so it is not serialised and
+#             is safe to cancel. ~7 minutes. It runs AFTER a merge, or on a
+#             pull request labelled `full-tests`.
 #
 # WHY THE DATABASE SUITE NO LONGER BLOCKS A PULL REQUEST (2026-08-09).
 #

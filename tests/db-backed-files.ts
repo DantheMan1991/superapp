@@ -1,6 +1,6 @@
 // Test files that talk to the database.
 //
-// These run SEQUENTIALLY (see vitest.config.ts): they share one Neon branch,
+// These run SEQUENTIALLY (see vitest.config.ts): they share one database,
 // create and delete tenants, and several assert what is NOT visible across
 // tenants — an assertion another file writing at the same moment can break.
 // Everything else is pure and runs in parallel.

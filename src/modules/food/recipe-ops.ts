@@ -20,6 +20,8 @@ export const FOOD_HOME = "/personal/m/food";
 export const FOOD_RECIPES = "/personal/m/food/recipes";
 /** The week (D2): `?week=` a Monday, this week's without one. */
 export const FOOD_WEEK = "/personal/m/food/week";
+/** The shopping list (D3). */
+export const FOOD_LIST = "/personal/m/food/list";
 
 export function weekHref(monday: string | null): string {
   return monday ? `${FOOD_WEEK}?week=${monday}` : FOOD_WEEK;

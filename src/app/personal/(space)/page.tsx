@@ -83,8 +83,8 @@ export default async function PersonalHomePage() {
               </p>
               <p>
                 Food comes with it: what you eat, counted against your targets, the
-                week&apos;s meals planned, and your recipes from a link, a photo of a
-                page or typed in; then the shopping list.
+                week&apos;s meals planned and a shopping list made from them, and your
+                recipes from a link, a photo of a page or typed in.
               </p>
               <p>
                 Health keeps your sleep, your weight and tape measures, your cold
@@ -114,7 +114,6 @@ export default async function PersonalHomePage() {
                   );
                 })}
               </ul>
-              <p className="text-muted-foreground">The shopping list comes next.</p>
             </>
           )}
         </CardContent>

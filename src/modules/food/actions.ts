@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import { withTenant } from "@/db";
-import { requirePersonalSpace } from "@/lib/auth";
+import { requirePersonalSpace, type TenantContext } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { RECIPE_PHOTO_BASE64_LIMIT, linkRequestSchema, photosRequestSchema, textRequestSchema } from "./core/draft";
 import { FoodError, foodMessage } from "./core/errors";
@@ -11,7 +12,7 @@ import { recipeInputSchema } from "./core/recipe";
 import { discardImport, readLink, readPhotos, readText, takeImport, type ReadResult } from "./import-ops";
 import { discardPhoto, storeRecipePhoto, type StoredPhoto } from "./photo-ops";
 import { logCook, undoCook } from "./cook-ops";
-import { FOOD_HOME, FOOD_RECIPES, FOOD_WEEK, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
+import { FOOD_HOME, FOOD_LIST, FOOD_RECIPES, FOOD_WEEK, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
 import {
   changeEatenSchema,
   logFoodSchema,
@@ -32,6 +33,8 @@ import {
   repeatWeekSchema,
 } from "./core/week";
 import { addLeftovers, ateIt, changePlan, movePlan, planCook, planFood, removePlan, repeatWeek } from "./plan-ops";
+import { alwaysHaveSchema } from "./core/list";
+import { nameLines, setAlwaysHave } from "./list-ops";
 
 /**
  * FOOD'S SERVER ACTIONS. Each one: the personal space's own door
@@ -64,6 +67,22 @@ function refreshFood() {
   revalidatePath(FOOD_HOME);
   revalidatePath(FOOD_RECIPES);
   revalidatePath(FOOD_WEEK);
+  revalidatePath(FOOD_LIST);
+}
+
+/**
+ * Name the new lines a plan brings (D3), after the answer has gone: the
+ * shopping list is then sorted when it is opened, instead of waiting on Claude
+ * in the shop. A failure here costs nothing: the list names what is left.
+ */
+function nameLinesLater(ctx: TenantContext) {
+  after(async () => {
+    try {
+      await nameLines(ctx);
+    } catch {
+      // The list page names what is still unnamed when it is opened.
+    }
+  });
 }
 
 function readOutcome(result: ReadResult): Outcome<{ importId: string }> & { importId?: string } {
@@ -353,6 +372,7 @@ export async function planCookAction(input: unknown): Promise<Outcome> {
     if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
     await withTenant(ctx.tenant.id, (tx) => planCook(tx, ctx, parsed.data), { role: ctx.role });
     refreshFood();
+    nameLinesLater(ctx);
     return { ok: true };
   } catch (err) {
     return failure(err, "It could not be put on the week. Try again.");
@@ -367,6 +387,7 @@ export async function planFoodAction(input: unknown): Promise<Outcome> {
     if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
     await withTenant(ctx.tenant.id, (tx) => planFood(tx, ctx, parsed.data), { role: ctx.role });
     refreshFood();
+    nameLinesLater(ctx);
     return { ok: true };
   } catch (err) {
     return failure(err, "It could not be put on the week. Try again.");
@@ -451,9 +472,44 @@ export async function repeatWeekAction(input: unknown): Promise<Outcome<{ added:
     if (!parsed.success) return { error: foodMessage(new FoodError("PLAN_WEEK")) };
     const added = await withTenant(ctx.tenant.id, (tx) => repeatWeek(tx, ctx, parsed.data), { role: ctx.role });
     refreshFood();
+    nameLinesLater(ctx);
     return { ok: true, added };
   } catch (err) {
     return failure(err, "The week could not be repeated. Try again.");
+  }
+}
+
+/* -- the shopping list (D3) ------------------------------------------------- */
+
+/**
+ * Name the lines the list's days ask for that are not named yet: Claude says
+ * what each buys, its aisle, and whether most kitchens keep it. Takes up to
+ * half a minute; the list page sets `maxDuration` for it.
+ */
+export async function nameLinesAction(): Promise<Outcome<{ named: number; left: number }>> {
+  try {
+    const ctx = await gate();
+    const outcome = await nameLines(ctx);
+    revalidatePath(FOOD_LIST);
+    return { ok: true, ...outcome };
+  } catch (err) {
+    return failure(err, "The list could not be sorted into aisles this time. Try again.");
+  }
+}
+
+/** "Always have": left off every list after. Or put back. */
+export async function alwaysHaveAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = alwaysHaveSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => setAlwaysHave(tx, ctx.tenant.id, parsed.data.item, parsed.data.always), {
+      role: ctx.role,
+    });
+    revalidatePath(FOOD_LIST);
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "That could not be saved. Try again.");
   }
 }
 

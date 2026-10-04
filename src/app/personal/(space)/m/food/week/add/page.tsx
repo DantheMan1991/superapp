@@ -9,6 +9,8 @@ import { takenSlots } from "@/modules/food/plan-ops";
 import { PlanAdd } from "@/modules/food/components/plan-add";
 
 export const dynamic = "force-dynamic";
+/** Put on the week names the new lines for the shopping list after it answers (`after`), in up to half a minute. */
+export const maxDuration = 60;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

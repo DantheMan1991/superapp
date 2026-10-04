@@ -13,12 +13,13 @@ You can plan this week and next week. An earlier week, up to twelve weeks back, 
 - **`Food`**, the title, with the line `What you ate, the week ahead, and your recipes.`
 - **The {icon:circle-question-mark}**, which opens this guide beside the page.
 - **{button:Put on the week|primary|plus}.** Opens Put on the week on today's next meal, or on next Monday's dinner when you are looking at next week. It is not shown on a week gone by. See [Putting a meal on the week](week-add.md).
-- **`Today`, `Week` and `Recipes`**, Food's sections. You are on `Week`.
+- **`Today`, `Week`, `Recipes` and `List`**, Food's sections. You are on `Week`.
 - **The week**, between two arrows: `This week, Oct 5 to 11`, `Next week, Oct 12 to 18`, `Last week, Sep 28 to Oct 4`, or only the dates for an earlier week. {button:|ghost|chevron-left} goes to the week before, back to twelve weeks ago. {button:|ghost|chevron-right} goes to the week after, up to next week.
 - **The week's numbers.**
   - `Calories a day, planned` and `Protein a day, planned`: the average of the days that have something planned, so an empty day does not pull it down. A day counts what you eat at each meal: the servings you eat of a recipe, or a food's amount.
   - **Your targets**, when you set them on Today: a bar under each, and how far along, such as `1,940 of 2,200 kcal`. The bar stops at full when the plan goes over. With nothing planned the numbers show `–` and no bar.
   - Under them, `The average of the 5 days with something planned.`, or `Nothing is planned this week yet.` With no targets set it adds `Set your targets on Today to see the week against them.`
+  - **{button:Shopping list|outline|shopping-cart}**, on this week and next week, opens the list made from the week. See [Your shopping list](list.md).
   - **{button:Repeat a week|outline|copy}**, on this week and next week. It opens the weeks you can repeat, under `Each meal goes on the same day of the week shown. Days already gone are left out, and it adds to what is planned.` Each earlier week with something planned is a row, such as `Last week, Sep 28 to Oct 4` and `9 meals`. Click one to copy it onto the week you are looking at. With none, it says `No earlier week has anything planned.` {button:Cancel|ghost} closes it.
   - On a week gone by, instead: `A week gone by is shown as it was. Repeat it from this week or the next.`
 - **A card for each day**, Monday first, such as `Mon, Oct 5`, with `Today` beside today's name and the day's numbers on the right, such as `1,800 kcal · 164 g protein`. A day gone by is shaded, and one with nothing planned is a single line, `Nothing planned`. On a phone the days run down the page; on a wide screen two side by side, and on a very wide one all seven.
@@ -93,7 +94,6 @@ To add leftovers later, tap the recipe on the day you cook it and use `Plan left
 
 ## Not on this page
 
-- **The shopping list.** It comes next: the week's ingredients added up across recipes, sorted by aisle, ticked off in the shop.
 - **Dragging a meal to another day.** Use `Move to`.
 - **Planning further ahead than next week.**
 - **Nutrition worked out from a recipe's ingredients.** A recipe counts with the nutrition it states; one that states none shows `no numbers`.

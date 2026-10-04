@@ -14,6 +14,13 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-03 — Food makes the shopping list (`claude/food-d3`)
+
+Food's D3 ([food.md](food.md), ADR 0130): the shopping list made from the
+week. The space's home, `docs/help/personal/overview.md` and Food's catalogue
+line name it; the home no longer says what comes next, since nothing is
+chosen. Nothing in the container changed.
+
 ### 2026-10-03 — Food plans the week (`claude/food-d2`)
 
 Food's D2 ([food.md](food.md), ADR 0129): the week's meals, a recipe cooked
@@ -228,7 +235,7 @@ No code yet. This entry is the plan; the slices are below and in
 | P0 | The container | A person has one personal space, can switch to it and back, nobody can be invited into it, support view refuses it, and the isolation suite says so |
 | P1 | The consumer door | A new sign-up is asked "for my business, or just for me", and "just for me" never sees the business setup |
 | F1–F6 | Fitness | See [fitness.md](fitness.md) |
-| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), eating logged (D4a, built 2026-10-03: from USDA's food list, a recipe or a photo of the plate, against calorie and protein targets, ADR 0126), the week (D2, built 2026-10-03: recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, Ate it on Today, ADR 0129), the shopping list, a recipe's nutrition worked out. See [food.md](food.md) |
+| D1–D4 | Food | Recipes (D1, built 2026-10-01: from a link, a photo of a page, pasted text or typed in, scaled), cook mode (D1b, built 2026-10-02: the screen on, timers from the steps, a log of what you made), hands-free (D1c, built 2026-10-02: the steps read aloud and short phrases heard on the phone, [voice-commands.md](voice-commands.md)), eating logged (D4a, built 2026-10-03: from USDA's food list, a recipe or a photo of the plate, against calorie and protein targets, ADR 0126), the week (D2, built 2026-10-03: recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, Ate it on Today, ADR 0129), the shopping list (D3, built 2026-10-03: from the week, Claude naming what each line buys and the app adding the amounts, staples asked once, ticks on the phone, ADR 0130), a recipe's nutrition worked out. See [food.md](food.md) |
 | H | Health | **His goal (2026-10-01):** progress tracked from what he does: workouts, eating, cold plunges, sleep and more. H1 built 2026-10-02 from a mockup: cold plunges timed on the phone, sleep as bed and wake times, his own habits, and progress by week across them and his workouts, read through a slot the tools fill (ADR 0125). Eating joined with Food's D4a (2026-10-03). H2 built 2026-10-03 from a mockup: weight typed in and read as a trend, a goal weight and a pace, the tape measures he picks, and earlier days filled in (ADR 0127). H2b the same day: progress photos, front, side and back on a timer, kept on the phone only under the posture lock, with Save a copy (ADR 0128). The calorie check is a slice of its own; a watch or ring only if he wears one. See [health.md](health.md) |
 
 ### P0 — the container, as built

@@ -86,6 +86,7 @@ import {
   Save,
   ScanLine,
   Search,
+  ShoppingCart,
   MessageSquarePlus,
   Mic,
   MicOff,
@@ -213,6 +214,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   // The Posture check card on the Workouts page (posture.md, slice 1).
   "scan-line": ScanLine,
   search: Search,
+  "shopping-cart": ShoppingCart,
   send: Send,
   // The advisor's New thread (livestock, slice 11).
   "message-square-plus": MessageSquarePlus,

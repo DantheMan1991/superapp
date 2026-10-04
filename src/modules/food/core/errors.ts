@@ -33,6 +33,7 @@ export type FoodErrorCode =
   | "PLAN_BATCH"
   | "PLAN_NOTHING"
   | "PLAN_WEEK"
+  | "LIST_FAILED"
   | "INVALID";
 
 const MESSAGES: Record<FoodErrorCode, string> = {
@@ -64,6 +65,7 @@ const MESSAGES: Record<FoodErrorCode, string> = {
   PLAN_BATCH: "That is more than the batch makes. Cook more, or put fewer leftovers on the week.",
   PLAN_NOTHING: "Nothing is eaten at that meal: the batch is made ahead. Log its leftovers when you eat them.",
   PLAN_WEEK: "Choose a past week to repeat, on this week or the next.",
+  LIST_FAILED: "The list could not be sorted into aisles this time. Try again.",
   INVALID: "Something in that was not right. Check it and try again.",
 };
 

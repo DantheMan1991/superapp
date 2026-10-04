@@ -51,6 +51,59 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-10-03 — The docs catch up with the database in the runner (branch `claude/ci-docs-postgres-in-runner`)
+
+**Six bullets under Decisions & gotchas still described CI as it ran before
+2026-08-15**, seven weeks after that date's entry moved the database into the
+runner. They said the `tests` job ran one at a time in `group: db-tests` with
+`cancel-in-progress: false`; that the separate Neon `ci` branch was the only
+thing stopping a production URL pasted into a secret; that the workflow failed
+on absent secrets; that the suite was not re-run *"with the secret present"*;
+and that CI migrated the `ci` branch. Each was checked against `ci.yml` and its
+`git log` before it was touched: `d1294fba` deleted the group, the "require the
+secrets" step and every `secrets.` reference, and wrote both URLs into the
+workflow as `localhost` values. The bullets now describe what is there: no
+group, and why there once was one; URLs that are not secrets, plus the guard's
+`localhost` check; a skip that cannot pass for a run in CI; and a database
+built, provisioned and seeded from zero on every run.
+
+**The one new claim was driven before it was written**: that with
+`NEON_LOCAL_PROXY` set, a missing `TEST_DATABASE_URL` fails the run instead of
+skipping it. `tests/adr-index.test.ts`, which reads only the filesystem, was run
+four ways:
+
+| Environment | Result |
+| --- | --- |
+| Proxy set, `TEST_DATABASE_URL` unset | Guard throws *"points at (none)"*: 1 file failed, no tests, exit 1 |
+| Proxy set, URL on `db.example.invalid` | Guard throws, naming the host: exit 1 |
+| Proxy set, URL on `localhost` | 6 passed, exit 0 |
+| Nothing set | 6 passed, exit 0, and no skip warning, because `DATABASE_URL` is unset |
+
+**The same claims lived in three more files.** `AGENTS.md` said CI ran *"the
+whole suite on every push and PR … against a dedicated Neon `ci` branch"*, and
+`docs/conventions.md` §7 said *"CI runs all of this on every push and PR"*.
+Both lines date from 2026-08-08: a PR has needed `full-tests` to get the
+database suite since 2026-08-09, and the suite has run in the runner since
+2026-08-15. Both now say what runs where and when. `AGENTS.md` also loses
+*"waiting on CI to learn that is the slow way round"*, which assumed CI ran the
+suite on every PR. On an unlabelled one it runs only after the merge, when the
+code is already live, and that is now the reason given for the label. The `db`
+project's reason for running sequentially, *"share one Neon branch"* in §7 and
+at the top of `tests/db-backed-files.ts`, now reads *one database*, which is
+true locally and in CI alike.
+
+**Left as they are, on purpose.** The header of `ci.yml` still lists the
+`tests` job as *"Shares ONE Neon branch with every other run, so it is
+serialised repo-wide"*, at ~12 minutes (lines 15–17), which the comment inside
+the job contradicts. This change is docs only, so the workflow is not edited.
+`vitest.config.ts` carries the same *"one Neon branch"* reason and is code. The
+build-log entries below keep wording that was true on their dates. The open
+item on the two `TEST_DATABASE_URL*` repository secrets stands:
+`gh secret list` still shows both, and no workflow reads a secret.
+
+The 2026-09-17 lesson again: the 2026-08-15 entry recorded the change, and the
+bullets further down this page went on describing the system it replaced.
+
 ### 2026-10-03 — Lint was not failing; the label was cancelling it (branch `claude/ci-checks-skip-labeled`)
 
 **The founder kept seeing "the ci/lint test failed" on PRs whose lint had
@@ -601,27 +654,37 @@ None. No tables, no migrations.
   from file contents, so drift fails loudly and immediately.
   - It also names the markers it searches for, so written the obvious way it
     matches its own rule. It assembles them from fragments instead.
-- **`cancel-in-progress: false` on the tests job, deliberately.** These suites
-  create tenants and delete them in `afterAll`. Cancelling a run midway leaves
-  the rows behind.
-- **The tests job is serialised repo-wide** (`group: db-tests`), because every
-  run shares one Neon branch and the suites stamp tenants with `process.pid` —
-  two runners can land on the same pid and collide on a slug. The `checks` job
-  has no such constraint and cancels superseded runs freely.
-- **NEITHER of `database-guard.ts`'s protections can fire in CI, and this is the
-  most important thing on this page.**
-  - It warns loudly when it disables the database — but only when `DATABASE_URL`
-    was already set, which never happens in CI. So the warning is not a usable
-    signal there, and the workflow asserts the secrets exist instead.
-  - It refuses when `TEST_DATABASE_URL` equals `DATABASE_URL` — but `DATABASE_URL`
-    is unset in CI, so a **production** connection string pasted into the secret
-    would be accepted, and the suite would create and delete tenants in
-    production. **The separate Neon `ci` branch is the only thing preventing
-    that.** Do not point CI at `dev` or at production to save a step.
-- **A missing secret must fail, not skip.** Without `TEST_DATABASE_URL` every DB
-  suite skips and the job goes green over zero coverage — including the
-  isolation certification. The workflow fails on absent secrets before running
-  anything.
+- **The tests job has no concurrency group, on purpose.** Every run builds its
+  own Postgres inside its own runner, so two runs cannot see each other and a
+  cancelled run takes its database with it. The repo-wide `db-tests` group and
+  its `cancel-in-progress: false` existed only because every run shared one
+  Neon branch: two runners could land on the same `process.pid` and collide on
+  a tenant slug, and a run killed midway left its tenants behind. Both went on
+  2026-08-15. The `checks` job cancels superseded runs freely.
+- **What keeps CI off production is that its database URLs are not secrets.**
+  `TEST_DATABASE_URL` and `TEST_DATABASE_URL_OWNER` are fixed `localhost` URLs
+  written into the workflow, aimed at the Postgres the job builds in its own
+  runner. There is no secret for a production connection string to be pasted
+  into, and changing them means editing `ci.yml`.
+  - `database-guard.ts` adds one check that can fire there: while
+    `NEON_LOCAL_PROXY` is set, as it is for the whole `tests` job, it throws on
+    a `TEST_DATABASE_URL` whose host does not start with `localhost` or
+    `127.0.0.1`. It reads that URL only. The owner URL is used by
+    `db:migrate -- --dev`, an earlier step that never loads the guard.
+  - Its two older protections still cannot fire in CI. The skip warning and the
+    refusal when `TEST_DATABASE_URL` equals `DATABASE_URL` both need
+    `DATABASE_URL` set, and the suite step never sets it. Do not read their
+    silence as a check, and do not point CI at `dev` or at production to save a
+    step.
+- **A skipped suite must never pass for a run, and in CI it now cannot.**
+  Without `TEST_DATABASE_URL` every DB suite skips and reports zero failures,
+  the isolation certification included. CI used to stop that with a step that
+  failed on absent secrets, and the step went with the secrets on 2026-08-15.
+  Now the job builds its own database first, so a broken owner URL fails at
+  `db:migrate` before a test runs. And while `NEON_LOCAL_PROXY` is set the guard
+  throws on a missing `TEST_DATABASE_URL` rather than skipping, because an
+  absent URL has no `localhost` host. Driven on 2026-10-03 with the URL unset:
+  one failed file, no tests run, exit 1.
 - **The suite needs three non-database values, and they are NOT repo secrets:**
   `APP_ENCRYPTION_KEY` (32 bytes of base64), `SHARE_SECRET` (32+ chars) and
   `INTERVIEW_IP_SALT` (any non-empty string). Every suite using them creates a
@@ -632,12 +695,16 @@ None. No tables, no migrations.
   than guess at the next one, the whole suite was re-run locally with `.env`
   moved aside and only a CI-shaped environment. Those three were the complete
   set.
-- **The suite is not re-run to prove isolation ran.** With the secret present the
-  guard points `DATABASE_URL` at it, so the DB suites cannot skip; a second
-  `test:isolation` pass would just repeat five minutes of work.
-- **CI migrates its own database** (`npm run db:migrate -- --dev` against the
-  `ci` branch) before the suite, so the branch cannot drift behind `main` and
-  there is no third database for a human to remember.
+- **The suite is not re-run to prove isolation ran.** `TEST_DATABASE_URL` is
+  written into the workflow, so the guard always points `DATABASE_URL` at it and
+  the DB suites cannot skip; a second `test:isolation` pass would only repeat
+  files `npm test` has already run.
+- **CI builds its own database from zero before the suite:**
+  `npm run db:migrate -- --dev` against the Postgres in the runner (`--dev`
+  targets `TEST_DATABASE_URL_OWNER`), then `scripts/ci-provision-db.ts` for
+  `app_user`, then `npm run db:seed`. Every run applies the whole migration
+  chain to an empty database, so nothing can drift, and there is no third
+  database for a human to remember.
 - **`npm run build` needs no secrets, and that is load-bearing.** Verified by
   building with `.env` and `.env.local` moved aside: only `robots.txt`,
   `sitemap.xml` and `icon.png` are static, every real page is dynamic, so

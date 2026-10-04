@@ -291,17 +291,21 @@ reads to infer intent. The existing standard, which is worth keeping:
 - `core/` logic is tested without a database. Prefer pushing logic there.
 - `live-*.test.ts` hit real provider APIs and are not part of the default gate.
 - **Two vitest projects.** `pure` runs files in parallel; `db` runs them
-  sequentially, because those suites share one Neon branch and several assert
+  sequentially, because those suites share one database and several assert
   what is *not* visible across a tenant boundary — an assertion another file
   writing at that moment can break. Which files are which lives in
   `tests/db-backed-files.ts`, and `tests/db-backed-files.test.ts` recomputes it
   from file contents and fails if it drifted. A `d(...)` block added to a
   previously pure file therefore cannot silently start racing; if that guard
   fails, update the list rather than deleting the test.
-- **CI runs all of this on every push and PR** (`.github/workflows/ci.yml`), so
-  a full local run is not the price of opening a PR. The traps around the test
-  database in CI are in [modules/ci-and-tests.md](modules/ci-and-tests.md) —
-  read that before changing anything about how tests reach a database.
+- **CI runs the `pure` project on every PR and every push to `main`, and the
+  `db` project on a PR only when it carries the `full-tests` label** — otherwise
+  on the push to `main` after the merge — against Postgres 18 built inside the
+  runner (`.github/workflows/ci.yml`). So a full local run is not the price of
+  opening a PR, but an unlabelled PR merges without the database suite having
+  run. The traps around the test database in CI are in
+  [modules/ci-and-tests.md](modules/ci-and-tests.md) — read that before
+  changing anything about how tests reach a database.
 
 ```bash
 npm test

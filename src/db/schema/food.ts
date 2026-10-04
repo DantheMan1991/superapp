@@ -252,6 +252,88 @@ export const foodMeal = pgEnum("food_meal", ["breakfast", "lunch", "dinner", "sn
 /** How an eaten thing came in: found on the food list, a saved recipe, or read from a photo of the plate. */
 export const foodEatenSource = pgEnum("food_eaten_source", ["food", "recipe", "photo"]);
 
+/** What a planned meal is (D2): a recipe cooked there, leftovers of one cooked earlier, or a food from the list. */
+export const foodPlanKind = pgEnum("food_plan_kind", ["cook", "leftover", "food"]);
+
+/**
+ * THE WEEK (D2, ADR 0129; the founder's calls 2026-10-03, from a mockup):
+ * what the person means to eat, on a day, in a meal. A `cook` is a recipe made
+ * there, `make` servings of it, of which they eat `servings` (none, for a batch
+ * made ahead); a `leftover` eats `servings` from a cook earlier on (`cook_id`),
+ * so the shopping list buys once for the batch and Cook opens it at `make`; a
+ * `food` is one from the list, by its amount, as Log food has it.
+ *
+ * No numbers are kept: a plan is the future, worked out from the recipe and
+ * the list as they are when it is read. What was eaten keeps its own, in
+ * `food_eaten`, whose `plan_id` says which planned meal it was ("Ate it").
+ *
+ * The id is the phone's, so a Put on the week sent twice is one row. Deleting
+ * a recipe takes its cooks off the week, and deleting a cook takes its
+ * leftovers; a leftover reads its recipe through its cook.
+ */
+export const foodPlan = pgTable(
+  "food_plan",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The space's own day it is planned for. */
+    plannedOn: date("planned_on").notNull(),
+    meal: foodMeal("meal").notNull(),
+    kind: foodPlanKind("kind").notNull(),
+    /** A cook's recipe. A leftover's is its cook's. */
+    recipeId: uuid("recipe_id"),
+    /** The cook a leftover eats from. */
+    cookId: uuid("cook_id"),
+    /** What the person eats here, in servings: a cook's may be 0, a leftover's is more; null for a food. */
+    servings: doublePrecision("servings"),
+    /** What a cook makes, in servings: the batch the shopping list buys for. */
+    make: doublePrecision("make"),
+    fdcId: integer("fdc_id").references(() => foodUsdaFoods.fdcId, { onDelete: "set null" }),
+    /** A food's name as it was planned. A recipe's title is read from the recipe. */
+    name: text("name"),
+    /** A food's amount of `portion`, and what that weighs, as `food_eaten` keeps them. */
+    amount: doublePrecision("amount"),
+    portion: text("portion"),
+    grams: doublePrecision("grams"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    /** `clock_timestamp()`, as `food_eaten`'s: a cook and its leftovers are written in one transaction. */
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`clock_timestamp()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The composite key a leftover's cook and an eaten row's plan point at.
+    uniqueIndex("food_plan_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("food_plan_tenant_day_idx").on(t.tenantId, t.plannedOn),
+    index("food_plan_tenant_cook_idx").on(t.tenantId, t.cookId),
+    foreignKey({
+      name: "food_plan_recipe_fk",
+      columns: [t.tenantId, t.recipeId],
+      foreignColumns: [foodRecipes.tenantId, foodRecipes.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "food_plan_cook_fk",
+      columns: [t.tenantId, t.cookId],
+      foreignColumns: [t.tenantId, t.id],
+    }).onDelete("cascade"),
+    check(
+      "food_plan_shape",
+      sql`(${t.kind} = 'cook' and ${t.recipeId} is not null and ${t.cookId} is null
+          and ${t.make} > 0 and ${t.make} <= 999 and ${t.servings} >= 0 and ${t.servings} <= ${t.make}
+          and ${t.fdcId} is null and ${t.name} is null and ${t.amount} is null and ${t.portion} is null and ${t.grams} is null)
+        or (${t.kind} = 'leftover' and ${t.recipeId} is null and ${t.cookId} is not null
+          and ${t.make} is null and ${t.servings} > 0 and ${t.servings} <= 999
+          and ${t.fdcId} is null and ${t.name} is null and ${t.amount} is null and ${t.portion} is null and ${t.grams} is null)
+        or (${t.kind} = 'food' and ${t.recipeId} is null and ${t.cookId} is null and ${t.make} is null and ${t.servings} is null
+          and char_length(${t.name}) between 1 and 300 and ${t.amount} > 0 and ${t.amount} <= 100000
+          and ${t.portion} is not null and ${t.grams} > 0)`,
+    ),
+  ],
+);
+
 /**
  * WHAT WAS EATEN (D4a, the founder's calls 2026-10-03): one food or one recipe,
  * on a day, in a meal, with what it came to. The numbers are kept as they were
@@ -292,6 +374,12 @@ export const foodEaten = pgTable(
     fiberG: doublePrecision("fiber_g"),
     sugarG: doublePrecision("sugar_g"),
     sodiumMg: doublePrecision("sodium_mg"),
+    /**
+     * The planned meal this was (D2, "Ate it" on Today, or Change first): one
+     * eaten row a plan at most. Clearing the week keeps what was eaten
+     * (`ON DELETE SET NULL ("plan_id")`, hand-edited in the migration).
+     */
+    planId: uuid("plan_id"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
     /**
      * `clock_timestamp()`, not `now()`: a plate's foods are written in one
@@ -312,6 +400,15 @@ export const foodEaten = pgTable(
       columns: [t.tenantId, t.recipeId],
       foreignColumns: [foodRecipes.tenantId, foodRecipes.id],
     }).onDelete("set null"),
+    // Hand-edited the same way: `ON DELETE SET NULL ("plan_id")`.
+    foreignKey({
+      name: "food_eaten_plan_fk",
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [foodPlan.tenantId, foodPlan.id],
+    }).onDelete("set null"),
+    uniqueIndex("food_eaten_plan_once_idx")
+      .on(t.tenantId, t.planId)
+      .where(sql`${t.planId} is not null`),
     check("food_eaten_amount_range", sql`${t.amount} > 0 and ${t.amount} <= 100000`),
     check("food_eaten_grams_for_foods", sql`(${t.source} = 'recipe') = (${t.grams} is null)`),
     check("food_eaten_grams_positive", sql`${t.grams} is null or ${t.grams} > 0`),
@@ -351,3 +448,4 @@ export type FoodCook = typeof foodCooks.$inferSelect;
 export type FoodImport = typeof foodImports.$inferSelect;
 export type FoodUsdaFood = typeof foodUsdaFoods.$inferSelect;
 export type FoodEatenRow = typeof foodEaten.$inferSelect;
+export type FoodPlanRow = typeof foodPlan.$inferSelect;

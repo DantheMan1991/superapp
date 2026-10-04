@@ -4,10 +4,11 @@
 > food list, their own recipes or a photo of the plate and counted against
 > their targets (D4a); and their own recipes, brought in from a link, a photo
 > of a page, pasted text or typed in, checked before they are saved, and
-> scaled to any number of servings; then the week's meals and the shopping
-> list. The founder's goal for it (2026-10-01) is part of a larger one: to
-> track his progress from what he does, workouts, eating, cold plunges and
-> sleep among it, which [Health](health.md) shows. Lives in a personal space
+> scaled to any number of servings; and the week's meals, a recipe cooked
+> once and eaten again (D2); then the shopping list. The founder's goal for it
+> (2026-10-01) is part of a larger one: to track his progress from what he
+> does, workouts, eating, cold plunges and sleep among it, which
+> [Health](health.md) shows. Lives in a personal space
 > beside [fitness](fitness.md); the container is [personal-space](personal-space.md).
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
@@ -16,6 +17,80 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — D2: the week (`claude/food-d2`)
+
+He chose the week and the shopping list after Health H2b merged (#697), over a
+recipe's nutrition worked out, reminders to log, and Workouts' F5: the last
+part of what he first asked for (recipes, meal planning, a shopping list).
+**His calls, from a mockup of both (2026-10-03):** COOK ONCE, EAT AGAIN (say
+how much to cook and how much he eats; the rest goes on later meals as
+leftovers, and the list buys once for the batch; leave some off if someone
+else eats them); ATE IT with one tap on Today (Change first when it
+differed). The list's two calls (staples asked once, then remembered; Claude
+names each line and the app adds the amounts) are D3's, which follows this
+one's merge. My defaults, said in chat: recipes AND foods on the week; Monday
+to Sunday; this week and the next, earlier weeks to repeat; a Move to menu,
+no dragging on a phone; Add to the week on a recipe; seven columns on a wide
+screen.
+
+- **`food_plan`** (ADR 0129, `0448`, RLS `0449`): a `cook` (a recipe made at a
+  meal: `make` servings, `servings` of them eaten there, 0 for a batch made
+  ahead), a `leftover` (eats `servings` from a cook earlier on; its recipe is
+  read through the cook) or a `food` from the list by its amount. One CHECK
+  keeps each kind's columns; composite keys cascade a recipe's deletion to its
+  cooks and a cook's to its leftovers. No numbers kept: a plan is worked out
+  from the recipe or the list whenever it is read.
+- **The rules, in `core/week.ts` and again in `plan-ops.ts`:** this week and
+  the next can be planned (`canPlan`); a leftover comes after its cook
+  (`isAfter`, breakfast, lunch, dinner, snacks); a batch never feeds more than
+  it makes (`batchFits`). Leftovers are offered for lunch and dinner on the
+  four days after the cook (USDA's three to four days), the next free lunches
+  lit up first, then dinners (`firstLeftovers`), each as much as he eats at
+  the cook.
+- **The week** (`/personal/m/food/week`, `?week=` a Monday back twelve weeks):
+  the days' average calories and protein against the targets (only days with
+  something planned, as a week of eating averages the days logged), seven
+  day cards (one column on a phone, two at `@2xl`, seven at `@6xl`, container
+  queries), each planned meal with what it is ("Cook 4 servings, eat 1", "3
+  more: Tue lunch, Wed lunch, Thu dinner", "From Mon dinner") and its
+  calories. Tap one: how much, Move to (day and meal), Plan leftovers while
+  the batch has some, Cook (cook mode at the whole batch), Recipe, Take off (a
+  cook says its leftovers go too). Repeat a week copies an earlier week onto
+  this one or the next, same weekdays, days gone left out, leftovers relinked.
+- **Put on the week** (`/personal/m/food/week/add`, from the week, a meal's
+  plus, or a recipe's new Add to the week): day, meal, then a recipe or a
+  food (the search is Log food's, now `use-food-search.ts`); for a recipe,
+  Cook and You eat steppers and the leftover meals; for a food, its amount.
+- **Today**: each meal shows what is planned and not yet eaten in a
+  `Planned` box: Ate it (one tap, logged as planned, shown at once), Change
+  first (Log food on `?plan=`, its first add logged as the plan), Cook. An
+  eaten row now has `plan_id` (one a plan, `food_eaten_plan_once_idx`); every
+  eaten insert's conflict names no target, so a resend with a new id is still
+  one. Taking a plan off keeps the log (`SET NULL ("plan_id")`); removing the
+  eaten row puts the plan back to waiting.
+- `RecipeHit` gained `yieldAmount` (Cook starts at what the recipe makes).
+- Tests: `food-week` (18 pure), `food-week-ops` (11 db), `isolation/food-week`
+  (8). Guides: `week.md`, `week-add.md`; `overview.md`, `log.md`, `recipe.md`,
+  `recipes.md` updated. `calendar-plus` registered for guides. Food's catalogue
+  line and the space's home name the week (a seed on both databases).
+- **On DEV AND PROD before the merge** (his word, "Run the migrations and then
+  the pr"): the prod ledger read first (it ended at 0447, exactly 0448/0449
+  pending), `0448`/`0449` applied (prod ledger ids 454/455), verify-rls 271 on
+  both, the keys read back from `pg_constraint` (plan key `SET NULL
+  (plan_id)`, cook and recipe keys CASCADE, the partial unique index); the
+  catalogue seed on both, verify-modules green on both, Food still
+  `coming_soon`.
+- **Driven on dev** (a production build, dev's personal space with three
+  invented recipes): tonight's chili with leftovers (Cook 6 down to 4, the
+  lunches offered again), the batch changed and a leftover added, next week's
+  leftovers, Repeat a week onto next week, a food on a breakfast, a refused and
+  an allowed move, Ate it, the log entry removed (the plan waits again),
+  Change first at 1.5 servings, `Eaten` on the week. Fixed from it: a target
+  bar drawn under `–` with nothing planned; days gone by with nothing planned
+  are now one line, so today is not at the bottom of a phone's page; Put on
+  the week and Log food had no "?" (Log food never had); Repeat a week said
+  "this week" while showing next week.
 
 ### 2026-10-03 — D4a: eating, logged (`claude/food-d4a`)
 
@@ -479,8 +554,8 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | D1 | **Recipes** | A recipe by hand, from a link, from pasted text or from a photo of a page, checked before it is saved, scaled to a number of servings, with its photo and the nutrition it states. **Built** |
 | D1b | **Cook mode** | "Cook" on a recipe: the screen stays on, the ingredients gathered first, one step at a time in big type with what it uses, a timer for each time a step names, several at once, ringing until stopped, and "Log that you made it". **Built** |
 | D1c | **Hands-free** | Each step read aloud in the coach's recorded voice, and "next step", "go back", "repeat", "start timer", "stop timer" and "ingredients" heard on the phone (his calls: reading aloud comes with the voice commands; the listener on the phone; short phrases). **Built** |
-| D2 | **The week** | Recipes on days and meals, moved about, a past week repeated |
-| D3 | **The shopping list** | Built from the week, the same food added up across recipes (`core/amounts.ts` reads every line), ticked off in the shop on a phone |
+| D2 | **The week** | Recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, moved about, a past week repeated, and a planned meal logged from Today with one tap (his calls 2026-10-03; ADR 0129). **Built** |
+| D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone |
 | D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
 | D4 | **Nutrition of a recipe** | Per recipe, worked out from its ingredients against the food list (D4a's) and labelled as worked out, beside the recipe's own numbers, so a recipe that states none can be counted |
 
@@ -498,7 +573,8 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 | --- | --- | --- |
 | `food_recipes` | A person's recipe: title, what it makes (`yield_amount` double, `yield_unit`), prep, cook and total minutes, `tags` text[], `ingredients` and `steps` jsonb (`{ text, heading? }[]`, kept as written), `notes`, `nutrition` jsonb (per serving, as the recipe states it: calories, protein, carbs, fat, fiber, sugar g; sodium mg), `source_url`, the photo (`photo_pathname`, width, height), `created_by_clerk_user_id` | D1, `0437`. RLS member + superadmin (`0438`). `food_recipes_tenant_id_id_idx` is the composite key later slices point at. CHECKs: a title, yield > 0, minutes 0–10,080, a photo all or nothing |
 | `food_cooks` | A time a recipe was cooked (D1b): `made_on` (the space's day), `servings` (what it was made for), the phone's id | `0439`/`0440`. Composite key to `food_recipes` (`(tenant_id, recipe_id)`, ON DELETE CASCADE). The recipe's count and last day are read from it |
-| `food_eaten` | What was eaten (D4a): `eaten_on` (the space's day), `meal` (enum `food_meal`: breakfast, lunch, dinner, snack), `source` (enum `food_eaten_source`: food, recipe, photo), `fdc_id` or `recipe_id`, `name` as it was, `amount` of `portion` ("1 banana", "g", "oz", or "serving"), `grams` (a food's; null for a recipe), and the seven numbers as worked out when logged (null where a recipe states none) | `0443`, RLS member + superadmin (`0444`). The id is the phone's (`ON CONFLICT DO NOTHING`). `fdc_id` → `food_usda_foods` ON DELETE SET NULL; composite `(tenant_id, recipe_id)` → `food_recipes` ON DELETE SET NULL ("recipe_id"), hand-edited to the column-list form, so a deleted recipe leaves the row and its numbers. CHECKs: amount 0–100,000, grams for foods and none for recipes, numbers not negative. `created_at` defaults to `clock_timestamp()` (`0445`), so a plate's rows keep their order. Index `(tenant_id, eaten_on)` |
+| `food_eaten` | What was eaten (D4a): `eaten_on` (the space's day), `meal` (enum `food_meal`: breakfast, lunch, dinner, snack), `source` (enum `food_eaten_source`: food, recipe, photo), `fdc_id` or `recipe_id`, `name` as it was, `amount` of `portion` ("1 banana", "g", "oz", or "serving"), `grams` (a food's; null for a recipe), and the seven numbers as worked out when logged (null where a recipe states none) | `0443`, RLS member + superadmin (`0444`). The id is the phone's (`ON CONFLICT DO NOTHING`). `fdc_id` → `food_usda_foods` ON DELETE SET NULL; composite `(tenant_id, recipe_id)` → `food_recipes` ON DELETE SET NULL ("recipe_id"), hand-edited to the column-list form, so a deleted recipe leaves the row and its numbers. CHECKs: amount 0–100,000, grams for foods and none for recipes, numbers not negative. `created_at` defaults to `clock_timestamp()` (`0445`), so a plate's rows keep their order. Index `(tenant_id, eaten_on)`. `plan_id` (D2, `0448`): the planned meal it was, composite `(tenant_id, plan_id)` → `food_plan` ON DELETE SET NULL ("plan_id") (hand-edited); `food_eaten_plan_once_idx` unique on `(tenant_id, plan_id)` where it is set, so a plan is eaten once |
+| `food_plan` | The week (D2, ADR 0129): `planned_on` (the space's day), `meal`, `kind` (enum `food_plan_kind`: cook, leftover, food); a cook's `recipe_id`, `make` and `servings` (eaten there, 0 for a batch made ahead); a leftover's `cook_id` and `servings`; a food's `fdc_id`, `name`, `amount`, `portion` and `grams`. No numbers: worked out from the recipe or the list when read | `0448`, RLS member + superadmin (`0449`). The id is the phone's (`ON CONFLICT DO NOTHING`). `food_plan_shape` CHECK keeps each kind's columns (a cook's `servings` between 0 and `make`, at most 999). Composite keys: `(tenant_id, recipe_id)` → `food_recipes` CASCADE, `(tenant_id, cook_id)` → `food_plan` CASCADE (its unique index `food_plan_tenant_id_id_idx` created before the keys, hand-ordered). `fdc_id` SET NULL. `created_at` `clock_timestamp()`. Indexes `(tenant_id, planned_on)`, `(tenant_id, cook_id)` |
 | `food_targets` | The daily targets: `calories` (500–10,000) and `protein_g` (10–500), either null | `0443`/`0444`. One row a space (`tenant_id` the key). A day is judged against the targets as they are now |
 | `food_usda_foods` | The food list (D4a, ADR 0126): FNDDS 2021-2023, 5,431 foods, `name`, `category` (WWEIA), the seven numbers per 100 g, `portions` jsonb (`{ label, grams }[]`), `release` | `0443`; REFERENCE DATA with no tenant: `modules`' two policies (superadmin all, any member reads) in `0444`, with `search_tsv`, a generated tsvector (name A, category B) not modelled in the schema, GIN-indexed. Written only by the seed from `scripts/data/usda-foods.json` |
 | `food_imports` | A recipe on its way in: `kind` (`link`, `text`, `photo`), `source_url` (a link's), `status` (`reading`, `draft`, `failed`), the `draft` (a recipe input, its name allowed empty), `error`, the page's photo for a link | D1, `0437`/`0438`. Deleted on save or discard. CHECKs: a link has its URL; a photo all or nothing. Nothing points at it |
@@ -554,6 +630,13 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `log-food.tsx` (Log food), `food-nav.tsx` (the Today / Recipes strip),
   `new-id.ts`; `src/app/api/food/search/route.ts`; the pages
   `src/app/personal/(space)/m/food/log` and `.../recipes` (the list's page).
+- The week (D2): `core/week.ts` (weeks, what can be planned, meals in order,
+  the leftovers a cook offers, the numbers, a week repeated, the inputs),
+  `plan-ops.ts` (read, put on, move, change, take off, Ate it, repeat),
+  `components/week-plan.tsx` (the week), `plan-add.tsx` (Put on the week),
+  `use-food-search.ts` (the search, shared with Log food); pages
+  `src/app/personal/(space)/m/food/week` and `.../week/add`. Today's planned
+  meals are in `eaten-day.tsx`; Log food's `?plan=` in its page.
 - The food list: `scripts/build-usda-foods.ts` (pinned download, readable
   names), `scripts/data/usda-foods.json` (the committed list),
   `scripts/lib/usda-foods.ts` (the seed's loader); `scripts/seed.ts` loads it,
@@ -644,6 +727,19 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `/personal/m/food`, which is Today; `FOOD_RECIPES` is the list. Every action
   revalidates both (`refreshFood`), since an action re-renders the page it was
   called from only when that page is named.
+- **A cook and its leftovers, not a meal per serving** (D2, ADR 0129). A
+  recipe planned on four meals is one cook and three leftovers, so the list
+  buys once and Cook opens at the batch. A leftover reads its recipe through
+  its cook, and the order (leftovers after their cook) is checked on every
+  write, in `plan-ops.ts` as well as the screen.
+- **A plan keeps no numbers; what was eaten keeps its own** (D2). The week
+  reads the recipe and the list as they are; "Ate it" writes an ordinary eaten
+  row with `plan_id`, once. Every eaten insert's `ON CONFLICT DO NOTHING`
+  names no target, so the second Ate it, with a new id, meets the plan's
+  unique index and is dropped instead of failing.
+- **The week is container-queried**, not window-queried: the personal space's
+  rail takes width, so `@container` with `@2xl:`/`@6xl:` columns
+  (breakpoints-cannot-see-the-layout).
 - **Show what was just done.** Today keeps its own copy of the day and the
   targets and adopts the server's when it differs, as Health's cards do
   (health.md): an action answers before its re-rendered page streams in.
@@ -666,6 +762,13 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 - **The cook history is a count and a day.** Undo works right after logging;
   older logs cannot be seen or changed. What was EATEN is D4a's log, which
   cook mode's last screen opens (Log what you ate).
+- **The week has not met a phone.** Driven in a desktop pane at 375 px and
+  wide; the steppers, the leftover buttons and the Move to menu on a real
+  Android screen are unwatched.
+- **Nothing reminds him to plan**, and nothing clears old plans: an earlier
+  week stays as it was (a few rows a week), read-only and repeatable.
+- **A leftover's servings follow the cook's** when it is offered; a different
+  amount is a change afterwards.
 - **No brands or barcodes.** FNDDS is everyday foods. USDA's branded list
   (an API key, the search sent to USDA) or Open Food Facts (ODbL) would add
   packaged foods and a barcode scan; neither is chosen.

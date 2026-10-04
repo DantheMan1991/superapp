@@ -11,7 +11,7 @@ import { recipeInputSchema } from "./core/recipe";
 import { discardImport, readLink, readPhotos, readText, takeImport, type ReadResult } from "./import-ops";
 import { discardPhoto, storeRecipePhoto, type StoredPhoto } from "./photo-ops";
 import { logCook, undoCook } from "./cook-ops";
-import { FOOD_HOME, FOOD_RECIPES, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
+import { FOOD_HOME, FOOD_RECIPES, FOOD_WEEK, deleteRecipe, insertRecipe, recipeHref, updateRecipe } from "./recipe-ops";
 import {
   changeEatenSchema,
   logFoodSchema,
@@ -22,6 +22,16 @@ import {
 import { plateRequestSchema } from "./core/plate";
 import { changeEaten, deleteEaten, logFood, logPlate, logRecipe, setTargets } from "./eating-ops";
 import { readPlate, type PlateDraftItem } from "./plate-ops";
+import {
+  addLeftoversSchema,
+  ateItSchema,
+  changePlanSchema,
+  movePlanSchema,
+  planCookSchema,
+  planFoodSchema,
+  repeatWeekSchema,
+} from "./core/week";
+import { addLeftovers, ateIt, changePlan, movePlan, planCook, planFood, removePlan, repeatWeek } from "./plan-ops";
 
 /**
  * FOOD'S SERVER ACTIONS. Each one: the personal space's own door
@@ -46,12 +56,14 @@ function failure(err: unknown, fallback: string): { error: string } {
 
 /**
  * The Food pages an action can change. Today is Food's front page since D4a
- * and the recipes moved to their own; an action re-renders the page it was
+ * and the recipes moved to their own; D2 added the week, which a recipe's
+ * change, a log and a plan all show. An action re-renders the page it was
  * called from only when that page is named here.
  */
 function refreshFood() {
   revalidatePath(FOOD_HOME);
   revalidatePath(FOOD_RECIPES);
+  revalidatePath(FOOD_WEEK);
 }
 
 function readOutcome(result: ReadResult): Outcome<{ importId: string }> & { importId?: string } {
@@ -328,6 +340,120 @@ export async function deleteEatenAction(input: unknown): Promise<Outcome> {
     return { ok: true };
   } catch (err) {
     return failure(err, "It could not be removed. Try again.");
+  }
+}
+
+/* -- the week (D2) ---------------------------------------------------------- */
+
+/** Put a recipe on the week: cooked at a meal, what is eaten there, and its leftovers on later meals. */
+export async function planCookAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = planCookSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => planCook(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be put on the week. Try again.");
+  }
+}
+
+/** Put a food from the list on the week. */
+export async function planFoodAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = planFoodSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => planFood(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be put on the week. Try again.");
+  }
+}
+
+/** More leftovers of a cook already on the week. */
+export async function addLeftoversAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = addLeftoversSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => addLeftovers(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "The leftovers could not be put on the week. Try again.");
+  }
+}
+
+export async function movePlanAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = movePlanSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => movePlan(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be moved. Try again.");
+  }
+}
+
+export async function changePlanAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = changePlanSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => changePlan(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be changed. Try again.");
+  }
+}
+
+const planIdInput = z.object({ id: z.string().uuid() });
+
+/** Take a planned meal off the week; a cook takes its leftovers. */
+export async function removePlanAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = planIdInput.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => removePlan(tx, ctx.tenant.id, parsed.data.id), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be taken off the week. Try again.");
+  }
+}
+
+/** "Ate it" on Today: a planned meal logged as it was planned. */
+export async function ateItAction(input: unknown): Promise<Outcome> {
+  try {
+    const ctx = await gate();
+    const parsed = ateItSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    await withTenant(ctx.tenant.id, (tx) => ateIt(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true };
+  } catch (err) {
+    return failure(err, "It could not be logged. Try again.");
+  }
+}
+
+/** Repeat a past week on this week or the next. */
+export async function repeatWeekAction(input: unknown): Promise<Outcome<{ added: number }>> {
+  try {
+    const ctx = await gate();
+    const parsed = repeatWeekSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("PLAN_WEEK")) };
+    const added = await withTenant(ctx.tenant.id, (tx) => repeatWeek(tx, ctx, parsed.data), { role: ctx.role });
+    refreshFood();
+    return { ok: true, added };
+  } catch (err) {
+    return failure(err, "The week could not be repeated. Try again.");
   }
 }
 

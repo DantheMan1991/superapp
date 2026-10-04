@@ -12,6 +12,7 @@ import {
   Building2,
   CalendarClock,
   CalendarDays,
+  CalendarPlus,
   Camera,
   Check,
   ChevronDown,
@@ -144,6 +145,7 @@ export const CONTROL_ICONS: Record<string, LucideIcon> = {
   // Putting a social post on the calendar (marketing, slice S1).
   "calendar-clock": CalendarClock,
   "calendar-days": CalendarDays,
+  "calendar-plus": CalendarPlus,
   camera: Camera,
   check: Check,
   "chevron-down": ChevronDown,

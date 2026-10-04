@@ -133,7 +133,7 @@ export async function searchRecipes(tx: Tx, tenantId: string, q: string, limit =
   const words = searchWords(q);
   const lastCooked = sql`(select max(c.made_on) from food_cooks c where c.tenant_id = ${t.tenantId} and c.recipe_id = ${t.id})`;
   const rows = await tx
-    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldUnit: t.yieldUnit })
+    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldAmount: t.yieldAmount, yieldUnit: t.yieldUnit })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), ...words.map((w) => ilike(t.title, `%${w}%`))))
     .orderBy(sql`${lastCooked} desc nulls last`, asc(t.title))
@@ -161,10 +161,15 @@ function nutrientColumns(n: Nutrients) {
   };
 }
 
-async function insertFood(
+/**
+ * A food eaten, with the numbers its grams come to. The id is the phone's and
+ * a planned meal (D2) is logged once, so either sent twice is one row: the
+ * conflict names no target, which takes both the id and `food_eaten_plan_once_idx`.
+ */
+export async function insertEatenFood(
   tx: Tx,
   ctx: TenantContext,
-  entry: { id: string; day: string; meal: Meal; fdcId: number; amount: number; portion: string },
+  entry: { id: string; day: string; meal: Meal; fdcId: number; amount: number; portion: string; planId?: string | null },
   source: "food" | "photo",
 ): Promise<void> {
   const food = await getFood(tx, entry.fdcId);
@@ -185,50 +190,75 @@ async function insertFood(
       portion: entry.portion,
       grams,
       ...nutrientColumns(forGrams(food.per100g, grams)),
+      planId: entry.planId ?? null,
       createdByClerkUserId: ctx.userId,
     })
-    .onConflictDoNothing({ target: schema.foodEaten.id });
+    .onConflictDoNothing();
 }
 
-/** Log a food from the list. Its id is the phone's, so an Add sent twice is one row. */
-export async function logFood(tx: Tx, ctx: TenantContext, input: LogFoodInput, now: Date = new Date()): Promise<void> {
-  checkDay(input.day, ctx.tenant.timezone, now);
-  await insertFood(tx, ctx, input, "food");
-}
-
-/** Log a recipe by servings, with the numbers it states per serving (none when it states none). */
-export async function logRecipe(tx: Tx, ctx: TenantContext, input: LogRecipeInput, now: Date = new Date()): Promise<void> {
-  checkDay(input.day, ctx.tenant.timezone, now);
+/** A recipe eaten by servings, with the numbers it states per serving (none when it states none). */
+export async function insertEatenRecipe(
+  tx: Tx,
+  ctx: TenantContext,
+  entry: { id: string; day: string; meal: Meal; recipeId: string; servings: number; planId?: string | null },
+): Promise<void> {
   const t = schema.foodRecipes;
   const [recipe] = await tx
     .select({ title: t.title, nutrition: t.nutrition })
     .from(t)
-    .where(and(eq(t.tenantId, ctx.tenant.id), eq(t.id, input.recipeId)))
+    .where(and(eq(t.tenantId, ctx.tenant.id), eq(t.id, entry.recipeId)))
     .limit(1);
   if (!recipe) throw new FoodError("RECIPE_MISSING");
   await tx
     .insert(schema.foodEaten)
     .values({
-      id: input.id,
+      id: entry.id,
       tenantId: ctx.tenant.id,
-      eatenOn: input.day,
-      meal: input.meal,
+      eatenOn: entry.day,
+      meal: entry.meal,
       source: "recipe",
-      recipeId: input.recipeId,
+      recipeId: entry.recipeId,
       name: recipe.title,
-      amount: input.servings,
+      amount: entry.servings,
       portion: "serving",
       grams: null,
-      ...nutrientColumns(forServings(recipe.nutrition ?? null, input.servings)),
+      ...nutrientColumns(forServings(recipe.nutrition ?? null, entry.servings)),
+      planId: entry.planId ?? null,
       createdByClerkUserId: ctx.userId,
     })
-    .onConflictDoNothing({ target: schema.foodEaten.id });
+    .onConflictDoNothing();
+}
+
+/** A planned meal named by Log food (Change first, D2) must still be on the week. */
+async function checkPlan(tx: Tx, tenantId: string, planId: string | undefined): Promise<void> {
+  if (!planId) return;
+  const p = schema.foodPlan;
+  const [row] = await tx
+    .select({ id: p.id })
+    .from(p)
+    .where(and(eq(p.tenantId, tenantId), eq(p.id, planId)))
+    .limit(1);
+  if (!row) throw new FoodError("PLAN_MISSING");
+}
+
+/** Log a food from the list. Its id is the phone's, so an Add sent twice is one row. */
+export async function logFood(tx: Tx, ctx: TenantContext, input: LogFoodInput, now: Date = new Date()): Promise<void> {
+  checkDay(input.day, ctx.tenant.timezone, now);
+  await checkPlan(tx, ctx.tenant.id, input.planId);
+  await insertEatenFood(tx, ctx, input, "food");
+}
+
+/** Log a recipe by servings, with the numbers it states per serving (none when it states none). */
+export async function logRecipe(tx: Tx, ctx: TenantContext, input: LogRecipeInput, now: Date = new Date()): Promise<void> {
+  checkDay(input.day, ctx.tenant.timezone, now);
+  await checkPlan(tx, ctx.tenant.id, input.planId);
+  await insertEatenRecipe(tx, ctx, input);
 }
 
 /** Log a plate the person checked: each item a food on the list, all or none. */
 export async function logPlate(tx: Tx, ctx: TenantContext, input: LogPlateInput, now: Date = new Date()): Promise<void> {
   checkDay(input.day, ctx.tenant.timezone, now);
-  for (const item of input.items) await insertFood(tx, ctx, { ...item, day: input.day, meal: input.meal }, "photo");
+  for (const item of input.items) await insertEatenFood(tx, ctx, { ...item, day: input.day, meal: input.meal }, "photo");
 }
 
 export interface EatenRow extends Nutrients {
@@ -289,7 +319,7 @@ export async function dayEaten(tx: Tx, tenantId: string, day: string): Promise<D
 export async function recipeHit(tx: Tx, tenantId: string, recipeId: string): Promise<RecipeHit | null> {
   const t = schema.foodRecipes;
   const [row] = await tx
-    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldUnit: t.yieldUnit })
+    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldAmount: t.yieldAmount, yieldUnit: t.yieldUnit })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), eq(t.id, recipeId)))
     .limit(1);
@@ -389,6 +419,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
       },
       recipeTitle: r.title,
       recipeNutrition: r.nutrition,
+      recipeYieldAmount: r.yieldAmount,
       recipeYieldUnit: r.yieldUnit,
     })
     .from(t)
@@ -426,6 +457,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
           recipeId: row.recipeId,
           title: row.recipeTitle ?? "",
           perServing: row.recipeNutrition ?? null,
+          yieldAmount: row.recipeYieldAmount ?? null,
           yieldUnit: row.recipeYieldUnit ?? null,
         }
       : null;

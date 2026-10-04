@@ -17,6 +17,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   date,
   doublePrecision,
@@ -26,8 +27,10 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -443,9 +446,65 @@ export const foodTargets = pgTable(
   ],
 );
 
+/** Where a thing to buy is found in a shop (D3): the shopping list's groups, in the order a shop is walked. */
+export const foodAisle = pgEnum("food_aisle", ["produce", "meat", "dairy", "bakery", "pantry", "frozen", "drinks", "other"]);
+
+/**
+ * WHAT A LINE BUYS (D3, ADR 0130; the founder's call: Claude names each line,
+ * the app adds the amounts): an ingredient line as a recipe writes it ("2 cups
+ * long-grain white rice, rinsed"), or a planned food's name, with the thing a
+ * shopper looks for (`item`, "long-grain white rice"), its aisle, and whether
+ * most kitchens keep it (`staple`: salt, oil, spices, asked about once). A row
+ * a thing: "Salt and pepper to taste" is two. Named once per space and kept,
+ * so a list is sorted at once the next time; one row with `item` null is a
+ * line that buys nothing (water). No amount is kept here: the list reads those
+ * from the line every time (`core/amounts.ts`).
+ */
+export const foodLineNames = pgTable(
+  "food_line_names",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    line: text("line").notNull(),
+    item: text("item"),
+    aisle: foodAisle("aisle").notNull(),
+    staple: boolean("staple").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One row a line and thing; NULLS NOT DISTINCT, so "buys nothing" is kept once too.
+    unique("food_line_names_tenant_line_item_key").on(t.tenantId, t.line, t.item).nullsNotDistinct(),
+    check("food_line_names_line_length", sql`char_length(${t.line}) between 1 and 500`),
+    check("food_line_names_item_length", sql`${t.item} is null or char_length(${t.item}) between 1 and 80`),
+  ],
+);
+
+/**
+ * WHAT THE PERSON ALWAYS HAS AT HOME (D3, the founder's call): an item the
+ * shopping list asked about once ("Have these at home?") and was told
+ * "Always have", left off every list after, until put back.
+ */
+export const foodStaples = pgTable(
+  "food_staples",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    item: text("item").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.item] }),
+    check("food_staples_item_length", sql`char_length(${t.item}) between 1 and 80`),
+  ],
+);
+
 export type FoodRecipe = typeof foodRecipes.$inferSelect;
 export type FoodCook = typeof foodCooks.$inferSelect;
 export type FoodImport = typeof foodImports.$inferSelect;
 export type FoodUsdaFood = typeof foodUsdaFoods.$inferSelect;
 export type FoodEatenRow = typeof foodEaten.$inferSelect;
 export type FoodPlanRow = typeof foodPlan.$inferSelect;
+export type FoodLineName = typeof foodLineNames.$inferSelect;

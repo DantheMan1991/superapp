@@ -5,11 +5,11 @@
 > their targets (D4a); and their own recipes, brought in from a link, a photo
 > of a page, pasted text or typed in, checked before they are saved, and
 > scaled to any number of servings; and the week's meals, a recipe cooked
-> once and eaten again (D2); then the shopping list. The founder's goal for it
-> (2026-10-01) is part of a larger one: to track his progress from what he
-> does, workouts, eating, cold plunges and sleep among it, which
-> [Health](health.md) shows. Lives in a personal space
-> beside [fitness](fitness.md); the container is [personal-space](personal-space.md).
+> once and eaten again (D2), and the shopping list made from it (D3). The
+> founder's goal for it (2026-10-01) is part of a larger one: to track his
+> progress from what he does, workouts, eating, cold plunges and sleep among
+> it, which [Health](health.md) shows. Lives in a personal space beside
+> [fitness](fitness.md); the container is [personal-space](personal-space.md).
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -17,6 +17,72 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — D3: the shopping list (`claude/food-d3`)
+
+The other half of what he picked with the week (D2, #698 merged). **His calls,
+from the same mockup (2026-10-03):** CLAUDE NAMES EACH LINE (over exact words
+only), the app adds the amounts; staples ASKED ONCE ("Have these at home?":
+Have it, Always have) and remembered. My defaults, said in chat: the next
+seven days, changeable; kept on the phone so ticks work with no signal; his
+own items; a cooked batch bought once, at its size.
+
+- **Naming** (ADR 0130, `core/list-names.ts`, `list-model.ts`): one forced
+  `record_items` call for a list's new lines together (up to 120), told the
+  names the space already uses, gives each line's item, aisle (produce, meat,
+  dairy, bakery, pantry, frozen, drinks, other) and staple flag; kept in
+  `food_line_names` per space and line, a row a thing (`0450`, RLS `0451`), so
+  each line is named once and "Salt and pepper to taste" is salt and black
+  pepper. A line unanswered stays unnamed and is asked again; `item` null
+  buys nothing (water). Lines are content, never instructions. The week's
+  actions (Put on the week, a food, Repeat a week) name new lines with
+  `after()` once their answer has gone; the List page names what is left on
+  opening ("Sorting 12 ingredients into aisles") and refreshes, with Try again
+  if Claude cannot be reached, those lines listed as written meanwhile.
+- **Adding up** (`core/list.ts`): every line read again by `core/amounts.ts`
+  at its cook's batch (`make / yieldAmount`; leftovers add nothing; a recipe
+  with no yield as written), gathered by item: weights across oz, lb, g, kg;
+  volumes across tsp, tbsp, cups, fl oz, ml, l (never one into the other:
+  `4 cloves + 1 tsp`); units of their own by kind with a container's size
+  (`2 cans (15 oz)`); counts; a range by its larger end; no amount listed
+  without one; a planned food by its portion (`5 × banana`) or weight. Shown
+  in the recipe's system (US when any line used US units).
+- **The trip, on the phone** (`components/list-store.ts`, the cook store's
+  idiom): the days (today and six after to start, held from the first tick
+  until the last day has gone, ending by next Sunday), ticks kept by the
+  list's first day (a new first day starts unticked) with the amount ticked
+  (more needed later brings it back: "the week now needs more"), Have it, his
+  own items (a ticked one gone from the next trip). Only Always have
+  (`food_staples`) is on the server, with Put back.
+- **The screen** (`/personal/m/food/list`, a `List` tab, and Shopping list on
+  the week): the days and Change days, the aisles, each item with what needs
+  it, Not sorted yet, Have these at home? (with At home), Your items, what is
+  left off as always had. A ticked thing stays where it is, struck through.
+- Tests: `food-list` (19 pure), `food-list-ops` (5 db, with a stand-in for
+  Claude), `isolation/food-list` (5). Guide `list.md`; `overview.md`,
+  `week.md`, `recipes.md` and the space's overview updated; `shopping-cart`
+  registered for guides. Food's catalogue line and the space's home name the
+  list (a seed on both databases), and the home no longer says what comes next.
+- **Driven on dev** (a production build, three invented recipes, Claude for
+  real): planning a recipe named its lines in the background within seconds
+  (`after()`); the list opened with them sorted, a batch bought once, olive
+  oil gathered across two recipes with each one's share, staples asked
+  separately; with the names wiped, the list said "Sorting 14 ingredients
+  into aisles" and sorted itself. Ticks, Have it, Always have and Put back,
+  his own items, a new first day starting a fresh trip, the help panel, 375
+  px. **Fixed from it:** "Salt and pepper to taste" was named salt alone (a
+  line held one thing: now a row a thing, and the table was rewritten before
+  any production run); a ticked item jumped down to a cart and the next tap
+  hit the row that moved under the finger (now it stays in place, struck
+  through, and the cart is gone); the default days moved with today, which
+  would have unticked a Saturday shop on Sunday (now held from the first
+  tick); "Bananas, banana" (one of a portion now reads "1 banana").
+- **On DEV AND PROD before the merge** (his word, "Go for it"): the prod
+  ledger read first (it ended at 0449, exactly 0450/0451 pending), `0450`/
+  `0451` applied (prod ledger ids 456/457), verify-rls 273 on both, the key
+  read back from `pg_constraint` (`UNIQUE NULLS NOT DISTINCT (tenant_id, line,
+  item)`); the catalogue seed on both, verify-modules green on both, Food
+  still `coming_soon`.
 
 ### 2026-10-03 — D2: the week (`claude/food-d2`)
 
@@ -555,7 +621,7 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | D1b | **Cook mode** | "Cook" on a recipe: the screen stays on, the ingredients gathered first, one step at a time in big type with what it uses, a timer for each time a step names, several at once, ringing until stopped, and "Log that you made it". **Built** |
 | D1c | **Hands-free** | Each step read aloud in the coach's recorded voice, and "next step", "go back", "repeat", "start timer", "stop timer" and "ingredients" heard on the phone (his calls: reading aloud comes with the voice commands; the listener on the phone; short phrases). **Built** |
 | D2 | **The week** | Recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, moved about, a past week repeated, and a planned meal logged from Today with one tap (his calls 2026-10-03; ADR 0129). **Built** |
-| D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone |
+| D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone (ADR 0130). **Built** |
 | D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
 | D4 | **Nutrition of a recipe** | Per recipe, worked out from its ingredients against the food list (D4a's) and labelled as worked out, beside the recipe's own numbers, so a recipe that states none can be counted |
 
@@ -575,6 +641,8 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 | `food_cooks` | A time a recipe was cooked (D1b): `made_on` (the space's day), `servings` (what it was made for), the phone's id | `0439`/`0440`. Composite key to `food_recipes` (`(tenant_id, recipe_id)`, ON DELETE CASCADE). The recipe's count and last day are read from it |
 | `food_eaten` | What was eaten (D4a): `eaten_on` (the space's day), `meal` (enum `food_meal`: breakfast, lunch, dinner, snack), `source` (enum `food_eaten_source`: food, recipe, photo), `fdc_id` or `recipe_id`, `name` as it was, `amount` of `portion` ("1 banana", "g", "oz", or "serving"), `grams` (a food's; null for a recipe), and the seven numbers as worked out when logged (null where a recipe states none) | `0443`, RLS member + superadmin (`0444`). The id is the phone's (`ON CONFLICT DO NOTHING`). `fdc_id` → `food_usda_foods` ON DELETE SET NULL; composite `(tenant_id, recipe_id)` → `food_recipes` ON DELETE SET NULL ("recipe_id"), hand-edited to the column-list form, so a deleted recipe leaves the row and its numbers. CHECKs: amount 0–100,000, grams for foods and none for recipes, numbers not negative. `created_at` defaults to `clock_timestamp()` (`0445`), so a plate's rows keep their order. Index `(tenant_id, eaten_on)`. `plan_id` (D2, `0448`): the planned meal it was, composite `(tenant_id, plan_id)` → `food_plan` ON DELETE SET NULL ("plan_id") (hand-edited); `food_eaten_plan_once_idx` unique on `(tenant_id, plan_id)` where it is set, so a plan is eaten once |
 | `food_plan` | The week (D2, ADR 0129): `planned_on` (the space's day), `meal`, `kind` (enum `food_plan_kind`: cook, leftover, food); a cook's `recipe_id`, `make` and `servings` (eaten there, 0 for a batch made ahead); a leftover's `cook_id` and `servings`; a food's `fdc_id`, `name`, `amount`, `portion` and `grams`. No numbers: worked out from the recipe or the list when read | `0448`, RLS member + superadmin (`0449`). The id is the phone's (`ON CONFLICT DO NOTHING`). `food_plan_shape` CHECK keeps each kind's columns (a cook's `servings` between 0 and `make`, at most 999). Composite keys: `(tenant_id, recipe_id)` → `food_recipes` CASCADE, `(tenant_id, cook_id)` → `food_plan` CASCADE (its unique index `food_plan_tenant_id_id_idx` created before the keys, hand-ordered). `fdc_id` SET NULL. `created_at` `clock_timestamp()`. Indexes `(tenant_id, planned_on)`, `(tenant_id, cook_id)` |
+| `food_line_names` | What a line buys (D3, ADR 0130), a row a thing: `line` (an ingredient line or a planned food's name, spaces collapsed, at most 500), `item` (the thing to buy, lower case, at most 80; one row with null buys nothing), `aisle` (enum `food_aisle`), `staple`. Named by Claude once per space and line; "Salt and pepper to taste" is two rows | `0450`, RLS member + superadmin (`0451`). Unique `(tenant_id, line, item)` `NULLS NOT DISTINCT`; inserts `ON CONFLICT DO NOTHING`. No amount: the list reads those from the line |
+| `food_staples` | What the person always has (D3): `item`, left off every list until put back | `0450`/`0451`. Primary key `(tenant_id, item)`, item lower case, at most 80 |
 | `food_targets` | The daily targets: `calories` (500–10,000) and `protein_g` (10–500), either null | `0443`/`0444`. One row a space (`tenant_id` the key). A day is judged against the targets as they are now |
 | `food_usda_foods` | The food list (D4a, ADR 0126): FNDDS 2021-2023, 5,431 foods, `name`, `category` (WWEIA), the seven numbers per 100 g, `portions` jsonb (`{ label, grams }[]`), `release` | `0443`; REFERENCE DATA with no tenant: `modules`' two policies (superadmin all, any member reads) in `0444`, with `search_tsv`, a generated tsvector (name A, category B) not modelled in the schema, GIN-indexed. Written only by the seed from `scripts/data/usda-foods.json` |
 | `food_imports` | A recipe on its way in: `kind` (`link`, `text`, `photo`), `source_url` (a link's), `status` (`reading`, `draft`, `failed`), the `draft` (a recipe input, its name allowed empty), `error`, the page's photo for a link | D1, `0437`/`0438`. Deleted on save or discard. CHECKs: a link has its URL; a photo all or nothing. Nothing points at it |
@@ -637,6 +705,12 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `use-food-search.ts` (the search, shared with Log food); pages
   `src/app/personal/(space)/m/food/week` and `.../week/add`. Today's planned
   meals are in `eaten-day.tsx`; Log food's `?plan=` in its page.
+- The shopping list (D3): `core/list.ts` (what a line asks for, the sums and
+  their words, the list for a run of days, the trip on the phone),
+  `core/list-names.ts` (Claude's prompt, tool and reader), `list-model.ts`
+  (the call), `list-ops.ts` (the days' plan, names, naming, always have),
+  `components/shopping-list.tsx`, `list-store.ts`; the page
+  `src/app/personal/(space)/m/food/list`.
 - The food list: `scripts/build-usda-foods.ts` (pinned download, readable
   names), `scripts/data/usda-foods.json` (the committed list),
   `scripts/lib/usda-foods.ts` (the seed's loader); `scripts/seed.ts` loads it,
@@ -737,6 +811,14 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   row with `plan_id`, once. Every eaten insert's `ON CONFLICT DO NOTHING`
   names no target, so the second Ate it, with a new id, meets the plan's
   unique index and is dropped instead of failing.
+- **Claude names, the app counts** (D3, ADR 0130). Claude only says what a
+  line buys, its aisle and whether it is a staple; every amount on the list is
+  read from the line and added here. A name is kept per line, so a list is
+  sorted at once the next time, and a line changed in its recipe is a new line
+  to name.
+- **The trip is the phone's** (D3). Ticks, the days and his own items are in
+  the browser's storage, kept by the list's first day; Always have is on the
+  server. Another phone, or a cleared browser, starts without ticks.
 - **The week is container-queried**, not window-queried: the personal space's
   rail takes width, so `@container` with `@2xl:`/`@6xl:` columns
   (breakpoints-cannot-see-the-layout).
@@ -769,6 +851,11 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   week stays as it was (a few rows a week), read-only and repeatable.
 - **A leftover's servings follow the cook's** when it is offered; a different
   amount is a change afterwards.
+- **The list has not met a shop.** Driven in a desktop pane at 375 px; a real
+  phone with no signal, and Claude's names on his own recipes, are unwatched.
+- **A name or an aisle cannot be changed** on the list, and a line Claude
+  says buys nothing is left off; sharing or sending the list is not built.
+- **Ticks are per phone**: the app and Chrome on the same phone keep their own.
 - **No brands or barcodes.** FNDDS is everyday foods. USDA's branded list
   (an API key, the search sent to USDA) or Open Food Facts (ODbL) would add
   packaged foods and a barcode scan; neither is chosen.

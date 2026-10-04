@@ -12,7 +12,7 @@ Your personal space sits beside your business. It is where your own things go, n
 - **`Personal`**, the title, with the line `Your own space, beside your business. Only you can open it.` under it.
 - **The {icon:circle-question-mark} beside the title.** It opens this guide in a panel beside the page.
 - **The `Private to you` card.** It says that nobody from your business can see anything here, that nobody can be invited in, and that Yosher staff cannot open it from the product either. If something goes wrong in your personal space, send us a screenshot, because we cannot look for ourselves.
-- **The `Your tools` card.** While nothing is switched on it says `Nothing is switched on here yet.`, and what is coming: Workouts; Food, with what you eat counted against your targets, the week's meals planned and your recipes, then the shopping list; and Health, with your sleep, weight and tape measures, cold plunges and habits, and your progress week by week. Once a tool is on, the card lists it with a line on what it does, such as **Workouts** {icon:dumbbell}, **Food** {icon:utensils} and **Health** {icon:heart-pulse}; click one to open it. Under the list it says `The shopping list comes next.` Each tool appears on this page and in the sidebar as soon as it is ready.
+- **The `Your tools` card.** While nothing is switched on it says `Nothing is switched on here yet.`, and what is coming: Workouts; Food, with what you eat counted against your targets, the week's meals planned, a shopping list made from them, and your recipes; and Health, with your sleep, weight and tape measures, cold plunges and habits, and your progress week by week. Once a tool is on, the card lists it with a line on what it does, such as **Workouts** {icon:dumbbell}, **Food** {icon:utensils} and **Health** {icon:heart-pulse}; click one to open it. Each tool appears on this page and in the sidebar as soon as it is ready.
 - **The `Back to your business` card.** It tells you where the workspace switcher is.
 - **The workspace switcher.** At the bottom of the sidebar on a computer, at the top right on a phone. Here it shows `Personal`. Open it and pick your business to go back.
 - **Your account button.** Beside the switcher. It opens your Yosher account: your name, your email, and signing out.
@@ -46,7 +46,7 @@ The next time you click `Personal space`, you see `Opening your personal spaceâ€
 
 ## Not on this page
 
-- **The shopping list.** It comes to Food next, made from the week. It arrives on this page when it is ready.
+- **A recipe's nutrition worked out from its ingredients.** Not built. A recipe counts with the nutrition it states.
 - **Inviting somebody in.** A personal space is for one person. A space shared with a partner, such as a household meal plan, is not built. Ask us if you want it.
 - **Deleting your personal space.** Not built yet. Ask us and we will remove it for you.
 - **Settings for your personal space.** Its clock comes from your browser the day you create it. There is nothing to change here yet.

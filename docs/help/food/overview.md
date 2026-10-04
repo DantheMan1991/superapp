@@ -1,17 +1,17 @@
 # Food
 
-> What you ate today, with its calories, protein, carbs and fat, against your targets, and what you planned for each meal; the week ahead and your recipes are one tab over.
+> What you ate today, with its calories, protein, carbs and fat, against your targets, and what you planned for each meal; the week ahead, your recipes and your shopping list are a tab over.
 > **Route:** /personal/m/food/**
 > **Order:** 0
 
-Open **Food** {icon:utensils} in the sidebar of your personal space. This page is the day: what you ate, meal by meal, and how the day adds up. To add something, click {button:Log food|primary|plus}, or {button:Add|ghost|plus} beside a meal. What you planned for a meal waits under it: click {button:Ate it|primary|check} once you have eaten it. The week ahead is under `Week`, and your recipes are under `Recipes`.
+Open **Food** {icon:utensils} in the sidebar of your personal space. This page is the day: what you ate, meal by meal, and how the day adds up. To add something, click {button:Log food|primary|plus}, or {button:Add|ghost|plus} beside a meal. What you planned for a meal waits under it: click {button:Ate it|primary|check} once you have eaten it. The week ahead is under `Week`, your recipes under `Recipes`, and the shopping list under `List`.
 
 ## What you see
 
 - **`Food`**, the title, with the line `What you ate, the week ahead, and your recipes.`
 - **The {icon:circle-question-mark}**, which opens this guide beside the page.
 - **{button:Log food|primary|plus}.** Opens Log food for this day, on the meal the time of day suggests: breakfast from 4 in the morning, lunch from 11, snacks from 3 in the afternoon, dinner from 5, and snacks again from 10 at night. On an earlier day it starts on dinner. See [Logging what you ate](log.md).
-- **`Today`, `Week` and `Recipes`**, Food's sections. You are on `Today`. `Week` is the week ahead: see [Planning the week](week.md). `Recipes` is your recipes: see [Your recipes](recipes.md).
+- **`Today`, `Week`, `Recipes` and `List`**, Food's sections. You are on `Today`. `Week` is the week ahead: see [Planning the week](week.md). `Recipes` is your recipes: see [Your recipes](recipes.md). `List` is the shopping list made from the week: see [Your shopping list](list.md).
 - **The day**, between two arrows: `Today`, `Yesterday`, or a date such as `Thursday, Oct 1`. {button:|ghost|chevron-left} goes to the day before, back to two weeks ago, so you can log a meal you forgot. {button:|ghost|chevron-right} goes to the day after, up to today.
 - **The day's numbers**, four of them, the same size: `Calories`, `Protein`, `Carbs` and `Fat`, everything logged on the day added up.
   - **Your targets**, when you set them: a bar under `Calories` and under `Protein`, and how far along, such as `1,640 of 2,200 kcal` and `128 of 150 g`. The bar stops at full when you go over.
@@ -83,7 +83,6 @@ Every change shows at once, {button:Ate it|primary|check} too. If it could not b
 
 - **Fiber, sugar and sodium.** They are kept for every food on the list, but not shown yet.
 - **Brands and barcodes.** The food list is USDA's everyday foods. Packaged foods by brand, and scanning a barcode, are not built.
-- **The shopping list.** It comes next, in Food, made from the week.
 - **Nutrition worked out from a recipe's ingredients.** Not built. A recipe counts with the nutrition it states.
 - **Progress over weeks.** It is in Health, with your workouts, sleep and plunges.
 

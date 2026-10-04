@@ -15,6 +15,8 @@ import { FoodNav } from "@/modules/food/components/food-nav";
 import { WeekPlan } from "@/modules/food/components/week-plan";
 
 export const dynamic = "force-dynamic";
+/** Repeat a week names the new lines for the shopping list after it answers (`after`), in up to half a minute. */
+export const maxDuration = 60;
 
 /**
  * THE WEEK (D2, docs/help/food/week.md, ADR 0129): `?week=` any day of the

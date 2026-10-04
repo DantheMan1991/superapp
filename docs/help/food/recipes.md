@@ -10,7 +10,7 @@ Open **Food** {icon:utensils} in the sidebar of your personal space, then click 
 
 - **`Food`**, the title, with the line `Your recipes in one place: from a link, a photo of a page, pasted text, or typed in.`
 - **{button:Add a recipe|primary|plus}.** Opens Add a recipe. See [Adding a recipe](add.md).
-- **`Today`, `Week` and `Recipes`**, Food's sections, under the title. `Today` is what you ate: see [Food](overview.md). `Week` is the week ahead: see [Planning the week](week.md). You are on `Recipes`.
+- **`Today`, `Week`, `Recipes` and `List`**, Food's sections, under the title. `Today` is what you ate: see [Food](overview.md). `Week` is the week ahead: see [Planning the week](week.md). `List` is the shopping list: see [Your shopping list](list.md). You are on `Recipes`.
 - **Drafts.** Shown only while a recipe is on its way in. Each row says where it came from: the site's name for a link, `Pasted text`, or `Photos of a page`, and the recipe's own name once it has been read. Under it, one of these:
   - `Reading, started just now`, with a turning circle, while Claude reads it. That takes up to a minute. You can leave the page; the reading carries on.
   - `Ready to check`, with {button:Check it|primary}. It opens the draft in the editor, where you check it and save it. See [Typing in and editing a recipe](editor.md).
@@ -42,7 +42,6 @@ The reasons a recipe could not be read are listed in [Adding a recipe](add.md).
 
 ## Not on this page
 
-- **The shopping list.** It comes next, made from the week. The week itself is under `Week`: see [Planning the week](week.md).
 - **Working out nutrition from the ingredients.** Not built. A recipe shows the nutrition it states, when it states it.
 - **Sharing a recipe with somebody.** Not built.
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { Check, ChefHat, ChevronLeft, ChevronRight, Copy, Plus } from "lucide-react";
+import { Check, ChefHat, ChevronLeft, ChevronRight, Copy, Plus, ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
 import type { FoodPortion } from "@/db/schema";
 import { Button } from "@/components/ui/button";
@@ -267,6 +267,11 @@ export function WeekPlan({
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => setRepeating((now) => !now)} aria-expanded={repeating}>
               <Copy aria-hidden /> Repeat a week
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/personal/m/food/list">
+                <ShoppingCart aria-hidden /> Shopping list
+              </Link>
             </Button>
           </div>
         )}

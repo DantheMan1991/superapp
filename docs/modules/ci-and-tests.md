@@ -51,6 +51,72 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-10-03 — Lint was not failing; the label was cancelling it (branch `claude/ci-checks-skip-labeled`)
+
+**The founder kept seeing "the ci/lint test failed" on PRs whose lint had
+passed.** `gh pr create --label full-tests` fires `opened` and `labeled`
+together, and `labeled` has been a trigger since 2026-08-09, added after
+labelling #101 re-ran nothing. So two CI runs start on one commit. Both ran
+`checks`, whose job-level group (`checks-<workflow>-<ref>`,
+`cancel-in-progress: true`) let whichever copy queued second cancel the other.
+On #699 the loser, in run 37167938556, was cancelled in the second it was
+created. The head commit then carried a CANCELLED "Lint, types, build" beside a
+SUCCESS one, its rollup read FAILURE, and `mergeStateStatus` read UNSTABLE.
+
+**It was not three PRs.** 344 of the 450 PRs ever labelled `full-tests` end
+with that pair on their head commit, from #109 to #698. #699 reads green now only
+because its cancelled run was re-run.
+
+**The fix is one line on `checks`: `if: github.event.action != 'labeled'`.** A
+label changes no code, so lint, types, the build and the pure tests have nothing
+new to say about it. `migrations` and `tests` still run on `labeled`: the label
+is what they read, and the reason `labeled` is a trigger at all. A push has no
+`action`, which GitHub coerces to `0` against the string's `NaN`, so the
+comparison is unequal and `main` still runs `checks`. Nothing has
+`needs: checks`, so skipping it skips nothing else.
+
+**It works only if two things are true, and GitHub's docs state only one of
+them.**
+
+- **A skipped job counts as passing.** Stated outright: a job skipped by a
+  conditional "will report its status as 'Success'" and does not block a merge
+  even as a required check, and the required-checks troubleshooting page lists
+  `success`, `skipped` and `neutral` as the successful statuses. This repo
+  already showed it: #680, #682 and #683 each carry a SKIPPED "Test suite" under
+  a rollup of SUCCESS.
+- **A skipped job never joins its concurrency group**, or the skipped copy would
+  still cancel the running one. **The docs do not say this.** They describe a
+  group acting on a job that is queued or starts, and `if:` as what stops a job
+  running, which implies it without stating it. The proof is this repo's own
+  history. From 2026-08-09 to 08-15 `tests` carried both an `if:` (a push, or
+  the `full-tests` label) and the repo-wide `db-tests` group with
+  `cancel-in-progress: false`. Twelve skipped copies were created while another
+  run held `db-tests`, and all twelve finished in 0s instead of queueing behind
+  it. And on 2026-08-12 a skipped copy (job 93998576586) was created while job
+  93995756948 sat pending in that group, and left it there, where a job that
+  joined would have replaced it (a group holds one pending job). It was replaced
+  22 seconds later, when the same PR's `labeled` run queued a real copy
+  (93998631169). That PR is #131, opened at 03:14:13 without the label and
+  labelled at 03:14:36: the same opened-then-labelled pair this entry is about.
+  Gitea changed its own Actions implementation to evaluate a job's `if:` before
+  its concurrency group for the same reason (go-gitea/gitea#39437, merged
+  2026-09-26).
+
+**A skipped copy cannot hide a failed one in the rollup.** The rollup counts
+every run's check, not the newest of each name, which is exactly why one
+CANCELLED copy turned it red. So a lint FAILURE in the `opened` run still shows
+beside the `labeled` run's SKIPPED. GitHub's docs do not say whether branch
+protection resolves two same-named checks the same way, and it was not tested;
+see Open items.
+
+**Left alone, deliberately:** a PR opened with the label still runs the database
+suite twice. That job has no group, so neither copy cancels the other. It costs
+runner minutes, not a red tick.
+
+**Not yet watched happening.** The first PR opened with the label after this
+merges should show one SUCCESS and one SKIPPED "Lint, types, build", a rollup of
+SUCCESS, and nothing CANCELLED.
+
 ### 2026-09-20 — The ADR index is checked against the ADRs (branch `claude/competent-chebyshev-c7907d`)
 
 `docs/decisions/README.md` had been stale since 2026-09-14: 99 ADRs in the
@@ -513,7 +579,7 @@ None. No tables, no migrations.
 
 | File | What it does |
 | --- | --- |
-| `.github/workflows/ci.yml` | The three jobs and their concurrency rules. `checks` gates the merge, `migrations` refuses an unlabelled migration PR, `tests` is the database suite |
+| `.github/workflows/ci.yml` | The three jobs and their concurrency rules. `checks` gates the merge and sits out a `labeled` run, `migrations` refuses an unlabelled migration PR, `tests` is the database suite |
 | `vitest.config.ts` | The `pure` / `db` project split |
 | `tests/db-backed-files.ts` | Which files are database-backed |
 | `tests/db-backed-files.test.ts` | Recomputes that list and fails if it drifted |
@@ -617,6 +683,11 @@ None. No tables, no migrations.
   required checks are ever added, replace it with a filter job that computes the
   changed paths and gates the expensive job with `if:`, so a status is always
   reported. The warning is repeated at the top of the workflow.
+  **Check a second thing before requiring "Lint, types, build".** A PR opened
+  with a label carries two checks of that name on one commit, and the `labeled`
+  run's is SKIPPED (2026-10-03). The rollup counts both, so a failure still
+  shows. Nobody has checked whether a required check does the same, or whether
+  a SKIPPED copy could satisfy it over a FAILED one.
 - **`package.json` declares no `engines`**, so nothing enforces the Node version
   the lockfile was authored with — CI pins 24 to match development, but that is
   a convention held in one YAML file. Adding `engines` would make it explicit;

@@ -103,7 +103,8 @@ on:
     # default trigger list — opened, synchronize, reopened — means adding the
     # label to an open PR re-runs nothing and the suite silently stays skipped.
     # Found by labelling PR #101 and watching it report "skipping" anyway.
-    # Listing types overrides the defaults, so all four are named.
+    # Listing types overrides the defaults, so all four are named. `checks`
+    # sits a `labeled` run out; see the note on that job.
     types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - "docs/*.md"
@@ -123,6 +124,17 @@ jobs:
   checks:
     name: Lint, types, build
     runs-on: ubuntu-latest
+    # NOT ON `labeled`: a label changes no code. Opening a PR with
+    # `gh pr create --label full-tests` fires `opened` and `labeled` together,
+    # so two runs start on one commit, and whichever copy of this job queued
+    # second cancelled the other through the group below. The PR then held a
+    # CANCELLED "Lint, types, build" beside a passing one and read as failed
+    # though lint had passed: #697, #698 and #699 (run 37167938556). A job
+    # skipped by `if:` never joins its group, so it cannot cancel the `opened`
+    # run's copy, and a SKIPPED check counts as passing. `migrations` and
+    # `tests` still run on `labeled`, because the label is what they read. The
+    # evidence for both claims is in docs/modules/ci-and-tests.md, 2026-10-03.
+    if: github.event.action != 'labeled'
     # A superseded push has nothing worth waiting for.
     concurrency:
       group: checks-${{ github.workflow }}-${{ github.ref }}

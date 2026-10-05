@@ -34,6 +34,9 @@ export type FoodErrorCode =
   | "PLAN_NOTHING"
   | "PLAN_WEEK"
   | "LIST_FAILED"
+  | "NUTRITION_EMPTY"
+  | "NUTRITION_FAILED"
+  | "NUTRITION_CHANGED"
   | "INVALID";
 
 const MESSAGES: Record<FoodErrorCode, string> = {
@@ -66,6 +69,9 @@ const MESSAGES: Record<FoodErrorCode, string> = {
   PLAN_NOTHING: "Nothing is eaten at that meal: the batch is made ahead. Log its leftovers when you eat them.",
   PLAN_WEEK: "Choose a past week to repeat, on this week or the next.",
   LIST_FAILED: "The list could not be sorted into aisles this time. Try again.",
+  NUTRITION_EMPTY: "This recipe has no ingredients to work out. Add them in the editor first.",
+  NUTRITION_FAILED: "The ingredients could not be matched this time. Try again.",
+  NUTRITION_CHANGED: "The recipe's ingredients changed while you checked them. Work it out again.",
   INVALID: "Something in that was not right. Check it and try again.",
 };
 

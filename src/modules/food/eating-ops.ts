@@ -5,6 +5,7 @@ import type { FoodPortion } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { addDays, todayInTimezone } from "@/lib/timezone";
 import { FoodError } from "./core/errors";
+import { effectiveNutrition } from "./core/nutrition";
 import {
   LOG_BACK_DAYS,
   MEALS,
@@ -72,7 +73,22 @@ function hitOf(row: Record<string, unknown>): FoodHit {
  * ties. Words are reduced to letters and digits before they are put in the
  * queries or the patterns, so nothing typed can change their shape.
  */
-export async function searchFoods(tx: Tx, q: string, limit = 20): Promise<FoodHit[]> {
+export function searchFoods(tx: Tx, q: string, limit = 20): Promise<FoodHit[]> {
+  return searchUsda(tx, "food_usda_foods", q, limit);
+}
+
+/**
+ * The same search on either of USDA's lists: the eating log's foods as eaten
+ * (`food_usda_foods`), or a recipe's ingredients as bought
+ * (`food_usda_ingredients`, D4). Both have the same columns and a
+ * `search_tsv` made the same way.
+ */
+export async function searchUsda(
+  tx: Tx,
+  table: "food_usda_foods" | "food_usda_ingredients",
+  q: string,
+  limit = 20,
+): Promise<FoodHit[]> {
   const words = searchWords(q);
   if (words.length === 0) return [];
   const every = words.map((w) => `${w}:*`).join(" & ");
@@ -89,7 +105,7 @@ export async function searchFoods(tx: Tx, q: string, limit = 20): Promise<FoodHi
              ${matched} as matched,
              ts_rank_cd(f.search_tsv, to_tsquery('english', ${every})) as rank_every,
              ts_rank_cd(f.search_tsv, to_tsquery('english', ${any})) as rank_any
-        from food_usda_foods f
+        from ${sql.identifier(table)} f
        where f.search_tsv @@ to_tsquery('english', ${any})
     )
     select fdc_id, name, category, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, portions
@@ -104,6 +120,27 @@ export async function searchFoods(tx: Tx, q: string, limit = 20): Promise<FoodHi
               length(name) asc
      limit ${Math.max(1, Math.min(limit, 50))}`);
   return ((result.rows ?? []) as Record<string, unknown>[]).map(hitOf);
+}
+
+/**
+ * The food on either list whose name, without USDA's notes in brackets, is
+ * `key` (`foodNameKey`, D4): how a recipe's line is matched when Claude names
+ * the food exactly as SR Legacy does. The normalising here and in
+ * `foodNameKey` must agree.
+ */
+export async function usdaByName(tx: Tx, table: "food_usda_foods" | "food_usda_ingredients", key: string): Promise<FoodHit | null> {
+  if (key === "") return null;
+  // The patterns go as parameters: in the sql template a backslash would be lost.
+  const notes = "\\s*\\([^)]*\\)";
+  const spaces = "\\s+";
+  const result = await tx.execute(sql`
+    select fdc_id, name, category, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, portions
+      from ${sql.identifier(table)}
+     where lower(btrim(regexp_replace(regexp_replace(name, ${notes}, '', 'g'), ${spaces}, ' ', 'g'))) = ${key}
+     order by length(name) asc, fdc_id asc
+     limit 1`);
+  const [row] = (result.rows ?? []) as Record<string, unknown>[];
+  return row ? hitOf(row) : null;
 }
 
 export async function getFood(tx: Tx, fdcId: number): Promise<FoodHit | null> {
@@ -127,18 +164,29 @@ export async function getFood(tx: Tx, fdcId: number): Promise<FoodHit | null> {
 
 /* -- the person's recipes, for the same search --------------------------- */
 
-/** Recipes whose name has every word in it; with no words, the ones cooked most lately. */
+/**
+ * Recipes whose name has every word in it; with no words, the ones cooked
+ * most lately. Each counts with its own numbers first and its worked-out ones
+ * for the rest (D4, the founder's call).
+ */
 export async function searchRecipes(tx: Tx, tenantId: string, q: string, limit = 5): Promise<RecipeHit[]> {
   const t = schema.foodRecipes;
   const words = searchWords(q);
   const lastCooked = sql`(select max(c.made_on) from food_cooks c where c.tenant_id = ${t.tenantId} and c.recipe_id = ${t.id})`;
   const rows = await tx
-    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldAmount: t.yieldAmount, yieldUnit: t.yieldUnit })
+    .select({
+      recipeId: t.id,
+      title: t.title,
+      own: t.nutrition,
+      worked: t.workedNutrition,
+      yieldAmount: t.yieldAmount,
+      yieldUnit: t.yieldUnit,
+    })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), ...words.map((w) => ilike(t.title, `%${w}%`))))
     .orderBy(sql`${lastCooked} desc nulls last`, asc(t.title))
     .limit(limit);
-  return rows.map((r) => ({ ...r, perServing: r.perServing ?? null }));
+  return rows.map(({ own, worked, ...r }) => ({ ...r, perServing: effectiveNutrition(own, worked, r.yieldAmount) }));
 }
 
 /* -- the log ---------------------------------------------------------- */
@@ -204,7 +252,7 @@ export async function insertEatenRecipe(
 ): Promise<void> {
   const t = schema.foodRecipes;
   const [recipe] = await tx
-    .select({ title: t.title, nutrition: t.nutrition })
+    .select({ title: t.title, own: t.nutrition, worked: t.workedNutrition, yieldAmount: t.yieldAmount })
     .from(t)
     .where(and(eq(t.tenantId, ctx.tenant.id), eq(t.id, entry.recipeId)))
     .limit(1);
@@ -222,7 +270,7 @@ export async function insertEatenRecipe(
       amount: entry.servings,
       portion: "serving",
       grams: null,
-      ...nutrientColumns(forServings(recipe.nutrition ?? null, entry.servings)),
+      ...nutrientColumns(forServings(effectiveNutrition(recipe.own, recipe.worked, recipe.yieldAmount), entry.servings)),
       planId: entry.planId ?? null,
       createdByClerkUserId: ctx.userId,
     })
@@ -319,11 +367,20 @@ export async function dayEaten(tx: Tx, tenantId: string, day: string): Promise<D
 export async function recipeHit(tx: Tx, tenantId: string, recipeId: string): Promise<RecipeHit | null> {
   const t = schema.foodRecipes;
   const [row] = await tx
-    .select({ recipeId: t.id, title: t.title, perServing: t.nutrition, yieldAmount: t.yieldAmount, yieldUnit: t.yieldUnit })
+    .select({
+      recipeId: t.id,
+      title: t.title,
+      own: t.nutrition,
+      worked: t.workedNutrition,
+      yieldAmount: t.yieldAmount,
+      yieldUnit: t.yieldUnit,
+    })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), eq(t.id, recipeId)))
     .limit(1);
-  return row ? { ...row, perServing: row.perServing ?? null } : null;
+  if (!row) return null;
+  const { own, worked, ...hit } = row;
+  return { ...hit, perServing: effectiveNutrition(own, worked, hit.yieldAmount) };
 }
 
 /** Every row in a run of days, both ends included: what Progress adds up. */
@@ -419,6 +476,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
       },
       recipeTitle: r.title,
       recipeNutrition: r.nutrition,
+      recipeWorked: r.workedNutrition,
       recipeYieldAmount: r.yieldAmount,
       recipeYieldUnit: r.yieldUnit,
     })
@@ -456,7 +514,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
       ? {
           recipeId: row.recipeId,
           title: row.recipeTitle ?? "",
-          perServing: row.recipeNutrition ?? null,
+          perServing: effectiveNutrition(row.recipeNutrition, row.recipeWorked, row.recipeYieldAmount),
           yieldAmount: row.recipeYieldAmount ?? null,
           yieldUnit: row.recipeYieldUnit ?? null,
         }

@@ -1,6 +1,6 @@
 # Cooking from a recipe
 
-> A saved recipe: its photo, the ingredients scaled to the servings you want with a box to tick each one off, the steps, and the nutrition it states.
+> A saved recipe: its photo, the ingredients scaled to the servings you want with a box to tick each one off, the steps, and its nutrition, as it states it or worked out from its ingredients.
 > **Route:** /personal/m/food/recipes/*
 > **Order:** 30
 
@@ -30,7 +30,11 @@ Open **Food**, click `Recipes`, and click a recipe. Change the servings with {bu
   - With no number for what it makes, there is no {button:−|outline|minus} and {button:+|outline|plus}, and the recipe shows as written.
   - `No ingredients written down.` when the recipe has none.
 - **Steps**, numbered in order, with any headings between them. `No steps written down.` when it has none.
-- **Nutrition**, when the recipe states it: `Per serving, as the recipe states it.`, then calories, protein, carbs and fat, and under them fiber, sugar and sodium when given. It is per serving, so changing the servings does not change it.
+- **Nutrition.** It is per serving, so changing the servings does not change it.
+  - What the recipe states: `Per serving, as the recipe states it.`, then calories, protein, carbs and fat, and under them fiber, sugar and sodium when given.
+  - When it states none, `This recipe states none, so it counts as no numbers on Today and the week.`, or when it states some, `It does not state them all, so the rest count as no numbers on Today and the week.`, with {button:Work it out from the ingredients|primary|calculator}. See [Working out a recipe's nutrition](recipe-nutrition.md).
+  - Once worked out: `Per serving, worked out from the ingredients and USDA's list.`, or `Worked out from the ingredients, for what the recipe does not state:` beside the recipe's own, then the numbers, and {button:Check it again|outline}. The recipe's own numbers always come first.
+  - After the ingredients change: `Worked out from an earlier version of the ingredients. Check it again to bring it up to date.` Its numbers still count until you do. Changing what the recipe makes needs no check: a serving is worked out from the whole recipe.
 - **Notes**, when the recipe has some.
 
 ## How to cook for a different number
@@ -50,7 +54,7 @@ Open **Food**, click `Recipes`, and click a recipe. Change the servings with {bu
 
 ## Not on this page
 
-- **Converting units**, such as cups to grams. Not built.
+- **Converting units**, such as cups to grams. Not built. (Working out the nutrition weighs each line, but the recipe still shows it as written.)
 - **Scaling the amounts inside the steps.** Not built; the note under the ingredients says so when the servings are changed.
 
 ## Who can do what

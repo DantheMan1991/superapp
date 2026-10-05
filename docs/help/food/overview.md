@@ -15,19 +15,20 @@ Open **Food** {icon:utensils} in the sidebar of your personal space. This page i
 - **The day**, between two arrows: `Today`, `Yesterday`, or a date such as `Thursday, Oct 1`. {button:|ghost|chevron-left} goes to the day before, back to two weeks ago, so you can log a meal you forgot. {button:|ghost|chevron-right} goes to the day after, up to today.
 - **The day's numbers**, four of them, the same size: `Calories`, `Protein`, `Carbs` and `Fat`, everything logged on the day added up.
   - **Your targets**, when you set them: a bar under `Calories` and under `Protein`, and how far along, such as `1,640 of 2,200 kcal` and `128 of 150 g`. The bar stops at full when you go over.
-  - **Something with no nutrition**: a recipe that states none is logged without numbers, and the card says so, such as `1 thing has no nutrition: its recipe states none. Add it in the recipe's editor, and log it again.`
+  - **Something with no nutrition**: a recipe with no nutrition yet is logged without numbers, and the card says so, such as `1 thing has no nutrition: its recipe has none yet. Tap it to work the recipe's nutrition out from its ingredients, and it counts here too.`
   - **{button:Set targets|ghost|target}**, or {button:Change targets|ghost|target} once you have some. It opens two boxes in the card:
     - `Calories a day`, a whole number from 500 to 10,000.
     - `Protein a day, g`, a whole number from 10 to 500.
     - `Leave a box empty for no target. A day is on its calorie target within a tenth of it, either way, and on its protein target at or above it.`
     - {button:Save targets|primary} keeps them, and {button:Cancel|ghost} closes the boxes unchanged. A number out of range shows `Calories between 500 and 10,000.` or `Protein between 10 and 500 g.` in red, and Save targets stays grayed out.
 - **A card for each meal**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`, each with its calories beside the name and {button:Add|ghost|plus}, which opens Log food for that meal and this day. A meal with nothing in it, logged or planned, says `Nothing yet`.
-  - **Each thing you logged**, in the order you logged it: its name ({icon:chef-hat} before a recipe of yours), how much, such as `1 banana`, `150 g` or `1.5 servings`, its protein, carbs and fat, and its calories on the right. A recipe that states no nutrition says `no nutrition` instead of calories.
+  - **Each thing you logged**, in the order you logged it: its name ({icon:chef-hat} before a recipe of yours), how much, such as `1 banana`, `150 g` or `1.5 servings`, its protein, carbs and fat, and its calories on the right. A recipe with no nutrition yet says `no nutrition` instead of calories; tap it for {button:Work out its nutrition|outline}.
   - **Tap a thing** to change it. Its card opens:
     - `How much`, a number above 0.
     - Beside it, what the number counts. For a food: its own portions from the food list, such as `1 banana` or `1 cup`, then `g` and `oz`. For a recipe: `servings`.
     - The meal buttons, `Breakfast`, `Lunch`, `Dinner` and `Snacks`, to move it to another meal.
     - Its numbers for the new amount, as you type. They are worked out from the numbers it was logged with, so a recipe you changed since keeps counting as it was when you ate it.
+    - {button:Work out its nutrition|outline}, on a recipe logged with no numbers, opens [Working out a recipe's nutrition](recipe-nutrition.md). Saving it there fills in this log too.
     - {button:Save|primary} keeps the change. {button:Cancel|ghost} closes it unchanged. {button:Remove|ghost} asks `Remove it?`: click {button:Remove|destructive} to take it off the day, or {button:Keep it|ghost}.
     - A number that is not one shows `Type how much, a number above 0.`, and a portion the food cannot be counted in shows `That amount is not one this food can be logged in.` Save stays grayed out for both.
   - **What you planned and have not logged yet**, under what you logged, in a box marked `Planned`: its name, what it is, such as `Cook 4 servings, eat 1`, `Leftovers · 1 serving` or `1 cup`, and its calories on the right. See [Planning the week](week.md).
@@ -83,7 +84,6 @@ Every change shows at once, {button:Ate it|primary|check} too. If it could not b
 
 - **Fiber, sugar and sodium.** They are kept for every food on the list, but not shown yet.
 - **Brands and barcodes.** The food list is USDA's everyday foods. Packaged foods by brand, and scanning a barcode, are not built.
-- **Nutrition worked out from a recipe's ingredients.** Not built. A recipe counts with the nutrition it states.
 - **Progress over weeks.** It is in Health, with your workouts, sleep and plunges.
 
 ## Who can do what

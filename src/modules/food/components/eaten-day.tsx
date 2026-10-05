@@ -41,6 +41,8 @@ export interface EntryView extends Nutrients {
   portion: string;
   grams: number | null;
   portions: FoodPortion[] | null;
+  /** A recipe's, for working its nutrition out when it has none (D4). */
+  recipeId?: string | null;
 }
 
 function entriesKey(entries: readonly EntryView[]): string {
@@ -284,7 +286,7 @@ export function EatenDay({
         </div>
         {day_.unknown > 0 && (
           <p className="text-sm text-muted-foreground">
-            {`${day_.unknown} ${day_.unknown === 1 ? "thing has" : "things have"} no nutrition: its recipe states none. Add it in the recipe's editor, and log it again.`}
+            {`${day_.unknown} ${day_.unknown === 1 ? "thing has" : "things have"} no nutrition: its recipe has none yet. Tap it to work the recipe's nutrition out from its ingredients, and it counts here too.`}
           </p>
         )}
         {settingGoal ? (
@@ -443,6 +445,11 @@ export function EatenDay({
                                     .filter(Boolean)
                                     .join(" · ")}
                           </p>
+                          {entry.source === "recipe" && entry.recipeId && entry.calories === null && (
+                            <Button asChild size="sm" variant="outline">
+                              <Link href={`/personal/m/food/recipes/${entry.recipeId}/nutrition`}>Work out its nutrition</Link>
+                            </Button>
+                          )}
                           {confirming === entry.id ? (
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm">Remove it?</span>

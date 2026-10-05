@@ -35,6 +35,8 @@ import {
 import { addLeftovers, ateIt, changePlan, movePlan, planCook, planFood, removePlan, repeatWeek } from "./plan-ops";
 import { alwaysHaveSchema } from "./core/list";
 import { nameLines, setAlwaysHave } from "./list-ops";
+import { saveWorkedSchema, workOutSchema, type DraftLine } from "./core/nutrition";
+import { saveWorked, workOut } from "./nutrition-ops";
 
 /**
  * FOOD'S SERVER ACTIONS. Each one: the personal space's own door
@@ -510,6 +512,39 @@ export async function alwaysHaveAction(input: unknown): Promise<Outcome> {
     return { ok: true };
   } catch (err) {
     return failure(err, "That could not be saved. Try again.");
+  }
+}
+
+/* -- a recipe's nutrition, worked out (D4) ----------------------------------- */
+
+/**
+ * Match a recipe's lines to USDA's ingredient list and weigh them, for the
+ * person to check: nothing is written. Up to half a minute with Claude; the
+ * nutrition page sets `maxDuration` for it.
+ */
+export async function workOutAction(input: unknown): Promise<Outcome<{ lines: DraftLine[] }>> {
+  try {
+    const ctx = await gate();
+    const parsed = workOutSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("RECIPE_MISSING")) };
+    return { ok: true, ...(await workOut(ctx, parsed.data.recipeId)) };
+  } catch (err) {
+    return failure(err, "The ingredients could not be matched this time. Try again.");
+  }
+}
+
+/** Keep what the person checked, and fill in past logs that had no numbers when they asked. */
+export async function saveWorkedAction(input: unknown): Promise<Outcome<{ filled: number }>> {
+  try {
+    const ctx = await gate();
+    const parsed = saveWorkedSchema.safeParse(input);
+    if (!parsed.success) return { error: foodMessage(new FoodError("INVALID")) };
+    const { filled } = await saveWorked(ctx, parsed.data);
+    refreshFood();
+    revalidatePath(recipeHref(parsed.data.recipeId));
+    return { ok: true, filled };
+  } catch (err) {
+    return failure(err, "The nutrition could not be saved. Try again.");
   }
 }
 

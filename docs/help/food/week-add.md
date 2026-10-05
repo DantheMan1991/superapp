@@ -14,13 +14,13 @@ Click {button:Put on the week|primary|plus} on Food's `Week`, or {button:|ghost|
 - **The meal buttons**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`. The one lit up is the meal it goes on. From {button:Put on the week|primary|plus}, it starts on the meal the time of day suggests (dinner on a later day); from a meal's {button:|ghost|plus}, on that meal.
 - **The search box**, `Search your recipes or foods`. Type a few letters: your recipes whose names have every word come first, under `Your recipes`, then foods on USDA's list under `Foods`, each with its kind, such as `Bananas`. The {icon:x} in the box clears it. While it looks, it says `Searching…`; with nothing found, `Nothing found for “quinoa bake”. Try fewer words, or other ones.`
 - **Before you type**: `Your recipes`, the ones you cooked most lately first, and `Foods you had lately`, with the amount you last had. Click one to choose it.
-- **What you chose**, in a card: its name ({icon:chef-hat} before a recipe), and under it, for a recipe, what it makes and its nutrition, such as `Makes 6 servings · 520 kcal and 44 g protein a serving`, or `states no nutrition`. For a food, its kind.
+- **What you chose**, in a card: its name ({icon:chef-hat} before a recipe), and under it, for a recipe, what it makes and its nutrition, such as `Makes 6 servings · 520 kcal and 44 g protein a serving`, or `no nutrition yet`. A recipe's nutrition is its own, then what was worked out from its ingredients. For a food, its kind.
   - **For a recipe:**
     - `Cook`: how much to make, with {button:|outline|minus} and {button:|outline|plus}, or type it. It starts at what the recipe makes. Under it, the recipe's unit, such as `servings`.
     - `You eat`: how much you eat at this meal, the same way. It starts at 1. 0 means the batch is made for later meals, and the card says `Nothing is eaten at this meal: the batch is made for later ones.`
     - `The other 3, as leftovers`, when the batch has more than you eat: a button for each lunch and dinner in the four days after this meal, such as `Tomorrow's lunch` and `Fri lunch`, up to next Sunday. The next free lunches are lit up to start, then dinners. A meal that has something planned already is not lit up to start. Click a button to put a leftover there or take it off; once the batch is used up, the rest are grayed out. Under them: `Each is 1 serving. Leave some off if someone else eats them. Cook opens the recipe at 4.`
   - **For a food:** `How much`, and beside it the food's own portions, such as `1 banana` or `1 cup`, then `g` and `oz`. It starts at the food's first portion, or at what you last had.
-  - **What you eat at this meal comes to**, such as `520 kcal · protein 44 g · carbs 38 g · fat 18 g`. `no numbers` means the recipe states no nutrition.
+  - **What you eat at this meal comes to**, such as `520 kcal · protein 44 g · carbs 38 g · fat 18 g`. `no numbers` means the recipe has no nutrition yet.
   - {button:Put on the week|primary} puts it on, says `Turkey chili is on the week.`, and goes back to the week. While it works it says `Putting it on…`. {button:Back|ghost} goes back to the search.
 
 ## How to put a recipe on the week
@@ -60,7 +60,7 @@ Click {button:Put on the week|primary|plus} on Food's `Week`, or {button:|ghost|
 
 - **Days before today, and after next Sunday.** Plan this week and next week.
 - **Breakfast and snacks for leftovers.** They are not offered; move a leftover there from the week.
-- **A recipe's nutrition worked out from its ingredients.** A recipe counts with the nutrition it states.
+- **Working out a recipe's nutrition.** It is on the recipe: see [Working out a recipe's nutrition](recipe-nutrition.md).
 
 ## Who can do what
 

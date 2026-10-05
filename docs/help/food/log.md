@@ -27,7 +27,7 @@ You also get here from {button:Log it|outline|plus} on a recipe, and from {butto
   - Its name, and its group on the list, or `Your recipe`.
   - **`How much`**, a number above 0, and beside it what the number counts. For a food: its own portions, such as `1 banana`, `1 cup` or `1 cup, mashed`, then `g` and `oz`. For a recipe: servings, as the recipe makes them.
   - **The four numbers** for that amount: `Calories`, `Protein`, `Carbs` and `Fat`. They change as you type.
-  - A recipe that states no nutrition says `This recipe states no nutrition, so it is logged without numbers. Add them in the recipe's editor first to count it.`
+  - A recipe with no nutrition yet says `This recipe has no nutrition yet, so it is logged without numbers. Work it out from its ingredients first to count it.`, where `Work it out from its ingredients` opens [Working out a recipe's nutrition](recipe-nutrition.md). A recipe whose nutrition was worked out counts with it, after its own numbers.
   - **{button:Add to lunch|primary}**, named for the meal chosen. It reads `Adding…` while it works. Then the card closes, the search box is ready for the next thing, and the line `Added to lunch:` appears above.
   - **{button:Back|ghost}.** Closes the card, to choose something else.
 - **At the bottom**: `Foods and their nutrition from USDA FoodData Central (FNDDS 2021-2023), per 100 g, for the amount you choose.`

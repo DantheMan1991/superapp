@@ -67,7 +67,7 @@ function Tick({ on }: { on: boolean }) {
  * the names Claude gave each line; the days, the ticks and his own items are
  * kept on the phone (`list-store.ts`), so ticking works with no signal. A
  * ticked thing stays where it is, struck through, so the row under a finger
- * never moves (the drive's mis-tap, 2026-10-04); the days are kept from the
+ * never moves (the drive's mis-tap, 2026-10-03); the days are kept from the
  * first tick, so tomorrow's default does not untick today's shop. Lines not
  * named yet are named on opening, and the page fetched again.
  */

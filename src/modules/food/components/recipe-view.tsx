@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ChefHat, Minus, Plus } from "lucide-react";
+import { Calculator, ChefHat, Minus, Plus } from "lucide-react";
+import type { FoodNutrition } from "@/db/schema";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { readLine, showLine } from "../core/amounts";
@@ -10,21 +11,28 @@ import { clampStep, isStale, realSteps } from "../core/cook";
 import { useCookSession, writeCookSession } from "./cook-store";
 import { useNow } from "./use-now";
 import { NUTRITION_KEYS, NUTRITION_LABELS, plainNumber, yieldWords, type RecipeInput } from "../core/recipe";
+import { gramWords, kcalWords } from "../core/eating";
+import { MAIN_KEYS, statesAll } from "../core/nutrition";
 
 /**
  * A RECIPE, TO COOK FROM (docs/help/food/recipe.md): the photo, the servings
  * with − and +, the ingredients scaled to them with a box to tick each one
- * off, the steps, and the nutrition the recipe states. Ticks and servings are
- * this screen's alone: nothing here is saved.
+ * off, the steps, and the nutrition: the recipe's own, and (D4) what was
+ * worked out from its ingredients for what it does not state, with Work it
+ * out or Check it again. Ticks and servings are this screen's alone: nothing
+ * here is saved.
  */
 export function RecipeView({
   recipeId,
   recipe,
   photo,
+  worked = null,
 }: {
   recipeId: string;
   recipe: RecipeInput;
   photo: { url: string; width: number; height: number } | null;
+  /** Its nutrition worked out from the ingredients (D4), and whether that still fits the recipe. */
+  worked?: { perServing: FoodNutrition; fits: boolean } | null;
 }) {
   const base = recipe.yieldAmount;
   const [servings, setServings] = useState<number | null>(base);
@@ -53,6 +61,15 @@ export function RecipeView({
   const more = NUTRITION_KEYS.slice(4).filter((key) => nutrition?.[key] !== undefined);
   const amountOf = (key: (typeof NUTRITION_KEYS)[number]) =>
     `${plainNumber(nutrition?.[key] ?? 0)}${NUTRITION_LABELS[key].unit === "kcal" ? " kcal" : ` ${NUTRITION_LABELS[key].unit}`}`;
+  // What the worked-out numbers add: the main ones the recipe does not state itself (its own come first).
+  const states = statesAll(nutrition);
+  const workedKeys = MAIN_KEYS.filter((key) => nutrition?.[key] === undefined && worked?.perServing[key] !== undefined);
+  const workedOf = (key: (typeof MAIN_KEYS)[number]) => {
+    const value = worked?.perServing[key] ?? 0;
+    // Rounded as the check screen and Today show them: an estimate is not exact to a tenth of a gram.
+    return key === "calories" ? kcalWords(value) : `${gramWords(value)} ${NUTRITION_LABELS[key].label.toLowerCase()}`;
+  };
+  const workHref = `/personal/m/food/recipes/${recipeId}/nutrition`;
 
   return (
     <div className="space-y-6">
@@ -181,20 +198,56 @@ export function RecipeView({
         )}
       </section>
 
-      {nutrition && (
+      {(nutrition || !states) && (
         <section className="space-y-1 rounded-2xl bg-card p-4 shadow-elevation-1 sm:p-5">
           <h2 className="font-heading font-medium tracking-heading">Nutrition</h2>
-          <p className="text-sm text-muted-foreground">Per serving, as the recipe states it.</p>
-          {main.length > 0 && (
-            <p className="font-medium">
-              {main.map((key) => (key === "calories" ? amountOf(key) : `${amountOf(key)} ${NUTRITION_LABELS[key].label.toLowerCase()}`)).join(" · ")}
-            </p>
+          {nutrition && (
+            <>
+              <p className="text-sm text-muted-foreground">Per serving, as the recipe states it.</p>
+              {main.length > 0 && (
+                <p className="font-medium">
+                  {main.map((key) => (key === "calories" ? amountOf(key) : `${amountOf(key)} ${NUTRITION_LABELS[key].label.toLowerCase()}`)).join(" · ")}
+                </p>
+              )}
+              {more.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {more.map((key) => `${amountOf(key)} ${NUTRITION_LABELS[key].label.toLowerCase()}`).join(" · ")}
+                </p>
+              )}
+            </>
           )}
-          {more.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              {more.map((key) => `${amountOf(key)} ${NUTRITION_LABELS[key].label.toLowerCase()}`).join(" · ")}
-            </p>
-          )}
+          {!states &&
+            (worked && workedKeys.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  {nutrition
+                    ? "Worked out from the ingredients, for what the recipe does not state:"
+                    : "Per serving, worked out from the ingredients and USDA's list."}
+                </p>
+                <p className="font-medium">{workedKeys.map(workedOf).join(" · ")}</p>
+                {!worked.fits && (
+                  <p className="text-sm text-module-accent">
+                    Worked out from an earlier version of the ingredients. Check it again to bring it up to date.
+                  </p>
+                )}
+                <Button asChild size="sm" variant="outline">
+                  <Link href={workHref}>Check it again</Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  {nutrition
+                    ? "It does not state them all, so the rest count as no numbers on Today and the week."
+                    : "This recipe states none, so it counts as no numbers on Today and the week."}
+                </p>
+                <Button asChild size="sm">
+                  <Link href={workHref}>
+                    <Calculator aria-hidden /> Work it out from the ingredients
+                  </Link>
+                </Button>
+              </div>
+            ))}
         </section>
       )}
 

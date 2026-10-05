@@ -3165,6 +3165,20 @@
       "when": 1791074731233,
       "tag": "0451_food_list_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 452,
+      "version": "7",
+      "when": 1791080950565,
+      "tag": "0452_food_recipe_nutrition",
+      "breakpoints": true
+    },
+    {
+      "idx": 453,
+      "version": "7",
+      "when": 1791080968029,
+      "tag": "0453_food_recipe_nutrition_rls",
+      "breakpoints": true
     }
   ]
 }

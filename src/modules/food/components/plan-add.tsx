@@ -67,7 +67,7 @@ function recipeLine(recipe: RecipeHit): string {
       .join(" and ");
     parts.push(`${each} a serving`);
   } else {
-    parts.push("states no nutrition");
+    parts.push("no nutrition yet");
   }
   return parts.filter(Boolean).join(" · ");
 }

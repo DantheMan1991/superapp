@@ -184,8 +184,8 @@ function numberAt(text: string, at: number): NumberFound | null {
   return null;
 }
 
-/** An amount, alone or as a range ("2-3", "2 to 3", "2 or 3"). */
-function amountAt(text: string, at: number): { min: number; max: number | null; end: number } | null {
+/** An amount, alone or as a range ("2-3", "2 to 3", "2 or 3"). Also how D4 finds a weight inside a line. */
+export function amountAt(text: string, at: number): { min: number; max: number | null; end: number } | null {
   const first = numberAt(text, at);
   if (!first || first.value <= 0) return null;
   const joint = /^\s*(?:[-–—]|to\b|or\b)\s*/i.exec(text.slice(first.end));
@@ -207,7 +207,7 @@ function unitOf(word: string): UnitDef | null {
 }
 
 /** The unit at `at`, including "fl oz" and "fluid ounces", with the spaces before it. */
-function unitAt(text: string, at: number): { unit: UnitDef; lead: string; word: string; end: number } | null {
+export function unitAt(text: string, at: number): { unit: UnitDef; lead: string; word: string; end: number } | null {
   const rest = text.slice(at);
   const fluid = /^(\s+)(fl\.?\s*oz\.?|fluid\s+ounces?)(?![A-Za-z])/i.exec(rest);
   if (fluid) {

@@ -51,7 +51,7 @@ interface SurveyFood {
  * The one file in a FoodData Central zip, read with Node's own inflate: the
  * central directory gives its method, size and where its data starts.
  */
-function onlyEntry(zip: Buffer): Buffer {
+export function onlyEntry(zip: Buffer): Buffer {
   const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (eocd < 0) throw new Error("not a zip");
   const central = zip.readUInt32LE(eocd + 16);
@@ -94,7 +94,7 @@ export function readablePortion(label: string): string {
     .trim();
 }
 
-function round(value: number, places: number): number {
+export function round(value: number, places: number): number {
   const factor = 10 ** places;
   return Math.round(value * factor) / factor;
 }

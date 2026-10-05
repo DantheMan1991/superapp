@@ -28,13 +28,13 @@ You can plan this week and next week. An earlier week, up to twelve weeks back, 
     - A recipe cooked there: `Cook 4 servings, eat 1`. When you eat none of it there (a batch made ahead), `Cook 4 servings, eat none here`. Its leftovers follow, such as `3 more: Tue lunch, Wed lunch, Thu dinner`.
     - Leftovers: `Leftovers · 1 serving`, and where it was cooked, such as `From Mon dinner` or `From today's dinner`.
     - A food: its amount, such as `1 cup` or `150 g`.
-    - On the right, the calories you eat there. `no numbers` means the recipe states no nutrition. `for later` means nothing is eaten at that meal: the batch is made for its leftovers. {icon:check} `Eaten` means you logged it, from Today's {button:Ate it|primary|check} or from Log food.
-  - Under the meals, when some recipes state no nutrition: `1 meal has no numbers: its recipe states none.`
+    - On the right, the calories you eat there. `no numbers` means the recipe has no nutrition yet: tap it and click {button:Work out its nutrition|ghost}. `for later` means nothing is eaten at that meal: the batch is made for its leftovers. {icon:check} `Eaten` means you logged it, from Today's {button:Ate it|primary|check} or from Log food.
+  - Under the meals, when some recipes have no nutrition yet: `1 meal has no numbers: its recipe has none yet. Tap it and choose Work out its nutrition.`, or `2 meals have no numbers: their recipes have none yet. Tap one and choose Work out its nutrition.`
 - **Tap a planned meal** on this week or next week to open it:
   - **How much.** For a recipe cooked there, `Cook` and `You eat`, in the recipe's own unit, such as `servings`. You can eat 0 there. For leftovers, `Servings`. For a food, `How much` and the portion beside it: the food's own portions, then `g` and `oz`. {button:Save|primary} shows once you change something.
   - **`Move to`**: the day (today to next Sunday), and the meal buttons, `Breakfast`, `Lunch`, `Dinner` and `Snacks`. {button:Move|outline} shows once you choose another place.
   - **`Plan leftovers`**, on a recipe cooked there while its batch has some left, such as `Plan leftovers: 2 more of 1 serving`. A button for each lunch and dinner in the four days after it (today on, up to next Sunday), without the ones it already has. Choose up to as many as it has left, then click {button:Put 2 on the week|outline}.
-  - {button:Cook|outline|chef-hat} on a recipe cooked there opens cook mode at what you cook. {button:Recipe|ghost} opens the recipe. {button:Close|ghost} closes the card.
+  - {button:Cook|outline|chef-hat} on a recipe cooked there opens cook mode at what you cook. {button:Recipe|ghost} opens the recipe. {button:Work out its nutrition|ghost}, on a recipe with no numbers, opens [Working out a recipe's nutrition](recipe-nutrition.md). {button:Close|ghost} closes the card.
   - {button:Take off|ghost} asks `Take it off?`, or for a recipe with leftovers `Take it off? Its 3 leftovers go too.` Click {button:Take off|destructive} to take it off the week, or {button:Keep it|ghost}. What you already logged as eaten stays in your log.
 
 Every change shows at once. If it could not be kept, it goes back as it was and a message says why.
@@ -96,7 +96,6 @@ To add leftovers later, tap the recipe on the day you cook it and use `Plan left
 
 - **Dragging a meal to another day.** Use `Move to`.
 - **Planning further ahead than next week.**
-- **Nutrition worked out from a recipe's ingredients.** A recipe counts with the nutrition it states; one that states none shows `no numbers`.
 
 ## Who can do what
 

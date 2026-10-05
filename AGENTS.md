@@ -176,11 +176,15 @@ and skipped by the build-docs walker:
   is not watching. A skipped isolation run is not a passing one.
 - `npm run build` — must stay green; keys are not required for the build
   (all provider clients are lazy).
-- **CI runs lint, `tsc`, the build and the whole suite on every push and PR**
-  (`.github/workflows/ci.yml`), against a dedicated Neon `ci` branch. You do not
-  need a full local run to open a PR — push and let it report. Run
-  `test:isolation` locally when you have touched RLS or a tenant table, because
-  waiting on CI to learn that is the slow way round.
+- **CI runs lint, `tsc`, the build and the pure tests on every PR and every push
+  to `main`** (`.github/workflows/ci.yml`); a change to the build docs alone
+  skips it. **The database suite runs on a PR only when it carries the
+  `full-tests` label**, and otherwise on the push to `main` after the merge,
+  against Postgres 18 built inside the runner rather than Neon. You do not need
+  a full local run to open a PR — push and let it report. Run `test:isolation`
+  locally when you have touched RLS or a tenant table, and label the PR
+  `full-tests`: without the label, CI finds a failure only after the merge,
+  when the code is already live.
 - `npm test` runs two projects: `pure` in parallel, `db` sequentially. If
   `tests/db-backed-files.test.ts` fails, a suite changed which side it belongs
   on — update the list in `tests/db-backed-files.ts`. See

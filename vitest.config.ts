@@ -6,7 +6,7 @@ import { DB_BACKED_TESTS } from "./tests/db-backed-files";
  * TWO PROJECTS, BECAUSE ONE CONSTRAINT WAS BEING PAID BY EVERY FILE.
  *
  * `fileParallelism: false` used to be set globally, for a real reason: the
- * database-backed suites share one Neon branch, create and delete tenants, and
+ * database-backed suites share one database, create and delete tenants, and
  * several of them assert what is NOT visible across a tenant boundary — an
  * assertion that another file writing at the same moment can break.
  *

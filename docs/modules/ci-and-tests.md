@@ -51,6 +51,61 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-10-03 — The `db` project is 88–89% of the suite, and `checks` takes ~5 minutes (branch `claude/ci-durations-measured`)
+
+**The two durations the entry below left are now measured.** The Open item on
+parallelising the `db` project still reasoned from 2m52s, when the sequential
+`db` project cost about a minute, and the `ci.yml` header still gave `checks`
+~3 minutes. Both were measured on the seven merges to `main` from #696 to #702:
+job and step times from `gh run view <id> --json jobs`, and each vitest project
+from the `Test suite` log, `gh run view --job <id> --log`. vitest prints a line
+as each file finishes and GitHub stamps every line, so `pure`'s time is the
+stamp on its last file, counted from vitest's `RUN` line, and `db`'s is the
+rest of vitest's own Duration.
+
+| PR | Run | `checks` | `Test suite` | vitest wall clock | `pure` | `db` | `db` share |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| #696 | 37125468217 | 6m06s | 8m28s | 439s | 53s | 386s | 88% |
+| #697 | 37138006916 | 5m41s | 8m37s | 455s | 56s | 399s | 88% |
+| #698 | 37163813064 | 3m48s | 7m16s | 373s | 43s | 330s | 89% |
+| #699 | 37169784827 | 6m26s | 7m19s | 368s | 42s | 326s | 89% |
+| #700 | 37171693792 | 4m08s | 6m23s | 334s | 36s | 298s | 89% |
+| #701 | 37172493980 | 3m36s | 8m33s | 451s | 54s | 397s | 88% |
+| #702 | 37173229601 | 6m12s | 8m47s | 460s | 55s | 405s | 88% |
+
+**`pure` and `db` never overlap, so all of `db` is on the clock.** vitest
+4.1.10's `groupSpecs` puts a project with `fileParallelism: false`, and the
+default `isolate` and `sequence.groupOrder`, in a group of its own after the
+others, and runs the groups one at a time. The logs agree: in all seven, no
+`db` file finished before the last `pure` one. On 2026-08-15 the whole suite
+took 117s. Now the `db` project alone takes 298–405s for its 152–156 files.
+Their own reported times add up to 215–273s; the other 83–131s is per-file
+start-up outside the tests.
+
+**`pure` runs in both jobs.** The suite step's first 36–56s are the files
+`checks` runs on the same commit, with the same five skipped: 284 in both jobs
+on #700.
+
+**So the Open item is open again.** `Test suite` finished after `checks` in all
+seven runs, by 53s to 4m57s (median 2m35s). On a pull request labelled
+`full-tests` that gap is time spent waiting on the `db` project alone. That is
+no longer the minute the item weighed against the risk of interleaving, so it
+now reasons from these numbers, names `--shard` as a way to parallelise with
+nothing shared, and keeps the 2026-08-15 analysis paragraph unchanged.
+
+**`checks` is ~5 minutes, and its spread is the runner, not the work.** It took
+3m36s to 6m26s, a mean of 5m08s, so the header now says ~5 minutes. #699 to
+#702 changed nothing either job runs except comments, yet `checks` took 6m26s,
+4m08s, 3m36s and 6m12s, every step slower together (lint 48s on #701 against
+83s on #699, the build 79s against 141s), and the same 440 test files took 334s
+to 460s.
+
+**Left alone.** The header's ~7 minutes for `tests`, which #702 wrote from the
+first five of these runs; with all seven the median is 8m28s. The header's
+dated sections and the entries below were true on their dates. One comment in
+`ci.yml` changed and no step, trigger or condition, so this runs CI, as any
+`ci.yml` change does, and nothing in it behaves differently.
+
 ### 2026-10-03 — The two comments the docs fix left alone (branch `claude/ci-comments-postgres-in-runner`)
 
 **The `ci.yml` header and `vitest.config.ts` now say what the job does.** The
@@ -744,12 +799,23 @@ None. No tables, no migrations.
 
 ## Open items
 
-- **Parallelising the `db` project is no longer worth doing**, and that is worth
-  saying rather than leaving the item open forever. It was the plan while the
-  suite took 25 minutes; at 2m52s the sequential `db` project costs about a
-  minute in total, so the win is now smaller than the risk of two runs
-  interleaving. The analysis is kept below because it is still true, not because
-  it is still a priority.
+- **Parallelising the `db` project is open again** (2026-10-03). It was closed
+  on the reasoning that at 2m52s the sequential `db` project cost about a minute
+  in total, a win smaller than the risk of two runs interleaving. On the seven
+  merges to `main` from #696 to #702 it took 298–405s, 88–89% of the suite,
+  against 36–56s for `pure`, and the two never overlap: vitest runs `pure` to
+  the end before the first `db` file starts. So it is most of how long a broken
+  `main` goes unnoticed after a merge. And `Test suite` finished after `checks`
+  in all seven, by 53s to 4m57s (median 2m35s): on a pull request labelled
+  `full-tests` that is time spent waiting on the `db` project alone, and the
+  most a faster one could save there, since `checks` is the floor. That is no
+  longer small. The risk side has moved too: every `tests` job builds its own
+  Postgres, so splitting the `db` files across several jobs with vitest's
+  `--shard` would leave nothing to interleave, for 45–67s of setup per extra
+  job. No attempt is recorded. Judge one over several runs, because the same
+  440 files took 334s to 460s across #699 to #702. The numbers are in the
+  2026-10-03 build-log entry, and the analysis below, about running files in
+  parallel against one database, still holds.
 
   The 2026-08-15 review found the stated blockers weaker than recorded: every
   `withSystem` call in the suite is a scoped INSERT of the file's own fixtures —

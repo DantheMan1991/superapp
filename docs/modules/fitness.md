@@ -13,6 +13,16 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-06 — A "future" day that would have run out in 2098 (`claude/test-date-bombs`)
+
+`tests/fitness-ops.test.ts` proved that `saveSession` refuses a day ahead of
+any today by sending `localDay: "2099-01-01"` with the real clock. From
+2098-12-30 that day falls inside the day and a half `saveSession` allows, so
+the session would be saved and the test would fail. It did fail, with the
+clock moved to 2098-12-31. The day is now three days past the session's own,
+which is ahead of any today whenever the suite runs. No code changed. Found
+in the date-bomb sweep ([ci-and-tests.md](ci-and-tests.md)).
+
 ### 2026-10-02 — Workouts in Health's progress (`claude/health-h1`)
 
 Health (H1, [health.md](health.md)) shows the founder's progress week by week

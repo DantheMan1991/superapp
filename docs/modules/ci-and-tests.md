@@ -51,6 +51,37 @@ open item while every test passes.
 
 ## Build log
 
+### 2026-10-06 — The suite swept for date bombs (branch `claude/test-date-bombs`)
+
+On 2026-10-01 `tests/paste-targets-db.test.ts` failed all day on every
+branch: a price pasted "from 2026-10-01" sat beside one from today, and on
+that day the two collided (fixed in #688). This sweep looked for the rest,
+meaning a test that reads the clock, or calls code that does, beside a date
+written into it.
+
+- **By reading.** Every test file with both a clock read and a written date,
+  and every call from `tests/` into code that falls back to the clock
+  (`now: Date = new Date()`, `todayInTimezone(tz)` with no `now`, the paste
+  targets' `today()`, `reverseEntry`'s default date). The house rule, that
+  `today` or `now` is passed in, holds nearly everywhere: the fallbacks are
+  reached only to stamp a timestamp, or with the date given. Nothing in
+  `drizzle/` reads the clock except column defaults.
+- **By running.** A setup file that wraps `globalThis.Date` in a Proxy and
+  shifts `new Date()`, `Date()` and `Date.now()` by `FAKE_NOW` minus now (the
+  clock keeps running), loaded through a copy of `vitest.config.ts`. `pure`
+  passed on 12 dates from 2026-10-15 to 2031-06-15, and on each date its files
+  write from 2026-10-05 to 2026-11-02 (27 of them), because a same-day
+  collision fails only on its day. The `db` project never finished a shifted
+  run from a laptop: it takes longer than the 30 minutes a background command
+  gets, and the machine slept through two attempts. Its half of the sweep is
+  the reading.
+
+Found: one, in `tests/fitness-ops.test.ts` ([fitness.md](fitness.md)). The
+suspect named in the brief, `tests/engagement-onboarding.test.ts` and its
+2026-12-01 start, is not one: `startOnboarding` compares the start with the
+`today` the test passes, never with the clock, and the file passes with the
+clock at 2026-12-01, 2026-12-04 and 2027-06-01.
+
 ### 2026-10-03 — The `db` project is 88–89% of the suite, and `checks` takes ~5 minutes (branch `claude/ci-durations-measured`)
 
 **The two durations the entry below left are now measured.** The Open item on

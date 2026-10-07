@@ -108,6 +108,7 @@ export async function FoodModule({
           portion: e.portion,
           grams: e.grams,
           portions: e.portions,
+          recipeId: e.recipeId,
           calories: e.calories,
           proteinG: e.proteinG,
           carbsG: e.carbsG,

@@ -509,8 +509,11 @@ export function LogFood({
             <p className="text-sm text-destructive">Type how much, a number above 0.</p>
           ) : choice.kind === "recipe" && choice.recipe.perServing === null ? (
             <p className="text-sm text-muted-foreground">
-              This recipe states no nutrition, so it is logged without numbers. Add them in the recipe&apos;s editor first to
-              count it.
+              This recipe has no nutrition yet, so it is logged without numbers.{" "}
+              <Link href={`/personal/m/food/recipes/${choice.recipe.recipeId}/nutrition`} className="text-module-accent underline underline-offset-2">
+                Work it out from its ingredients
+              </Link>{" "}
+              first to count it.
             </p>
           ) : (
             <Numbers n={chosenNumbers ?? NO_NUTRIENTS} />

@@ -5,12 +5,23 @@ import type { NeonDatabase } from "drizzle-orm/neon-serverless";
 import * as schema from "../../src/db/schema";
 
 /**
- * THE FOOD LIST, LOADED BY THE SEED (Food D4a, ADR 0126). `npm run db:seed`
- * writes `scripts/data/usda-foods.json` (made by `scripts/build-usda-foods.ts`)
- * into `food_usda_foods`, so the list reaches every database through the
- * before-the-merge ritual that already carries the catalogue, needs no network,
- * and `npm run db:verify-modules` can say when it has not.
+ * USDA'S TWO LISTS, LOADED BY THE SEED. `npm run db:seed` writes
+ * `scripts/data/usda-foods.json` (the eating log's foods as eaten, FNDDS, made
+ * by `scripts/build-usda-foods.ts`; Food D4a, ADR 0126) into `food_usda_foods`,
+ * and `scripts/data/usda-ingredients.json` (a recipe's ingredients as bought,
+ * SR Legacy, made by `scripts/build-usda-ingredients.ts`; Food D4, ADR 0131)
+ * into `food_usda_ingredients`, so both reach every database through the
+ * before-the-merge ritual that already carries the catalogue, need no network,
+ * and `npm run db:verify-modules` can say when they have not.
  */
+
+export type UsdaList = "foods" | "ingredients";
+
+/** Each list: its file, its table, and what a person calls it. */
+export const USDA_LISTS = {
+  foods: { file: "usda-foods.json", table: "food_usda_foods", what: "food list" },
+  ingredients: { file: "usda-ingredients.json", table: "food_usda_ingredients", what: "ingredient list" },
+} as const;
 
 /** One food as the file keeps it: `columns` in the file's header names each place. */
 type FileFood = [
@@ -32,10 +43,11 @@ export interface UsdaFoodFile {
   foods: FileFood[];
 }
 
-export function readUsdaFoodFile(): UsdaFoodFile {
-  const file = JSON.parse(readFileSync(path.join(process.cwd(), "scripts", "data", "usda-foods.json"), "utf8"));
+export function readUsdaFoodFile(list: UsdaList = "foods"): UsdaFoodFile {
+  const name = USDA_LISTS[list].file;
+  const file = JSON.parse(readFileSync(path.join(process.cwd(), "scripts", "data", name), "utf8"));
   if (typeof file.release !== "string" || !Array.isArray(file.foods) || file.foods.length === 0) {
-    throw new Error("scripts/data/usda-foods.json is not a food list");
+    throw new Error(`scripts/data/${name} is not a ${USDA_LISTS[list].what}`);
   }
   return { release: file.release, foods: file.foods };
 }
@@ -43,24 +55,28 @@ export function readUsdaFoodFile(): UsdaFoodFile {
 const BATCH = 500;
 
 /**
- * Load the list, unless this release is already there in full. Foods a new
- * release no longer has are deleted; what was eaten keeps its numbers and its
- * name (`food_eaten.fdc_id` is set to null, never the row deleted).
+ * Load a list, unless this release is already there in full. Foods a new
+ * release no longer has are deleted: what was eaten keeps its numbers and its
+ * name (`food_eaten.fdc_id` is set to null, never the row deleted), and a
+ * recipe's worked-out lines keep the name they were matched to.
  */
-export async function seedUsdaFoods(
+async function seedUsdaList(
   db: NeonDatabase<typeof schema>,
+  list: UsdaList,
 ): Promise<{ release: string; loaded: number; removed: number }> {
-  const { release, foods } = readUsdaFoodFile();
+  const { release, foods } = readUsdaFoodFile(list);
+  // The two tables have the same columns; the one written is named by the list.
+  const t = (list === "foods" ? schema.foodUsdaFoods : schema.foodUsdaIngredients) as typeof schema.foodUsdaFoods;
+  const table = sql.identifier(USDA_LISTS[list].table);
   return db.transaction(async (tx) => {
     // Trusted system code; RLS requires an explicit context (scripts/seed.ts).
     await tx.execute(sql`select set_config('app.role', 'superadmin', true)`);
     const counted = await tx.execute(sql`
       select count(*)::int as total, count(*) filter (where release = ${release})::int as current
-        from food_usda_foods`);
+        from ${table}`);
     const { total, current } = counted.rows[0] as { total: number; current: number };
     if (total === foods.length && current === foods.length) return { release, loaded: 0, removed: 0 };
 
-    const t = schema.foodUsdaFoods;
     for (let i = 0; i < foods.length; i += BATCH) {
       const rows = foods.slice(i, i + BATCH).map((f) => ({
         fdcId: f[0],
@@ -96,7 +112,17 @@ export async function seedUsdaFoods(
           },
         });
     }
-    const removed = await tx.execute(sql`delete from food_usda_foods where release <> ${release} returning fdc_id`);
+    const removed = await tx.execute(sql`delete from ${table} where release <> ${release} returning fdc_id`);
     return { release, loaded: foods.length, removed: removed.rows.length };
   });
+}
+
+/** The eating log's food list (D4a). */
+export function seedUsdaFoods(db: NeonDatabase<typeof schema>) {
+  return seedUsdaList(db, "foods");
+}
+
+/** The ingredient list a recipe's nutrition is worked out from (D4). */
+export function seedUsdaIngredients(db: NeonDatabase<typeof schema>) {
+  return seedUsdaList(db, "ingredients");
 }

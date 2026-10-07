@@ -7,7 +7,7 @@ import { configureNeonForLocalProxy } from "./lib/neon-local";
 import * as schema from "../src/db/schema";
 import { MODULES } from "./seed-catalogue";
 import { enablePersonalToolsEverywhereSql } from "../src/lib/personal-tools-sql";
-import { seedUsdaFoods } from "./lib/usda-foods";
+import { seedUsdaFoods, seedUsdaIngredients } from "./lib/usda-foods";
 
 
 /**
@@ -107,6 +107,13 @@ async function main() {
     foods.loaded > 0
       ? `Loaded ${foods.loaded} foods (${foods.release})${foods.removed > 0 ? `, removed ${foods.removed} no longer in it` : ""}.`
       : `The food list is current (${foods.release}).`,
+  );
+  // The ingredient list a recipe's nutrition is worked out from (D4, ADR 0131).
+  const ingredients = await seedUsdaIngredients(db);
+  console.log(
+    ingredients.loaded > 0
+      ? `Loaded ${ingredients.loaded} ingredients (${ingredients.release})${ingredients.removed > 0 ? `, removed ${ingredients.removed} no longer in it` : ""}.`
+      : `The ingredient list is current (${ingredients.release}).`,
   );
   await pool.end();
 }

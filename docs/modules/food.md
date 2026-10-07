@@ -4,8 +4,10 @@
 > food list, their own recipes or a photo of the plate and counted against
 > their targets (D4a); and their own recipes, brought in from a link, a photo
 > of a page, pasted text or typed in, checked before they are saved, and
-> scaled to any number of servings; and the week's meals, a recipe cooked
-> once and eaten again (D2), and the shopping list made from it (D3). The
+> scaled to any number of servings, a recipe's nutrition worked out from its
+> ingredients on USDA's list when it states none (D4); and the week's meals, a
+> recipe cooked once and eaten again (D2), and the shopping list made from it
+> (D3). The
 > founder's goal for it (2026-10-01) is part of a larger one: to track his
 > progress from what he does, workouts, eating, cold plunges and sleep among
 > it, which [Health](health.md) shows. Lives in a personal space beside
@@ -17,6 +19,104 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-10-03 — D4: a recipe's nutrition, worked out (`claude/food-d4`)
+
+The holes in his numbers: a recipe that states no nutrition was logged with
+none, and the week said `no numbers`. **His calls, from a mockup
+(2026-10-03):** ADD THE INGREDIENT LIST (USDA's SR Legacy; he approved the
+12.6 MB download), the RECIPE'S OWN NUMBERS FIRST, worked out WHEN ASKED,
+past logs FILLED IN. My defaults, said with the mockup: a weight in the line
+is used as written; cups, spoons and counts by USDA's portion weight, else
+Claude's estimate, marked and editable; salt, pepper, water and lines with no
+amount not counted; Check it again after an edit.
+
+- **The ingredient list** (ADR 0131): `scripts/build-usda-ingredients.ts`
+  reads FoodData Central's SR Legacy JSON (pinned URL and SHA-256, or a local
+  zip) into `scripts/data/usda-ingredients.json`: 7,793 foods, 1.2 MB, the
+  seven numbers per 100 g (fiber, sugar, sodium 0 where none is listed) and
+  household portions (`1 clove`, `1 cup, chopped`; a plural beside its
+  singular dropped). `food_usda_ingredients` (`0452`, RLS and `search_tsv`
+  `0453`) is reference data like the food list; the seed loads both lists
+  through one loader (`scripts/lib/usda-foods.ts`), verify-modules checks
+  both. `searchUsda` in `eating-ops.ts` searches either list.
+- **Matching** (`core/nutrition.ts`, `nutrition-model.ts`, `nutrition-ops.ts`):
+  one forced `record_matches` call reads the recipe's lines (up to 150,
+  headings left out) and gives each the food's name as SR Legacy writes it,
+  search words, grams as bought (or null) and whether it counts; never what
+  anything contains. Each food is the one named exactly so (`usdaByName`,
+  USDA's notes in brackets aside), else the closest name among those found by
+  the name, the words and the line (`closestByName`). `gramsOf` weighs a
+  line by a weight it states (its amount; past it, `statedWeight`: a
+  container's size, `(6 oz each)`, `2 (6-ounce) fillets`, `2 x 400g`, each
+  times the count, or `(190 g)`, `(about 1 ½ lb total)` for the line; unless
+  drained and estimated), USDA's portion (a unit word, a volume matched to the
+  cut, a count by the size named, then medium, then large, an egg large
+  first), Claude's
+  estimate, or nothing; grams to a tenth. `amountAt` and `unitAt` are now
+  exported from `core/amounts.ts` for it.
+- **Keeping it**: the screen sends each line, its food's id, its grams, where
+  they came from and whether it counts; `saveWorked` refuses a line the
+  recipe no longer has (`NUTRITION_CHANGED`) and works the numbers out again
+  from the list. `food_recipes.worked_nutrition` (`0452`) keeps the WHOLE
+  recipe and the lines as checked; a serving is the whole divided by what the
+  recipe makes when read (`perServingOf`), so changing what it makes leaves
+  nothing out of date. With the box ticked, the recipe's past logs get the
+  numbers they lacked (`coalesce`), never a number already there.
+- **Counted everywhere**: `effectiveNutrition(own, worked, yield)` (the
+  recipe's own first, number by number) in Log food's search and choice,
+  Recent, Today's Ate it and the week.
+- **The screens**: the recipe's Nutrition card (its own numbers, worked-out
+  ones for what it does not state, Work it out from the ingredients or Check
+  it again, and a note when its lines changed);
+  `/personal/m/food/recipes/[id]/nutrition` (`maxDuration` 60), each line
+  with its food, grams and where they came from, Change food (a GET search of
+  the list, `/api/food/ingredients`), Leave out or Count it, the totals as
+  they change, the past-logs box, Save as worked out and Match again; links
+  from Today (Work out its nutrition on an entry with none, and the day's
+  note), Log food and the week's card.
+- Tests: `food-nutrition` (19 pure), `food-nutrition-ops` (8 db, with a
+  stand-in for Claude, on the seeded list), `isolation/food-nutrition` (4).
+  Guide `recipe-nutrition.md`; `recipe.md`, `overview.md`, `log.md`,
+  `week.md` and `week-add.md` updated.
+- **Fixed before the PR**: the first version kept a serving's numbers with
+  the servings typed on the check screen; a recipe saved with "Makes" changed
+  would have read as out of date at once and disagreed with its own servings
+  elsewhere. Now the whole is kept and "Makes" is read from the recipe.
+- **Driven on dev** (a production build, Claude for real, five invented
+  recipes in dev's personal space, removed after): a chili stating nothing
+  matched in about ten seconds, every line sensible (2 lb of turkey from the
+  line, onions and garlic by USDA's portions, drained beans estimated, salt
+  left out), a food changed and grams typed, saved with its two earlier logs
+  filled (2 servings: 782 kcal, 1: 391); a salmon dish stating only calories
+  kept its 690 kcal with protein, carbs and fat worked out; overnight oats
+  with no yield counted as one serving; Log food's link, Today's note and
+  Work out its nutrition on an entry (the log filled on save), the week's
+  card link; a line edited on the chili showed the out-of-date note and Check
+  it again kept the earlier checks; a saved result reopened at once; the help
+  panel, the empty search, and 375 px with no sideways scroll.
+- **Fixed from the drive**:
+  "2 salmon fillets (6 oz each)" was weighed by USDA's fillet (2 × 198 g), as
+  only a can's bracket was read as a weight (now any weight the line states,
+  `statedWeight`); "rolled oats" matched a branded oat bran and "milk"
+  buttermilk, since the first hit for Claude's search words was taken (now
+  Claude names the food as SR Legacy does, matched exactly or by the closest
+  name: 31 of 36 common lines named exactly in a probe, the rest a note in
+  brackets or a word apart); the recipe card showed 37.9 g where the check
+  screen said 38 g (now rounded the same); "1 egg" took USDA's medium egg
+  (now an egg is large unless the line says otherwise); the week's note said
+  a recipe "states none" with nothing to do about it (now it says to tap the
+  meal and work it out); Check it again after an edit dropped the grams and
+  foods checked on lines that had not changed (now `keepChecked` keeps them,
+  and only new or changed lines take the fresh match).
+- **On DEV AND PROD before the merge** (his word, "Run the migrations and
+  then the pr and commit and push", 2026-10-05): the prod ledger read first
+  (it ended at 0451, exactly 0452/0453 pending), `0452`/`0453` applied (prod
+  ledger ids 458/459), verify-rls 274 on both; the seed on both (prod loaded
+  the 7,793 ingredients), verify-modules green on both with both lists
+  checked; read back on prod: `food_usda_ingredients` with RLS enabled and
+  forced and its two policies, `food_recipes.worked_nutrition` jsonb, Food
+  still `coming_soon`. Nothing to run after the merge.
 
 ### 2026-10-03 — D3: the shopping list (`claude/food-d3`)
 
@@ -623,7 +723,7 @@ ts` (5), and `tests/guides.test.ts` (every Food screen finds its guide).
 | D2 | **The week** | Recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, moved about, a past week repeated, and a planned meal logged from Today with one tap (his calls 2026-10-03; ADR 0129). **Built** |
 | D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone (ADR 0130). **Built** |
 | D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
-| D4 | **Nutrition of a recipe** | Per recipe, worked out from its ingredients against the food list (D4a's) and labelled as worked out, beside the recipe's own numbers, so a recipe that states none can be counted |
+| D4 | **Nutrition of a recipe** | Worked out from its ingredients when asked: each line matched on USDA's ingredient list (SR Legacy, his call) and weighed, every line checked, the whole recipe kept and a serving read from what it makes; the recipe's own numbers first (his call), counted wherever a recipe is, past logs filled in (his call) (ADR 0131). **Built** |
 
 **His health goal (2026-10-01)**, in his words: "track progress based on things
 i am doing with the workout, eating/diet, cold plunge, sleep etc." That is a
@@ -637,7 +737,7 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `food_recipes` | A person's recipe: title, what it makes (`yield_amount` double, `yield_unit`), prep, cook and total minutes, `tags` text[], `ingredients` and `steps` jsonb (`{ text, heading? }[]`, kept as written), `notes`, `nutrition` jsonb (per serving, as the recipe states it: calories, protein, carbs, fat, fiber, sugar g; sodium mg), `source_url`, the photo (`photo_pathname`, width, height), `created_by_clerk_user_id` | D1, `0437`. RLS member + superadmin (`0438`). `food_recipes_tenant_id_id_idx` is the composite key later slices point at. CHECKs: a title, yield > 0, minutes 0–10,080, a photo all or nothing |
+| `food_recipes` | A person's recipe: title, what it makes (`yield_amount` double, `yield_unit`), prep, cook and total minutes, `tags` text[], `ingredients` and `steps` jsonb (`{ text, heading? }[]`, kept as written), `notes`, `nutrition` jsonb (per serving, as the recipe states it: calories, protein, carbs, fat, fiber, sugar g; sodium mg), `worked_nutrition` jsonb (D4, `0452`: the WHOLE recipe's seven numbers worked out from its lines on the ingredient list, each line as checked, `workedAt`; null until asked), `source_url`, the photo (`photo_pathname`, width, height), `created_by_clerk_user_id` | D1, `0437`. RLS member + superadmin (`0438`). `food_recipes_tenant_id_id_idx` is the composite key later slices point at. CHECKs: a title, yield > 0, minutes 0–10,080, a photo all or nothing |
 | `food_cooks` | A time a recipe was cooked (D1b): `made_on` (the space's day), `servings` (what it was made for), the phone's id | `0439`/`0440`. Composite key to `food_recipes` (`(tenant_id, recipe_id)`, ON DELETE CASCADE). The recipe's count and last day are read from it |
 | `food_eaten` | What was eaten (D4a): `eaten_on` (the space's day), `meal` (enum `food_meal`: breakfast, lunch, dinner, snack), `source` (enum `food_eaten_source`: food, recipe, photo), `fdc_id` or `recipe_id`, `name` as it was, `amount` of `portion` ("1 banana", "g", "oz", or "serving"), `grams` (a food's; null for a recipe), and the seven numbers as worked out when logged (null where a recipe states none) | `0443`, RLS member + superadmin (`0444`). The id is the phone's (`ON CONFLICT DO NOTHING`). `fdc_id` → `food_usda_foods` ON DELETE SET NULL; composite `(tenant_id, recipe_id)` → `food_recipes` ON DELETE SET NULL ("recipe_id"), hand-edited to the column-list form, so a deleted recipe leaves the row and its numbers. CHECKs: amount 0–100,000, grams for foods and none for recipes, numbers not negative. `created_at` defaults to `clock_timestamp()` (`0445`), so a plate's rows keep their order. Index `(tenant_id, eaten_on)`. `plan_id` (D2, `0448`): the planned meal it was, composite `(tenant_id, plan_id)` → `food_plan` ON DELETE SET NULL ("plan_id") (hand-edited); `food_eaten_plan_once_idx` unique on `(tenant_id, plan_id)` where it is set, so a plan is eaten once |
 | `food_plan` | The week (D2, ADR 0129): `planned_on` (the space's day), `meal`, `kind` (enum `food_plan_kind`: cook, leftover, food); a cook's `recipe_id`, `make` and `servings` (eaten there, 0 for a batch made ahead); a leftover's `cook_id` and `servings`; a food's `fdc_id`, `name`, `amount`, `portion` and `grams`. No numbers: worked out from the recipe or the list when read | `0448`, RLS member + superadmin (`0449`). The id is the phone's (`ON CONFLICT DO NOTHING`). `food_plan_shape` CHECK keeps each kind's columns (a cook's `servings` between 0 and `make`, at most 999). Composite keys: `(tenant_id, recipe_id)` → `food_recipes` CASCADE, `(tenant_id, cook_id)` → `food_plan` CASCADE (its unique index `food_plan_tenant_id_id_idx` created before the keys, hand-ordered). `fdc_id` SET NULL. `created_at` `clock_timestamp()`. Indexes `(tenant_id, planned_on)`, `(tenant_id, cook_id)` |
@@ -645,6 +745,7 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 | `food_staples` | What the person always has (D3): `item`, left off every list until put back | `0450`/`0451`. Primary key `(tenant_id, item)`, item lower case, at most 80 |
 | `food_targets` | The daily targets: `calories` (500–10,000) and `protein_g` (10–500), either null | `0443`/`0444`. One row a space (`tenant_id` the key). A day is judged against the targets as they are now |
 | `food_usda_foods` | The food list (D4a, ADR 0126): FNDDS 2021-2023, 5,431 foods, `name`, `category` (WWEIA), the seven numbers per 100 g, `portions` jsonb (`{ label, grams }[]`), `release` | `0443`; REFERENCE DATA with no tenant: `modules`' two policies (superadmin all, any member reads) in `0444`, with `search_tsv`, a generated tsvector (name A, category B) not modelled in the schema, GIN-indexed. Written only by the seed from `scripts/data/usda-foods.json` |
+| `food_usda_ingredients` | The ingredient list (D4, ADR 0131): SR Legacy, 7,793 foods as bought, the same columns as `food_usda_foods` (`category` is USDA's food group), portions as `1 <modifier>` | `0452`; REFERENCE DATA, `modules`' two policies and `search_tsv` (GIN) in `0453`. Written only by the seed from `scripts/data/usda-ingredients.json`; fiber, sugar and sodium 0 where SR Legacy lists none |
 | `food_imports` | A recipe on its way in: `kind` (`link`, `text`, `photo`), `source_url` (a link's), `status` (`reading`, `draft`, `failed`), the `draft` (a recipe input, its name allowed empty), `error`, the page's photo for a link | D1, `0437`/`0438`. Deleted on save or discard. CHECKs: a link has its URL; a photo all or nothing. Nothing points at it |
 
 ## Key files & seams
@@ -711,10 +812,18 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   (the call), `list-ops.ts` (the days' plan, names, naming, always have),
   `components/shopping-list.tsx`, `list-store.ts`; the page
   `src/app/personal/(space)/m/food/list`.
-- The food list: `scripts/build-usda-foods.ts` (pinned download, readable
-  names), `scripts/data/usda-foods.json` (the committed list),
-  `scripts/lib/usda-foods.ts` (the seed's loader); `scripts/seed.ts` loads it,
-  `scripts/verify-modules.ts` checks it.
+- A recipe's nutrition (D4): `core/nutrition.ts` (which numbers count, a
+  line's grams, the whole and a serving, whether a result still fits,
+  Claude's prompt, tool and reader, the inputs), `nutrition-model.ts` (the
+  call), `nutrition-ops.ts` (a recipe matched, kept, past logs filled),
+  `components/nutrition-check.tsx`; the page
+  `src/app/personal/(space)/m/food/recipes/[id]/nutrition` and
+  `src/app/api/food/ingredients/route.ts`.
+- The food lists: `scripts/build-usda-foods.ts` (FNDDS, pinned download,
+  readable names) and `scripts/build-usda-ingredients.ts` (SR Legacy, D4),
+  `scripts/data/usda-foods.json` and `usda-ingredients.json` (committed),
+  `scripts/lib/usda-foods.ts` (the seed's loader for both);
+  `scripts/seed.ts` loads them, `scripts/verify-modules.ts` checks them.
 
 ## Decisions & gotchas
 
@@ -765,8 +874,9 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   sent again, is one log; the day it is logged for is the space's.
 - **Per serving stays per serving.** The recipe page's servings change the
   ingredients, never the nutrition. Changing a saved recipe's "Makes" without
-  changing its nutrition would make that nutrition wrong; the editor does not
-  try to tell.
+  changing its nutrition would make the nutrition it STATES wrong; the editor
+  does not try to tell. Worked-out numbers follow "Makes" (D4): the whole is
+  kept and divided when read.
 - **The photo route is the authorization.** The store is private; a photo is
   served only after the recipe's (or draft's) row is read under the person's
   RLS, and its URL changes with the photo, so the browser may keep it.
@@ -782,9 +892,11 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   or a new release of the list, never rewrites a day already eaten. Changing
   an amount scales the kept numbers by grams (a food) or servings (a recipe);
   it never reads the list again, so a food no longer on it can still change.
-- **A recipe with no stated nutrition is logged without numbers**, and the day
-  says how many such things it has, rather than guessing or blocking. D4
-  works a recipe's numbers out from its ingredients.
+  The one exception is D4's, on the person's tick: a recipe worked out fills
+  in the numbers its logs LACKED, never one they have.
+- **A recipe with no nutrition is logged without numbers**, and the day says
+  how many such things it has, rather than guessing or blocking, with Work out
+  its nutrition on the entry (D4).
 - **Calories on target means within a tenth either way; protein, at or
   above.** Calories are neither better nor worse in Health's colours, since
   one person's goal is less and another's more.
@@ -816,6 +928,27 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   read from the line and added here. A name is kept per line, so a list is
   sorted at once the next time, and a line changed in its recipe is a new line
   to name.
+- **Claude matches and weighs; the list says what the grams contain** (D4,
+  ADR 0131). The model gives the food's SR Legacy name, search words, an
+  estimate in grams and whether a line counts; it never says what anything
+  contains, and the server works the numbers out again from the list for what
+  the person checked. A weight in the line, a container's size or USDA's own
+  portion beats the estimate.
+- **Match by the name, not the first hit** (D4). The list's search stems
+  words ("rolled" is a dinner roll), so its first hit for a few words can be
+  wrong; Claude's remembered name, matched exactly or by the most words in
+  common, is not. `usdaByName` and `foodNameKey` normalise names the same way
+  (USDA's notes in brackets dropped); its regex patterns are bound as
+  parameters, since a backslash in drizzle's `sql` template is lost.
+- **The whole recipe is kept, a serving is read** (D4). `worked_nutrition`
+  holds the whole; `effectiveNutrition` divides by `yield_amount` wherever a
+  recipe is counted, so every caller must select it. A result goes out of
+  date only when the lines change (`workedStillFits` compares them cleaned
+  and sorted), and still counts until checked again.
+- **The ingredient list is not the food list.** SR Legacy is foods as bought
+  (uncooked rice, flour, spices), FNDDS foods as eaten; a recipe matches on
+  the first, a meal is logged from the second. `searchUsda` takes the table
+  by name from a fixed pair (`sql.identifier`), never from input.
 - **The trip is the phone's** (D3). Ticks, the days and his own items are in
   the browser's storage, kept by the list's first day; Always have is on the
   server. Another phone, or a cleared browser, starts without ticks.
@@ -870,7 +1003,17 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 - **A pasted list of several recipes** reads as the first (or the main) one.
 - **A recipe in another language** is copied in its language; nothing
   translates.
-- **Unit conversion** (cups to grams, Fahrenheit to Celsius) is not built.
+- **Unit conversion** (cups to grams, Fahrenheit to Celsius) is not built for
+  the recipe; D4 weighs lines for the nutrition only, and the page still shows
+  them as written.
+- **A recipe's nutrition has not met his recipes.** The drive used invented
+  ones; how often Claude's words find the right food on SR Legacy, and how
+  often a line needs grams typed, is unwatched on real ones.
+- **Cooking losses are not modelled** (D4): ingredients are weighed as bought.
+- **No per-space budget for matching**, as for recipe and plate reads, before
+  Food opens to everyone.
+- **Only the four main numbers are shown** worked out; fiber, sugar and sodium
+  are kept, and are 0 where SR Legacy lists none, so they can read low.
 - **Amounts in steps** do not scale; the recipe page says so.
 - **Recipe photos are not cropped.** The list shows them square and the page
   as they are, at most 28rem high.

@@ -57,6 +57,35 @@ export interface FoodNutrition {
   sodiumMg?: number;
 }
 
+/**
+ * One ingredient line as it was worked out (D4): the food on USDA's
+ * ingredient list it was matched to, its grams and where they came from
+ * (`line`: the line's own weight; `list`: USDA's weight for a portion;
+ * `estimate`: Claude's; `typed`: the person's), and whether it counts.
+ */
+export interface WorkedLine {
+  line: string;
+  fdcId: number | null;
+  food: string | null;
+  grams: number | null;
+  source: "line" | "list" | "estimate" | "typed" | "none";
+  counted: boolean;
+}
+
+/**
+ * A recipe's nutrition WORKED OUT from its ingredients (D4, ADR 0131): the
+ * WHOLE recipe as written, with each line as the person checked it. A serving
+ * is the whole divided by what the recipe makes when it is read, so changing
+ * what it makes never leaves this out of date. The numbers are USDA's, for
+ * the grams; Claude only matched and weighed. The recipe's own `nutrition`,
+ * where it states a number, comes first (the founder's call).
+ */
+export interface WorkedNutrition {
+  whole: FoodNutrition;
+  lines: WorkedLine[];
+  workedAt: string;
+}
+
 export const foodRecipes = pgTable(
   "food_recipes",
   {
@@ -80,6 +109,8 @@ export const foodRecipes = pgTable(
     steps: jsonb("steps").$type<FoodLine[]>().notNull().default(sql`'[]'::jsonb`),
     notes: text("notes"),
     nutrition: jsonb("nutrition").$type<FoodNutrition>(),
+    /** Its nutrition worked out from its ingredients (D4), when the person did; null until then. */
+    workedNutrition: jsonb("worked_nutrition").$type<WorkedNutrition>(),
     /** Where it came from: the page it was read from, or a link the person typed. */
     sourceUrl: text("source_url"),
     /**
@@ -243,6 +274,43 @@ export const foodUsdaFoods = pgTable(
   (t) => [
     check(
       "food_usda_foods_nutrients_positive",
+      sql`${t.calories} >= 0 and ${t.proteinG} >= 0 and ${t.carbsG} >= 0 and ${t.fatG} >= 0
+        and ${t.fiberG} >= 0 and ${t.sugarG} >= 0 and ${t.sodiumMg} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * THE INGREDIENT LIST (D4, ADR 0131; the founder's call): USDA FoodData
+ * Central's Standard Reference Legacy, about 7,800 foods as bought, raw and
+ * packaged, each with its nutrients per 100 g and its household portions
+ * ("1 clove", "1 cup, chopped"), which a recipe's lines are matched to when its
+ * nutrition is worked out. The eating log's list (`food_usda_foods`, FNDDS) is
+ * foods as eaten and has no uncooked rice, flour or spices. Reference data like
+ * that list: no tenant, read by any member, written only by the seed from
+ * `scripts/data/usda-ingredients.json`; searched through a generated
+ * `search_tsv` made in the migration.
+ */
+export const foodUsdaIngredients = pgTable(
+  "food_usda_ingredients",
+  {
+    fdcId: integer("fdc_id").primaryKey(),
+    name: text("name").notNull(),
+    /** USDA's food group: "Vegetables and Vegetable Products", "Spices and Herbs". */
+    category: text("category").notNull(),
+    calories: doublePrecision("calories").notNull(),
+    proteinG: doublePrecision("protein_g").notNull(),
+    carbsG: doublePrecision("carbs_g").notNull(),
+    fatG: doublePrecision("fat_g").notNull(),
+    fiberG: doublePrecision("fiber_g").notNull(),
+    sugarG: doublePrecision("sugar_g").notNull(),
+    sodiumMg: doublePrecision("sodium_mg").notNull(),
+    portions: jsonb("portions").$type<FoodPortion[]>().notNull(),
+    release: text("release").notNull(),
+  },
+  (t) => [
+    check(
+      "food_usda_ingredients_nutrients_positive",
       sql`${t.calories} >= 0 and ${t.proteinG} >= 0 and ${t.carbsG} >= 0 and ${t.fatG} >= 0
         and ${t.fiberG} >= 0 and ${t.sugarG} >= 0 and ${t.sodiumMg} >= 0`,
     ),
@@ -505,6 +573,7 @@ export type FoodRecipe = typeof foodRecipes.$inferSelect;
 export type FoodCook = typeof foodCooks.$inferSelect;
 export type FoodImport = typeof foodImports.$inferSelect;
 export type FoodUsdaFood = typeof foodUsdaFoods.$inferSelect;
+export type FoodUsdaIngredient = typeof foodUsdaIngredients.$inferSelect;
 export type FoodEatenRow = typeof foodEaten.$inferSelect;
 export type FoodPlanRow = typeof foodPlan.$inferSelect;
 export type FoodLineName = typeof foodLineNames.$inferSelect;

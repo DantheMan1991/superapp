@@ -26,6 +26,7 @@ import {
   type Slot,
 } from "./core/week";
 import { checkDay, getFood, insertEatenFood, insertEatenRecipe } from "./eating-ops";
+import { effectiveNutrition } from "./core/nutrition";
 
 /**
  * THE WEEK, KEPT (D2, docs/modules/food.md, ADR 0129): what is planned, put on
@@ -79,7 +80,9 @@ export async function planBetween(tx: Tx, tenantId: string, from: string, to: st
       grams: p.grams,
       title: r.title,
       yieldUnit: r.yieldUnit,
+      yieldAmount: r.yieldAmount,
       nutrition: r.nutrition,
+      worked: r.workedNutrition,
       fdcId: f.fdcId,
       portions: f.portions,
       calories: f.calories,
@@ -132,7 +135,8 @@ export async function planBetween(tx: Tx, tenantId: string, from: string, to: st
     portion: row.portion,
     grams: row.grams,
     portions: row.kind === "food" ? (row.portions ?? null) : null,
-    perServing: row.kind === "food" ? null : (row.nutrition ?? null),
+    // The recipe's own numbers first, worked out for the rest (D4).
+    perServing: row.kind === "food" ? null : effectiveNutrition(row.nutrition, row.worked, row.yieldAmount),
     per100g:
       row.kind === "food" && row.fdcId !== null
         ? {

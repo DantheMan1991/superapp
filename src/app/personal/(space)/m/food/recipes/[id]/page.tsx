@@ -11,6 +11,7 @@ import { todayInTimezone } from "@/lib/timezone";
 import { madeWords } from "@/modules/food/core/cook";
 import { hostOf, minutesWords, timeOf } from "@/modules/food/core/recipe";
 import { cookSummary } from "@/modules/food/cook-ops";
+import { perServingOf, workedStillFits } from "@/modules/food/core/nutrition";
 import { loadRecipe, recipePhotoUrl, recipeToInput } from "@/modules/food/recipe-ops";
 import { DeleteRecipeButton } from "@/modules/food/components/delete-recipe-button";
 import { RecipeView } from "@/modules/food/components/recipe-view";
@@ -91,6 +92,17 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
       <RecipeView
         recipeId={row.id}
         recipe={recipe}
+        worked={
+          row.workedNutrition
+            ? {
+                perServing: perServingOf(row.workedNutrition.whole, recipe.yieldAmount),
+                fits: workedStillFits(
+                  row.workedNutrition,
+                  recipe.ingredients.filter((line) => !line.heading).map((line) => line.text),
+                ),
+              }
+            : null
+        }
         photo={
           row.photoPathname && row.photoWidth && row.photoHeight
             ? { url: recipePhotoUrl(row.id, row.photoPathname), width: row.photoWidth, height: row.photoHeight }

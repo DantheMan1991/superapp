@@ -380,7 +380,7 @@ export function WeekPlan({
                 })}
                 {unknown > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {`${unknown} ${unknown === 1 ? "meal has" : "meals have"} no numbers: ${unknown === 1 ? "its recipe states" : "their recipes state"} none.`}
+                    {`${unknown} ${unknown === 1 ? "meal has" : "meals have"} no numbers: ${unknown === 1 ? "its recipe has" : "their recipes have"} none yet. Tap ${unknown === 1 ? "it" : "one"} and choose Work out its nutrition.`}
                   </p>
                 )}
               </section>
@@ -659,6 +659,11 @@ function PlanEditor({
         {item.recipeId && (
           <Button asChild size="sm" variant="ghost">
             <Link href={`/personal/m/food/recipes/${item.recipeId}`}>Recipe</Link>
+          </Button>
+        )}
+        {item.recipeId && item.perServing?.calories === undefined && (
+          <Button asChild size="sm" variant="ghost">
+            <Link href={`/personal/m/food/recipes/${item.recipeId}/nutrition`}>Work out its nutrition</Link>
           </Button>
         )}
         <Button size="sm" variant="ghost" onClick={onClose}>

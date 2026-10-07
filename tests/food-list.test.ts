@@ -6,6 +6,7 @@ import {
   defaultRange,
   emptyTotal,
   addTo,
+  leftToBuy,
   listLines,
   marksFor,
   measureOf,
@@ -247,6 +248,26 @@ describe("a trip, kept on the phone", () => {
   it("reads back only what it wrote", () => {
     expect(shoppingStateSchema.safeParse(setMark(addOwn(EMPTY_SHOPPING, "a", "Coffee"), TODAY, "garlic", { kind: "got", amount: "3" })).success).toBe(true);
     expect(shoppingStateSchema.safeParse({ range: { from: "today", to: TODAY }, marks: { from: "", byKey: {} }, own: [] }).success).toBe(false);
+  });
+
+  it("counts what is still to buy for the List tab: not a staple asked about, not at home, not ticked at this amount", () => {
+    const partial = { ...names };
+    delete partial["4 cloves garlic, minced"];
+    const list = buildList({ cooks: [chili, bowl, later], foods: [banana], names: partial, always: [], from: TODAY, to: "2026-10-13" });
+    const key = (name: string) => list.items.find((item) => item.name === name)?.key ?? "";
+    const garlicLine = list.items.find((item) => !item.sorted);
+    // Bananas, onions, turkey and rice, and the garlic line not named yet; pepper and salt are staples to ask about.
+    expect(leftToBuy(list, {}, [])).toBe(5);
+
+    let state = setMark(EMPTY_SHOPPING, TODAY, key("Bananas"), { kind: "have", amount: "1 banana" });
+    state = setMark(state, TODAY, key("Ground turkey"), { kind: "got", amount: "1 ⅓ lb" });
+    // Ticked at an amount the week no longer asks for: still to buy.
+    state = setMark(state, TODAY, key("Yellow onions"), { kind: "got", amount: "2" });
+    state = setMark(state, TODAY, garlicLine?.key ?? "", { kind: "got", amount: garlicLine?.amount ?? "" });
+    state = addOwn(state, "a", "Coffee beans");
+    state = addOwn(state, "b", "Paper towels");
+    state = toggleOwn(state, TODAY, "b");
+    expect(leftToBuy(list, marksFor(state, TODAY), ownFor(state, TODAY))).toBe(3);
   });
 });
 

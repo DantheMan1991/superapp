@@ -9,9 +9,11 @@ import { addDays, isDateString, localHourInTimezone, todayInTimezone } from "@/l
 import { mealAt } from "@/modules/food/core/eating";
 import { PLAN_BACK_WEEKS, mondayOf, weekInReach } from "@/modules/food/core/week";
 import { getTargets } from "@/modules/food/eating-ops";
+import { listInput } from "@/modules/food/list-ops";
 import { planBetween, weeksPlanned } from "@/modules/food/plan-ops";
 import { FOOD_WEEK } from "@/modules/food/recipe-ops";
 import { FoodNav } from "@/modules/food/components/food-nav";
+import { FoodPage } from "@/modules/food/components/food-page";
 import { WeekPlan } from "@/modules/food/components/week-plan";
 
 export const dynamic = "force-dynamic";
@@ -37,12 +39,13 @@ export default async function FoodWeekPage({
   const asked = typeof params.week === "string" && isDateString(params.week) ? mondayOf(params.week) : thisWeek;
   const monday = weekInReach(asked, today) ? asked : thisWeek;
 
-  const { items, targets, weeks } = await withTenant(
+  const { items, targets, weeks, list } = await withTenant(
     ctx.tenant.id,
     async (tx) => ({
       items: await planBetween(tx, ctx.tenant.id, monday, addDays(monday, 6)),
       targets: await getTargets(tx, ctx.tenant.id),
       weeks: await weeksPlanned(tx, ctx.tenant.id, addDays(thisWeek, -7 * PLAN_BACK_WEEKS), addDays(thisWeek, 13)),
+      list: await listInput(tx, ctx.tenant.id, today),
     }),
     { role: ctx.role },
   );
@@ -53,7 +56,7 @@ export default async function FoodWeekPage({
   const changeable = monday >= thisWeek;
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-4">
+    <FoodPage className="max-w-7xl space-y-4">
       <PageHeader
         title="Food"
         description="What you ate, the week ahead, and your recipes."
@@ -68,8 +71,8 @@ export default async function FoodWeekPage({
           ) : undefined
         }
       />
-      <FoodNav />
+      <FoodNav list={{ tenantId: ctx.tenant.id, today, ...list }} />
       <WeekPlan monday={monday} today={today} items={items} targets={targets} weeks={weeks} />
-    </div>
+    </FoodPage>
   );
 }

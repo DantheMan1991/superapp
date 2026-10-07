@@ -454,6 +454,26 @@ export function ownFor(state: ShoppingState, from: string): OwnItem[] {
   return state.own.filter((item) => item.got === null || item.got === from);
 }
 
+/**
+ * What is still to buy, as the List tab's count (the redesign, ADR 0132): the
+ * lines the list shows to buy, sorted into an aisle or not sorted yet, less
+ * what is at home or ticked at this amount, and the person's own items not
+ * yet ticked. A staple still asked about under "Have these at home?" is a
+ * question, not a thing to buy, so it is not counted. The same tests the
+ * list's own screen draws with (`shopping-list.tsx`).
+ */
+export function leftToBuy(list: ShoppingList, marks: Readonly<Record<string, Mark>>, own: readonly OwnItem[]): number {
+  let left = 0;
+  for (const item of list.items) {
+    const mark = marks[item.key];
+    if (mark?.kind === "have") continue;
+    if (item.sorted && item.staple) continue;
+    if (mark?.kind === "got" && mark.amount === item.amount) continue;
+    left += 1;
+  }
+  return left + own.filter((item) => item.got === null).length;
+}
+
 /** Set or clear a mark on the list that starts on `from`; an old trip's marks and ticked items go. */
 export function setMark(state: ShoppingState, from: string, key: string, mark: Mark | null): ShoppingState {
   const byKey = { ...marksFor(state, from) };

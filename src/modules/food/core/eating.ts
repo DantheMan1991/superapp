@@ -83,6 +83,8 @@ export interface RecipeHit {
   /** What one batch makes, in `yieldUnit` (D2's Cook starts there); null when it does not say. */
   yieldAmount: number | null;
   yieldUnit: string | null;
+  /** Its photo, for the picture beside it (the redesign); null or absent when it has none. */
+  photoUrl?: string | null;
 }
 
 /** The universal amounts every food can be logged in, beside its own portions. */

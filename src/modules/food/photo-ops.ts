@@ -96,9 +96,5 @@ export function photoResponse(pathname: string, ifNoneMatch: string | null): Pro
   });
 }
 
-/** A short version for a photo's URL, from its pathname: a new photo is a new URL. */
-export function photoVersion(pathname: string): string {
-  let hash = 0;
-  for (let i = 0; i < pathname.length; i += 1) hash = (hash * 31 + pathname.charCodeAt(i)) | 0;
-  return (hash >>> 0).toString(36);
-}
+/** A short version for a photo's URL, from its pathname: a new photo is a new URL (`core/photo-url.ts`). */
+export { photoVersion } from "./core/photo-url";

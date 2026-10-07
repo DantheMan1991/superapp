@@ -10,7 +10,7 @@ Open **Food** {icon:utensils} and click `List`, or click {button:Shopping list|o
 
 - **`Food`**, the title, with the line `What you ate, the week ahead, and your recipes.`
 - **The {icon:circle-question-mark}**, which opens this guide beside the page.
-- **`Today`, `Week`, `Recipes` and `List`**, Food's sections. You are on `List`.
+- **`Today`, `Week`, `Recipes` and `List`**, Food's sections. You are on `List`. `List` carries how many things are still to buy on the list for its days, once you have ticked off what you got on this phone; a staple the list is asking you about is not counted.
 - **The days the list covers**, such as `Shopping for Oct 7 to 13`: today and the six days after it to start. Once you tick something, the days stay as they are until their last day has gone, so the list does not move under you; then a new list starts from that day. Under it, what they have planned, such as `For 2 recipes to cook and 1 food.`, or `Nothing is planned for these days.`, and how many things are ticked, such as `5 things ticked.`
   - **{button:Change days|outline}** opens `From` and `to`. `From` can be any day of this week or next week, up to the last day; `to` can be today or any day after the first, up to next Sunday. Under them: `A new first day is a new trip: it starts with nothing ticked. A batch is bought for the day it is cooked.`
 - **`Sorting 12 ingredients into aisles. It takes a few seconds.`**, while Claude names what new lines buy. It shows once for each new line: a recipe you put on the week is usually sorted before you open the list. If it could not be done, `The list could not be sorted into aisles this time.` and {button:Try again|outline}. Until then, those lines are under `Not sorted yet`, as the recipe wrote them.

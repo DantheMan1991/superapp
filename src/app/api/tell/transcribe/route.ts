@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { resolveTenantContext } from "@/lib/auth";
-import { transcribeAudio } from "@/lib/speech/providers";
-import { SPEECH_MAX_BYTES, SpeechRefusal } from "@/lib/speech/types";
+import { speechFail, transcribeRequest } from "@/lib/speech/transcribe-route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,57 +42,16 @@ export const dynamic = "force-dynamic";
  * left to be discovered.
  */
 
-function fail(status: number, message: string): NextResponse {
-  return NextResponse.json(
-    { ok: false, error: message },
-    {
-      status,
-      headers: {
-        "Cache-Control": "no-store, private",
-        "Referrer-Policy": "no-referrer",
-        "X-Content-Type-Options": "nosniff",
-      },
-    },
-  );
-}
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const ctx = await resolveTenantContext();
-  if (!ctx) return fail(401, "Sign in first.");
+  if (!ctx) return speechFail(401, "Sign in first.");
 
   // A support view is a READ of somebody else's workspace (back-office slice
   // 4). Dictating into it would be typing on their behalf, and this is a POST,
   // which that view refuses everywhere else too.
-  if (ctx.support) return fail(403, "Not while viewing a client's workspace.");
+  if (ctx.support) return speechFail(403, "Not while viewing a client's workspace.");
 
-  // Checked before the body is buffered, so an oversized upload costs a header
-  // read rather than two megabytes of memory. The real check is below, because
-  // a client is free to lie about this one or omit it.
-  const declared = Number(req.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > SPEECH_MAX_BYTES) {
-    return fail(413, "That is too long. Say one thing at a time.");
-  }
-
-  const mimeType = req.headers.get("content-type") ?? "";
-  const audio = await req.arrayBuffer();
-
-  try {
-    const text = await transcribeAudio({ audio, mimeType });
-    return NextResponse.json(
-      { ok: true, text },
-      {
-        headers: {
-          "Cache-Control": "no-store, private",
-          "Referrer-Policy": "no-referrer",
-          "X-Content-Type-Options": "nosniff",
-        },
-      },
-    );
-  } catch (err) {
-    if (err instanceof SpeechRefusal) return fail(422, err.message);
-    // A vendor outage is not something the person did. Its own message never
-    // reaches them — it can carry their words back inside it.
-    console.error("transcribe failed", err);
-    return fail(502, "Yosher could not listen just now. Type it instead.");
-  }
+  // The size check, the vendor and the answer are shared with Food's search
+  // (`src/lib/speech/transcribe-route.ts`); this file keeps the door.
+  return transcribeRequest(req);
 }

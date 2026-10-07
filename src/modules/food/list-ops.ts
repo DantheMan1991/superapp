@@ -97,6 +97,24 @@ export async function alwaysHave(tx: Tx, tenantId: string): Promise<string[]> {
   return rows.map((row) => row.item);
 }
 
+/** What the list is made from, for the days that can be planned: the List page's read. */
+export interface ListInput {
+  cooks: ListCook[];
+  foods: ListFood[];
+  names: Record<string, LineName[]>;
+  always: string[];
+}
+
+export async function listInput(tx: Tx, tenantId: string, today: string): Promise<ListInput> {
+  const reach = plannable(today);
+  const plan = await shoppingPlan(tx, tenantId, reach.from, reach.to);
+  return {
+    ...plan,
+    names: await lineNames(tx, tenantId, listLines(plan.cooks, plan.foods)),
+    always: await alwaysHave(tx, tenantId),
+  };
+}
+
 /** "Always have", or put back on the list. Done already is fine. */
 export async function setAlwaysHave(tx: Tx, tenantId: string, item: string, always: boolean): Promise<void> {
   const t = schema.foodStaples;

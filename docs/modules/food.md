@@ -7,7 +7,7 @@
 > scaled to any number of servings, a recipe's nutrition worked out from its
 > ingredients on USDA's list when it states none (D4); and the week's meals, a
 > recipe cooked once and eaten again (D2), and the shopping list made from it
-> (D3). The
+> (D3). Drawn in its own "Fresh Market" skin since UI1 (ADR 0132). The
 > founder's goal for it (2026-10-01) is part of a larger one: to track his
 > progress from what he does, workouts, eating, cold plunges and sleep among
 > it, which [Health](health.md) shows. Lives in a personal space beside
@@ -21,6 +21,109 @@ Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
 Older entries (D1c, D1b and D1) are in [food-build-log.md](food-build-log.md).
+
+### 2026-10-06 — The Fresh Market redesign: Today and Log food (`claude/food-ui`)
+
+He had Claude Design redraw Food and picked "Fresh Market" (option 1a), handed
+over as a zip (`design_handoff_food_fresh_market`: a README build spec and a
+`.dc.html` mockup; viewed from the scratchpad, never the repo). It designed
+Today on a computer and a phone and Log food on a phone; the week, the
+recipes, a recipe and the list are not drawn. **His calls (2026-10-06, each
+the recommended option):** a USDA food's picture is an ICON FOR ITS KIND, from
+its USDA category; KEEP THE MICROPHONE, as the tell box's dictation; the
+undrawn screens get a MOCKUP FIRST, in the next PR. Mine, said in chat: keep
+`MEALS`' order (the mockup put Snacks before Dinner). ADR 0132.
+
+- **The skin** (`globals.css`): the design's values as `--food-*` on `:root`,
+  `food-*` utilities in `@theme` (colours, eight shadows, `font-food-display`),
+  drawn only in Food; `[data-app-main]:has([data-food-page])` paints the
+  shell's pane `--food-bg`. Contrast measured (scratchpad
+  `food-contrast.mjs`): every text pair 4.5:1 or better; the placeholder is
+  muted, not subtle (4.42:1 on the field). Radii on the scale, none literal.
+- **The face**: Bricolage Grotesque with its optical-size axis
+  (`components/food-display.ts`, `next/font/google`), its variable on
+  `FoodPage` and the sheet; only Food's pages preload it. The test stub
+  (`tests/stubs/next-font-google.ts`) has it, since the module registry
+  reaches it.
+- **`FoodPage`** wraps every Food page: the face, `@container` (Food's layouts
+  follow the width they are given: phone below `@2xl`, the hero in two
+  columns from `@4xl`), and `data-food-page`.
+- **The tabs** (`food-nav.tsx`): a pill segmented control in place of the
+  shared strip, four equal items without icons on a phone. `List` carries
+  what is left to buy: every page with the tabs reads `listInput` (the List
+  page's own read, moved to `list-ops.ts`) and the tab works the list out on
+  the phone, with its days and ticks, by `leftToBuy` (`core/list.ts`).
+- **Today** (`FoodModule.tsx`, `components/food-today.tsx`): a greeting by the
+  hour (`greetingFor`) with his first name from Clerk on a computer (the
+  shell's own `currentUser` call, deduplicated), the date and
+  `dinner's already planned.`; the day in a pill. `quick-log.tsx`, the search
+  bar (computer): Log food's search in a popover that folds away when the bar
+  loses the focus, the amount sheet, the microphone, the camera, `Again?`
+  (the last four logged: + logs at once with an 8-second Undo toast, the chip
+  opens the sheet). `day-card.tsx`: the double ring (CSS keyframes from empty,
+  `motion-reduce:` off), calories and protein against their targets, the
+  energy split (`energySplit`, fat 9 kcal a gram), the line under it
+  (`cheerFor`), the targets' editor; with no targets the four numbers large.
+  `up-next-card.tsx`: the next plan not eaten whose meal is not over
+  (`upNext`: by when a meal ends, not `MEALS`' order), Ate it giving way to
+  `Logged to dinner. Nice work.` and Undo until the page is next opened.
+  `meal-list.tsx`: cards side by side on a computer, one card of rows on a
+  phone (a row a meal, up to three pictures, opened with a tap), planned rows
+  dashed with Ate it and, on a tap, Change first and Cook. `today-model.ts`
+  holds the row's shape and the optimistic entries. `eaten-day.tsx` is gone.
+- **The floating bar** (phone): `What did you eat?` to Log food, and the
+  camera. A fixed element inside the `@container` page stays fixed to the
+  viewport (checked: 24 px above the bottom at 375 px).
+- **Log food** (`log-food.tsx`): the design's top, meal chips, search box
+  with the microphone, the photo tile, `Recent · one tap adds it` (+ logs at
+  once into the chosen meal; the row opens the sheet), the plate's review
+  restyled. **`amount-sheet.tsx`**, shared with Today: a bottom sheet on a
+  phone and a card in the middle from `sm`, steps of a serving, half a
+  portion or 10 g (`core/choice.ts`, with the choice's numbers and words).
+- **Pictures** (`components/food-thumb.tsx`, `core/food-icons.ts`): a recipe's
+  photo, a chef's hat without one, a USDA food as the icon for its WWEIA
+  category (ordered rules, whole words where a short one hides in a longer:
+  "pie" in "pieces", "oil" in "boiled", "pea" in "peaches"). The day, the plan,
+  recent and the recipe search now carry the recipe's photo URL and the
+  food's category (`core/photo-url.ts`, pure, so `eating-ops.ts` does not
+  import the blob store).
+- **The microphone**: `/api/food/transcribe` (`resolvePersonalContext`, Food
+  switched on) over the handler the tell box's route now shares
+  (`src/lib/speech/transcribe-route.ts`); `DictateButton` gained `endpoint`
+  and an `icon` look that hides where a browser cannot record. The tell box's
+  route refuses a personal space (401, checked), which is why.
+- **The camera's photo** reaches Log food in memory (`plate-handoff.ts`): Log
+  food shows `Reading the photo` from its first frame and reads it in an
+  effect that only waits for the answer (`readPlatePhoto`, a function outside
+  the component, since the compiler's lint refuses an effect that calls one
+  that sets state).
+- **Guides**: `overview.md` and `log.md` rewritten for the screens; `list`,
+  `recipes` and `week` name the tab's count; two button looks, `food` and
+  `food-soft`, so a guide draws Food's buttons in its colours
+  (`guides-core.ts`, `guide-control.tsx`, the template).
+- **Tests**: `tests/food-today.test.ts` (19 pure: the greeting, up next, the
+  rings and the split, the line under the numbers, every USDA category's
+  icon, the choice's numbers, words and steps, the photo's address);
+  `food-list.test.ts` gains the tab's count. The 36 Food db tests that call
+  the changed reads pass on dev.
+- **Driven** on a production build against dev (an invented day: three
+  recipes, a breakfast, a lunch and a snack logged, dinner and a snack
+  planned; removed after), at 1280 and 375 px: one-tap add and its Undo, the
+  search, the sheet's steps and meal, Ate it and its Undo on Up next, an
+  entry's amount and meal changed, a protein-only target, a planned row's
+  Change first and Cook, an earlier day, a meal row opened on the phone, Log
+  food's one-tap and sheet and Undo, a drawn plate photographed from Today's
+  camera and read on Log food, both transcription doors, the Week, Recipes
+  and List pages, and the tab's count (8 before Claude named the lines, 6
+  after, the list's own six). **Fixed from it:** `Snacks gets you to…` (now
+  `Your snack gets you…`, `Up next · Snack, planned`), the Undo toast gone
+  in four seconds (eight now), the plate's portion box pushing its button
+  down a line, a recipe with no photo showing the chef's hat twice, four
+  `Again?` chips not fitting a line, the targets button squeezing the line on
+  a phone. The pane drew no frames for part of the drive, so a closed sheet
+  stayed mounted (Radix waits for an exit animation that never ran); a
+  visible window closes it.
+- **No migration, no seed.**
 
 ### 2026-10-06 — The three oldest entries move to an archive (`claude/food-build-log-archive`)
 
@@ -376,6 +479,8 @@ snacks.
 | D2 | **The week** | Recipes and foods on days and meals, a recipe cooked once and its leftovers on later meals, moved about, a past week repeated, and a planned meal logged from Today with one tap (his calls 2026-10-03; ADR 0129). **Built** |
 | D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone (ADR 0130). **Built** |
 | D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
+| UI1 | **The Fresh Market look, Today and Log food** | His pick from a Claude Design handoff: Food's own skin and face, the tabs as pills with the list's count, Today's search bar, rings, Up next and meal cards, the phone's floating bar, Log food's sheet and one-tap recent; a food's picture an icon for its kind (his call), the tell box's dictation in the search (his call) (ADR 0132). **Built** |
+| UI2 | **The rest of Food in the same look** | The week, the recipes, a recipe and the list, from a mockup he approves first (his call). Not started |
 | D4 | **Nutrition of a recipe** | Worked out from its ingredients when asked: each line matched on USDA's ingredient list (SR Legacy, his call) and weighed, every line checked, the whole recipe kept and a serving read from what it makes; the recipe's own numbers first (his call), counted wherever a recipe is, past logs filled in (his call) (ADR 0131). **Built** |
 
 **His health goal (2026-10-01)**, in his words: "track progress based on things
@@ -448,8 +553,8 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   reader), `core/progress-rows.ts` (what Health is told); `eating-ops.ts` (the
   list's search, the log, its changes, recent, targets), `plate-model.ts` (the
   Claude call), `plate-ops.ts` (a plate read and matched), `progress-source.ts`
-  (the slot's filler); `components/eaten-day.tsx` (Today's day),
-  `log-food.tsx` (Log food), `food-nav.tsx` (the Today / Recipes strip),
+  (the slot's filler); Today's day is UI1's files (below; `eaten-day.tsx`
+  is gone), `log-food.tsx` (Log food), `food-nav.tsx` (the tabs),
   `new-id.ts`; `src/app/api/food/search/route.ts`; the pages
   `src/app/personal/(space)/m/food/log` and `.../recipes` (the list's page).
 - The week (D2): `core/week.ts` (weeks, what can be planned, meals in order,
@@ -458,7 +563,8 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `components/week-plan.tsx` (the week), `plan-add.tsx` (Put on the week),
   `use-food-search.ts` (the search, shared with Log food); pages
   `src/app/personal/(space)/m/food/week` and `.../week/add`. Today's planned
-  meals are in `eaten-day.tsx`; Log food's `?plan=` in its page.
+  meals are in `meal-list.tsx` and `up-next-card.tsx`; Log food's `?plan=` in
+  its page.
 - The shopping list (D3): `core/list.ts` (what a line asks for, the sums and
   their words, the list for a run of days, the trip on the phone),
   `core/list-names.ts` (Claude's prompt, tool and reader), `list-model.ts`
@@ -472,6 +578,16 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `components/nutrition-check.tsx`; the page
   `src/app/personal/(space)/m/food/recipes/[id]/nutrition` and
   `src/app/api/food/ingredients/route.ts`.
+- The Fresh Market look (UI1, ADR 0132): the tokens in `src/app/globals.css`
+  (`--food-*`), `components/food-display.ts` (the face), `food-page.tsx` (every
+  page's box), `food-nav.tsx` (the tabs and the list's count), `food-thumb.tsx`
+  (a picture: photo, chef's hat or the icon for a food's kind),
+  `food-today.tsx` (Today's state), `day-card.tsx`, `up-next-card.tsx`,
+  `meal-list.tsx`, `today-model.ts`, `quick-log.tsx` (the search bar and the
+  camera hook), `amount-sheet.tsx` (shared with Log food), `plate-handoff.ts`;
+  `core/today.ts` (greeting, up next, the line, the split), `core/food-icons.ts`,
+  `core/choice.ts`, `core/photo-url.ts`; `src/app/api/food/transcribe/route.ts`
+  over `src/lib/speech/transcribe-route.ts`.
 - The food lists: `scripts/build-usda-foods.ts` (FNDDS, pinned download,
   readable names) and `scripts/build-usda-ingredients.ts` (SR Legacy, D4),
   `scripts/data/usda-foods.json` and `usda-ingredients.json` (committed),
@@ -611,6 +727,34 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 - **Show what was just done.** Today keeps its own copy of the day and the
   targets and adopts the server's when it differs, as Health's cards do
   (health.md): an action answers before its re-rendered page streams in.
+- **Food wears its own skin, and nothing shared changes** (UI1, ADR 0132). Its
+  values are `--food-*` on `:root`, drawn only by Food's components; on
+  `:root` and not on Food's wrapper because the amount sheet is portalled out
+  of the page and would lose them. Its radii are the scale's nearest steps,
+  never literal; its face is loaded by its pages alone. A new Food screen
+  draws with `food-*` utilities, `FoodPage` around it.
+- **A fixed element inside the `@container` page stays on the viewport**:
+  `container-type: inline-size` is not layout containment (the phone's
+  floating bar was measured 24 px above the bottom at 375 px).
+- **Up next is by when a meal ends** (`core/today.ts`): breakfast 11, lunch
+  3 pm, dinner 10 pm, a snack until the day ends. `MEALS` puts the snack last,
+  and `mealAt` says snack at half past three, so "at or after the current
+  meal" (the handoff's rule) would have hidden dinner all afternoon.
+- **The List tab counts with the list's own rule, on the phone** (`leftToBuy`):
+  the days and the ticks are the phone's (ADR 0130), so no server count can
+  agree with the list. It repeats the screen's tests (a staple asked about is
+  a question, `have` is at home, `got` at the item's amount); change both
+  together.
+- **An effect may only wait for a read** (the React compiler's
+  `set-state-in-effect`): Log food's handed-over photo is read by
+  `readPlatePhoto`, outside the component, and the effect sets state in its
+  `then`. With no clean-up, so React's practice remount in development cannot
+  drop the answer (the photo is taken once).
+- **Two transcription doors, one handler** (`transcribe-route.ts`): the tell
+  box's answers a business workspace, Food's a personal space with Food on.
+  Neither keeps the audio or the words.
+- **A guide draws Food's buttons with `food` and `food-soft`**, not `primary`,
+  which is navy.
 
 ## Open items
 
@@ -675,3 +819,20 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   Food opens to everyone, a daily read budget per space.
 - **Sharing a recipe** (a link, a household) is not built, and would raise the
   copyright of a page's text and photo (ADR 0123).
+- **UI2: the week, the recipes, a recipe and the list** keep their old look
+  under the new tabs until he approves a mockup of them (his call,
+  2026-10-06).
+- **The redesign has not met his phone.** Driven in a pane at 375 px: the
+  floating bar over Android's gesture bar, the sheet sliding up, the
+  microphone inside the app (the WebView's recording permission) and the
+  camera from Today on a real phone are unwatched.
+- **A photo taken on Today is lost on a reload** before Log food opens; Log
+  food then opens as usual.
+- **No dark theme for Food**: the design has none and the product does not
+  switch to one today.
+- **The sheet cannot be swiped down**; its grabber is drawn, Back or a tap
+  outside closes it.
+- **The greeting's name is Clerk's first name**; an account with none (dev's)
+  gets `Good evening.`
+- **`Nothing was recorded. Hold the button while you speak.`** is the speech
+  seam's shared message; the button is tap to start, not hold.

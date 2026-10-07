@@ -1,11 +1,13 @@
 import { withTenant } from "@/db";
 import { requirePersonalSpace } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { isServerSpeechConfigured } from "@/lib/speech/providers";
 import { addDays, localHourInTimezone, todayInTimezone } from "@/lib/timezone";
 import { LOG_BACK_DAYS, MEALS, mealAt, type Meal } from "@/modules/food/core/eating";
 import { getFood, recentEaten, recipeHit, searchRecipes } from "@/modules/food/eating-ops";
 import { planItem } from "@/modules/food/plan-ops";
 import { FOOD_HOME } from "@/modules/food/recipe-ops";
+import { FoodPage } from "@/modules/food/components/food-page";
 import { LogFood } from "@/modules/food/components/log-food";
 
 export const dynamic = "force-dynamic";
@@ -93,16 +95,19 @@ export default async function LogFoodPage({
           : null;
 
   return (
-    <LogFood
-      day={day}
-      dayLabel={dayWords(day, today)}
-      backHref={day === today ? FOOD_HOME : `${FOOD_HOME}?day=${day}`}
-      initialMeal={meal}
-      recent={recent}
-      recipes={recipes}
-      initial={planned ? planned.choice : initial ? { kind: "recipe", recipe: initial } : null}
-      initialAmount={planned ? { amount: planned.amount, portion: planned.portion } : null}
-      planId={planned && fromPlan ? fromPlan.id : null}
-    />
+    <FoodPage className="max-w-xl">
+      <LogFood
+        day={day}
+        dayLabel={dayWords(day, today)}
+        backHref={day === today ? FOOD_HOME : `${FOOD_HOME}?day=${day}`}
+        initialMeal={meal}
+        recent={recent}
+        recipes={recipes}
+        initial={planned ? planned.choice : initial ? { kind: "recipe", recipe: initial } : null}
+        initialAmount={planned ? { amount: planned.amount, portion: planned.portion } : null}
+        planId={planned && fromPlan ? fromPlan.id : null}
+        speech={isServerSpeechConfigured()}
+      />
+    </FoodPage>
   );
 }

@@ -21,7 +21,18 @@ const BUTTON_VARIANT = {
   destructive: "destructive",
   secondary: "secondary",
   link: "link",
+  food: "default",
+  "food-soft": "secondary",
 } as const;
+
+/**
+ * Food's own buttons (ADR 0132), drawn in its colours: its tokens are on
+ * `:root`, so they hold in the help panel, which is portalled out of the page.
+ */
+const BUTTON_SKIN: Record<string, string> = {
+  food: "bg-food-accent text-white hover:bg-food-accent-hover",
+  "food-soft": "bg-food-soft text-foreground hover:bg-food-tabs-track",
+};
 
 const BADGE_VARIANT = {
   primary: "default",
@@ -77,7 +88,7 @@ export function GuideControl({ kind, label, variant, icon }: GuideControlProps) 
           type="button"
           size="xs"
           variant={look}
-          className="mx-0.5 align-middle"
+          className={cn("mx-0.5 align-middle", BUTTON_SKIN[variant ?? ""])}
           title="Show me where this is"
           onClick={() => pointTo(label, "control")}
         >
@@ -86,7 +97,7 @@ export function GuideControl({ kind, label, variant, icon }: GuideControlProps) 
       );
     }
     return (
-      <Button asChild size="xs" variant={look} className="mx-0.5 align-middle">
+      <Button asChild size="xs" variant={look} className={cn("mx-0.5 align-middle", BUTTON_SKIN[variant ?? ""])}>
         <span>{content}</span>
       </Button>
     );

@@ -21,6 +21,39 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-10-06 — Food wears its own skin (`claude/food-ui`, ADR 0132)
+
+The founder picked a redesign of Food ("Fresh Market", from a Claude Design
+handoff) with values the system did not have: a warmer page, a protein red, a
+carbs green, a fat yellow and a tint per meal, warmer shadows, a second face
+(Bricolage Grotesque) and radii off the scale. It is built as a skin ON the
+system, not a change to it ([food.md](food.md)):
+
+- **Module-scoped tokens.** `--food-*` on `:root` (so a portalled dialog has
+  them), registered in `@theme inline` as `food-*` colours, eight
+  `shadow-food-*` and `font-food-display`; nothing outside Food draws with
+  them, and no shared token moved. `[data-app-main]:has([data-food-page])`
+  paints the shell's pane for a Food page, the first rule that colours `<main>`
+  from inside a page.
+- **A second face, loaded where it is used**: `next/font/google` in a Food
+  file, its variable on Food's page box and its sheet, so only Food's pages
+  preload it; `font-food-display` falls back to Geist elsewhere. The vitest
+  stub for `next/font/google` gained it, since the module registry reaches it.
+- **The rules it keeps**: elevation, never an outline (its shadows are a warm
+  twin of `--elevation-1`); three text tiers, unchanged; the radius scale (the
+  design's 24 / 22 / 16 / 14 / 12 / 10 / 28 px are `3xl` / `2xl` / `xl` / `xl`
+  / `lg` / `md` / `3xl`); every text pair measured (the design's subtle tier on
+  its field was 4.42:1, so its placeholder is muted). **The rules it does not**:
+  one face, and the module accent as the module's only colour.
+- **Guides draw it**: two button looks, `food` and `food-soft`, in
+  `guides-core.ts` and `guide-control.tsx`, because `primary` is navy.
+- **Light only.** The `.dark` block has no Food values; nothing switches the
+  product to the dark theme today.
+
+A second module wanting a skin of its own should copy this shape (scoped
+tokens on `:root`, a face loaded by its pages, the scale kept) and say so in
+an ADR; it is not a licence to restyle a shared primitive.
+
 ### 2026-10-01 — Accent hues are spaced rail by rail (`claude/food-d1`)
 
 Food, the second personal tool ([food.md](food.md)), took hue 45, and

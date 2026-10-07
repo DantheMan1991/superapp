@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button";
 import { requirePersonalSpace } from "@/lib/auth";
 import { describeAgo } from "@/lib/last-seen";
 import { requireModuleEnabled } from "@/lib/modules";
+import { todayInTimezone } from "@/lib/timezone";
 import { hostOf } from "@/modules/food/core/recipe";
 import { importDraft, listImports } from "@/modules/food/import-ops";
+import { listInput } from "@/modules/food/list-ops";
 import { FOOD_HOME, listRecipes } from "@/modules/food/recipe-ops";
 import { DiscardDraftButton } from "@/modules/food/components/discard-draft-button";
 import { FoodNav } from "@/modules/food/components/food-nav";
+import { FoodPage } from "@/modules/food/components/food-page";
 import { RecipeList } from "@/modules/food/components/recipe-list";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +29,10 @@ export default async function RecipesPage() {
   const ctx = await requirePersonalSpace();
   await requireModuleEnabled(ctx.tenant.id, "food");
   const now = new Date();
-  const [recipes, imports] = await withTenant(
+  const today = todayInTimezone(ctx.tenant.timezone);
+  const [recipes, imports, list] = await withTenant(
     ctx.tenant.id,
-    (tx) => Promise.all([listRecipes(tx, ctx.tenant.id), listImports(tx, ctx.tenant.id)]),
+    async (tx) => [await listRecipes(tx, ctx.tenant.id), await listImports(tx, ctx.tenant.id), await listInput(tx, ctx.tenant.id, today)] as const,
     { role: ctx.role },
   );
 
@@ -41,14 +45,14 @@ export default async function RecipesPage() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6">
+    <FoodPage className="max-w-3xl space-y-6">
       <PageHeader
         title="Food"
         description="Your recipes in one place: from a link, a photo of a page, pasted text, or typed in."
         icon={<UtensilsCrossed />}
         actions={add}
       />
-      <FoodNav />
+      <FoodNav list={{ tenantId: ctx.tenant.id, today, ...list }} />
 
       {imports.length > 0 && (
         <section className="space-y-2">
@@ -106,6 +110,6 @@ export default async function RecipesPage() {
       ) : (
         <RecipeList recipes={recipes} />
       )}
-    </div>
+    </FoodPage>
   );
 }

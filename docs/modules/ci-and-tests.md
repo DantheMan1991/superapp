@@ -71,10 +71,13 @@ written into it.
   clock keeps running), loaded through a copy of `vitest.config.ts`. `pure`
   passed on 12 dates from 2026-10-15 to 2031-06-15, and on each date its files
   write from 2026-10-05 to 2026-11-02 (27 of them), because a same-day
-  collision fails only on its day. The `db` project never finished a shifted
-  run from a laptop: it takes longer than the 30 minutes a background command
-  gets, and the machine slept through two attempts. Its half of the sweep is
-  the reading.
+  collision fails only on its day. `db` ran on 2027-02-15 in 26 chunks, since
+  one run of all 158 files outlasts the 30 minutes a background command gets
+  from a laptop. Of its 2,927 tests, 12 failed, and every one was the shift
+  itself rather than a date: a row the database stamps with its own `now()`,
+  read against the moved JS clock (rate caps, import windows, `last_7_days`,
+  support-session expiry). The database's clock does not move, so a `db`
+  failure under this shift is a lead to read, not a verdict.
 
 Found: one, in `tests/fitness-ops.test.ts` ([fitness.md](fitness.md)). The
 suspect named in the brief, `tests/engagement-onboarding.test.ts` and its

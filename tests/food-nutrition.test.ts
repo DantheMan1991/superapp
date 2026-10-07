@@ -10,6 +10,7 @@ import {
   lineNumbers,
   matchPrompt,
   normalizeMatches,
+  nutritionTiles,
   perServingOf,
   portionMl,
   statedWeight,
@@ -85,6 +86,35 @@ describe("which numbers count", () => {
     expect(statesAll({ calories: 520, proteinG: 44, carbsG: 38, fatG: 18 })).toBe(true);
     expect(statesAll({ calories: 520, proteinG: 44 })).toBe(false);
     expect(statesAll(null)).toBe(false);
+  });
+
+  it("show on a recipe's page as four tiles, saying whose each number is (ADR 0132)", () => {
+    const perServing = perServingOf(worked.whole, 6);
+    const values = (own: Parameters<typeof nutritionTiles>[0], estimate: Parameters<typeof nutritionTiles>[1]) =>
+      nutritionTiles(own, estimate).tiles.map((tile) => [tile.label, tile.value, tile.from]);
+
+    // All its own, as stated, the worked-out ones not wanted.
+    expect(nutritionTiles({ calories: 1250.5, proteinG: 44, carbsG: 38.25, fatG: 18 }, perServing).source).toBe("own");
+    expect(values({ calories: 1250.5, proteinG: 44, carbsG: 38.25, fatG: 18 }, perServing)).toEqual([
+      ["kcal", "1,250.5", "own"],
+      ["protein", "44 g", "own"],
+      ["carbs", "38.25 g", "own"],
+      ["fat", "18 g", "own"],
+    ]);
+    // Its own first, worked out for the rest, rounded as Today rounds them.
+    expect(nutritionTiles({ calories: 520 }, { ...perServing, fatG: 4.56 }).source).toBe("mixed");
+    expect(values({ calories: 520 }, { ...perServing, fatG: 4.56 })).toEqual([
+      ["kcal", "520", "own"],
+      ["protein", "43 g", "worked"],
+      ["carbs", "36 g", "worked"],
+      ["fat", "4.6 g", "worked"],
+    ]);
+    expect(nutritionTiles(null, perServing).source).toBe("worked");
+    // Some of its own and nothing for the rest; then nothing at all.
+    expect(nutritionTiles({ calories: 520 }, null).source).toBe("partial");
+    expect(values({ calories: 520 }, null)[1]).toEqual(["protein", null, null]);
+    expect(nutritionTiles(null, null).source).toBe("none");
+    expect(nutritionTiles({}, {}).source).toBe("none");
   });
 });
 

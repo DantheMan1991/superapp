@@ -15,8 +15,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { deleteRecipeAction } from "../actions";
+import { FOOD_ROUND } from "./food-styles";
 
-/** Delete a recipe, after asking by name. Its photo goes with it. */
+/** Delete a recipe (the bin at the top of its page), after asking by name. Its photo goes with it. */
 export function DeleteRecipeButton({ recipeId, title }: { recipeId: string; title: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -39,9 +40,9 @@ export function DeleteRecipeButton({ recipeId, title }: { recipeId: string; titl
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Trash2 aria-hidden /> Delete
-        </Button>
+        <button type="button" aria-label="Delete" title="Delete" className={FOOD_ROUND}>
+          <Trash2 className="size-4" aria-hidden />
+        </button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

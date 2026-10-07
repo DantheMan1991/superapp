@@ -4,7 +4,7 @@
 > **Route:** /personal/m/food/recipes/*/cook
 > **Order:** 40
 
-Open a recipe and click {button:Cook|primary|chef-hat}. Cook mode opens on the ingredients, at the servings you chose on the recipe page. The screen stays on while cook mode is open, so you never have to wake the phone with your hands full.
+Open a recipe and click {button:Cook|food|chef-hat}. Cook mode opens on the ingredients, at the servings you chose on the recipe page. The screen stays on while cook mode is open, so you never have to wake the phone with your hands full.
 
 ## What you see
 
@@ -27,7 +27,7 @@ Open a recipe and click {button:Cook|primary|chef-hat}. Cook mode opens on the i
 
 ## How to cook a recipe
 
-1. On the recipe page, set the servings with {button:−|outline|minus} and {button:+|outline|plus}, then click {button:Cook|primary|chef-hat}.
+1. On the recipe page, set the servings with {button:|ghost|minus} and {button:|ghost|plus} beside `Ingredients`, then click {button:Cook|food|chef-hat}.
 2. Set out each ingredient and tick it. Click {button:Start cooking|primary}.
 3. Read the step. When it names a time, tap the time to start its timer. Click {button:Next|primary} when the step is done; timers keep running.
 4. When a timer rings, check the food, then click {button:Stop|primary}, or {button:1 min|outline|plus} if it needs longer.
@@ -112,7 +112,7 @@ Any phrase but “ingredients” closes the ingredient list if it is open. Say t
 ## What is kept, and where
 
 - Your place, your ticks and your timers are kept on this phone, for this recipe, for 12 hours. Another phone does not see them. After 12 hours, cook mode starts afresh.
-- While a cook is under way, the recipe page says {button:Back to cooking|primary|chef-hat} with where you are. A cook under way keeps the servings it started with: to cook for a different number, click {button:Start over|ghost} on the recipe page, set the servings, and click {button:Cook|primary|chef-hat}.
+- While a cook is under way, the recipe page says {button:Back to cooking|food|chef-hat} with where you are. A cook under way keeps the servings it started with: to cook for a different number, click {button:Start over|ghost} on the recipe page, set the servings, and click {button:Cook|food|chef-hat}.
 - {button:Back to the recipe|outline} on the last screen clears them, unless a timer is still running: then they wait for the next time you open cook mode.
 - What you log is kept in your account. The recipe page says how often, such as `Made 3 times, last on Sep 30.`, and your recipes show `made 3×` on its row.
 

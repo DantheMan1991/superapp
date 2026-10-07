@@ -1,12 +1,9 @@
-import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
-import { ChevronLeft, ChevronRight, UtensilsCrossed } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { DayWatch } from "@/components/app/day-watch";
 import { HelpButton } from "@/components/app/help-button";
 import { isServerSpeechConfigured } from "@/lib/speech/providers";
-import { cn } from "@/lib/utils";
 import { addDays, localHourInTimezone, todayInTimezone } from "@/lib/timezone";
 import { LOG_BACK_DAYS, mealAt } from "./core/eating";
 import { greetingFor, plannedWords, upNext } from "./core/today";
@@ -15,6 +12,7 @@ import { dayEaten, getTargets, recentEaten } from "./eating-ops";
 import { listInput } from "./list-ops";
 import { planOn } from "./plan-ops";
 import { FOOD_HOME } from "./recipe-ops";
+import { FoodHeader, FoodPager } from "./components/food-header";
 import { FoodNav } from "./components/food-nav";
 import { FoodPage } from "./components/food-page";
 import { FoodToday } from "./components/food-today";
@@ -36,9 +34,6 @@ function dayWords(day: string, today: string): string {
   if (day === addDays(today, -1)) return "Yesterday";
   return dateWords(day);
 }
-
-const ARROW =
-  "flex size-8 items-center justify-center rounded-full bg-card ring-1 ring-black/[0.06] hover:bg-food-field @2xl:bg-transparent @2xl:ring-0";
 
 /**
  * FOOD, TODAY (D4a, docs/help/food/overview.md; redrawn in the founder's
@@ -88,59 +83,34 @@ export async function FoodModule({
   return (
     <FoodPage className="max-w-[62.5rem] space-y-5 pb-28 @2xl:space-y-6 @2xl:pb-0">
       {isToday && <DayWatch today={today} timeZone={ctx.tenant.timezone} />}
-      <header className="flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs font-semibold text-food-accent-ink @2xl:text-[13px]">
-            <span className="hidden size-7 items-center justify-center rounded-md bg-food-tint @2xl:flex" aria-hidden>
-              <UtensilsCrossed className="size-4" />
-            </span>
-            <span className="@2xl:hidden">{isToday ? `Food · ${dateWords(day)}` : "Food"}</span>
-            <span className="hidden @2xl:inline">Food</span>
-          </p>
-          <h1 className="mt-1 font-food-display text-[28px] leading-[1.05] font-bold tracking-[-0.02em] @2xl:mt-2 @2xl:text-[38px] @2xl:tracking-[-0.03em]">
-            {isToday ? (
-              <>
-                {greetingFor(hour)}
-                {firstName && <span className="hidden @2xl:inline">{`, ${firstName}`}</span>}.
-              </>
-            ) : (
-              dateWords(day)
-            )}
-          </h1>
-          {isToday && (
-            <p className="mt-1.5 hidden text-[15px] text-muted-foreground @2xl:block">
-              {next ? `${dateWords(day)} · ${plannedWords(next.meal)}.` : dateWords(day)}
-            </p>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <HelpButton />
-          <nav
-            aria-label="Day"
-            className="flex items-center gap-1.5 @2xl:h-10 @2xl:gap-0 @2xl:rounded-full @2xl:bg-card @2xl:px-1 @2xl:ring-1 @2xl:ring-black/[0.06]"
-          >
-            {before ? (
-              <Link href={before} aria-label="The day before" className={ARROW}>
-                <ChevronLeft className="size-4" aria-hidden />
-              </Link>
-            ) : (
-              <span className={cn(ARROW, "opacity-30")} aria-hidden>
-                <ChevronLeft className="size-4" />
-              </span>
-            )}
-            <span className="hidden px-2 text-sm font-semibold whitespace-nowrap @2xl:inline">{dayWords(day, today)}</span>
-            {after ? (
-              <Link href={after} aria-label="The day after" className={ARROW}>
-                <ChevronRight className="size-4" aria-hidden />
-              </Link>
-            ) : (
-              <span className={cn(ARROW, "hidden opacity-30 @2xl:flex")} aria-hidden>
-                <ChevronRight className="size-4" />
-              </span>
-            )}
-          </nav>
-        </div>
-      </header>
+      <FoodHeader
+        phoneEyebrow={isToday ? `Food · ${dateWords(day)}` : "Food"}
+        title={
+          isToday ? (
+            <>
+              {greetingFor(hour)}
+              {firstName && <span className="hidden @2xl:inline">{`, ${firstName}`}</span>}.
+            </>
+          ) : (
+            dateWords(day)
+          )
+        }
+        sub={isToday ? (next ? `${dateWords(day)} · ${plannedWords(next.meal)}.` : dateWords(day)) : undefined}
+        subOnPhone={false}
+        actions={
+          <>
+            <HelpButton />
+            <FoodPager
+              ariaLabel="Day"
+              label={dayWords(day, today)}
+              before={before}
+              after={after}
+              beforeLabel="The day before"
+              afterLabel="The day after"
+            />
+          </>
+        }
+      />
 
       <FoodNav list={{ tenantId: ctx.tenant.id, today, ...list }} />
 

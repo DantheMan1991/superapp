@@ -6,7 +6,7 @@
 
 Get here from Food's `Today`: tap `What did you eat?` at the bottom of a phone, or {button:|food-soft|plus} beside a meal. Type what you ate, choose it, set how much in the sheet, and click {button:Add to lunch|food}. Or tap the + beside something you had lately to add it again at once. You stay on this page to add the next thing; click {button:Done|outline} when the meal is in.
 
-You also get here from {button:Log it|outline|plus} on a recipe, and from {button:Log what you ate|outline} at the end of cook mode. Both open with that recipe already chosen, in the sheet. From {button:Change first|food-soft} on a planned meal on Today, it opens on that day and meal, with the recipe or food chosen and the planned amount filled in, and the sheet says `Planned for this meal. Change how much, then add it.` The first thing you add then is logged as that planned meal, and it stops waiting on Today. And from the camera on Today, it opens reading your photo: see [A photo of the plate](#a-photo-of-the-plate) below.
+You also get here from {button:Log it|food-soft|plus} on a recipe, and from {button:Log what you ate|outline} at the end of cook mode. Both open with that recipe already chosen, in the sheet. From {button:Change first|food-soft} on a planned meal on Today, it opens on that day and meal, with the recipe or food chosen and the planned amount filled in, and the sheet says `Planned for this meal. Change how much, then add it.` The first thing you add then is logged as that planned meal, and it stops waiting on Today. And from the camera on Today, it opens reading your photo: see [A photo of the plate](#a-photo-of-the-plate) below.
 
 ## What you see
 

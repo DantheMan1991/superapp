@@ -184,11 +184,24 @@ export function rangeWords(monday: string): string {
     : `${month(monday)} ${date(monday)} to ${month(sunday)} ${date(sunday)}`;
 }
 
+/** "This week", "Next week" or "Last week"; null for a week further back. */
+export function weekName(monday: string, today: string): string | null {
+  const now = mondayOf(today);
+  return monday === now ? "This week" : monday === addDays(now, 7) ? "Next week" : monday === addDays(now, -7) ? "Last week" : null;
+}
+
 /** "This week, Oct 6 to 12", "Next week, …", "Last week, …", or the dates alone. */
 export function weekWords(monday: string, today: string): string {
-  const now = mondayOf(today);
-  const name = monday === now ? "This week" : monday === addDays(now, 7) ? "Next week" : monday === addDays(now, -7) ? "Last week" : null;
+  const name = weekName(monday, today);
   return name ? `${name}, ${rangeWords(monday)}` : rangeWords(monday);
+}
+
+/**
+ * The day the week opens on, one day at a time (the redesign's day strip,
+ * his call 2026-10-07): today, in this week; the Monday of any other.
+ */
+export function openingDay(monday: string, today: string): string {
+  return today >= monday && today <= addDays(monday, 6) ? today : monday;
 }
 
 /* -- what a planned meal is ----------------------------------------------- */

@@ -5,6 +5,7 @@ import type { FoodRecipe } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { cookCounts } from "./cook-ops";
 import { FoodError } from "./core/errors";
+import { effectiveNutrition } from "./core/nutrition";
 import { photoVersion, recipePhotoUrl } from "./core/photo-url";
 import { timeOf, type RecipeInput } from "./core/recipe";
 import type { StoredPhoto } from "./photo-ops";
@@ -38,6 +39,12 @@ export function draftPhotoUrl(importId: string, pathname: string): string {
   return `${FOOD_HOME}/drafts/${importId}/photo?v=${photoVersion(pathname)}`;
 }
 
+/** The two numbers a recipe card shows, or null when the recipe has neither. */
+function servingOf(numbers: { calories?: number; proteinG?: number } | null): RecipeSummary["perServing"] {
+  if (!numbers || (numbers.calories === undefined && numbers.proteinG === undefined)) return null;
+  return { calories: numbers.calories ?? null, proteinG: numbers.proteinG ?? null };
+}
+
 /** A recipe as the list shows it, with its lines for the search box. */
 export interface RecipeSummary {
   id: string;
@@ -49,6 +56,8 @@ export interface RecipeSummary {
   photoUrl: string | null;
   /** How many times it was made (cook mode's log, D1b). */
   made: number;
+  /** A serving's calories and protein, its own first and worked out for the rest (D4); null when it has neither. */
+  perServing: { calories: number | null; proteinG: number | null } | null;
   /** Ingredient lines, lower case, so "chicken" finds a recipe by what is in it. */
   search: string;
 }
@@ -71,6 +80,7 @@ export async function listRecipes(tx: Tx, tenantId: string): Promise<RecipeSumma
     minutes: timeOf(row),
     photoUrl: row.photoPathname ? recipePhotoUrl(row.id, row.photoPathname) : null,
     made: made.get(row.id) ?? 0,
+    perServing: servingOf(effectiveNutrition(row.nutrition, row.workedNutrition, row.yieldAmount)),
     search: [row.title, ...row.tags, ...row.ingredients.map((line) => line.text)].join("\n").toLowerCase(),
   }));
 }

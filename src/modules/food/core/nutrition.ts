@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { FoodNutrition, FoodPortion, WorkedLine, WorkedNutrition } from "@/db/schema";
 import { amountAt, unitAt } from "./amounts";
-import { NUTRIENT_KEYS, NO_NUTRIENTS, forGrams, totals, type NutrientKey, type Nutrients } from "./eating";
+import { NUTRIENT_KEYS, NO_NUTRIENTS, forGrams, gramWords, totals, type NutrientKey, type Nutrients } from "./eating";
 import { cleanLine, measureOf } from "./list";
 
 /**
@@ -45,6 +45,60 @@ export function effectiveNutrition(
 /** Whether a recipe states all four main numbers itself, so working out adds nothing. */
 export function statesAll(own: FoodNutrition | null | undefined): boolean {
   return MAIN_KEYS.every((key) => typeof own?.[key] === "number");
+}
+
+/** One of the four on a recipe's page, per serving, and whose number it is. */
+export interface NutritionTile {
+  key: (typeof MAIN_KEYS)[number];
+  /** "480" for calories, "38 g" for the rest; null when neither the recipe nor the working out has it. */
+  value: string | null;
+  /** "kcal", "protein", "carbs", "fat". */
+  label: string;
+  from: "own" | "worked" | null;
+}
+
+/**
+ * Whose numbers a recipe's page shows: all its own; all worked out; some of
+ * each; some of its own and nothing for the rest; or none at all.
+ */
+export type TilesSource = "own" | "worked" | "mixed" | "partial" | "none";
+
+const TILE_LABELS: Record<(typeof MAIN_KEYS)[number], string> = {
+  calories: "kcal",
+  proteinG: "protein",
+  carbsG: "carbs",
+  fatG: "fat",
+};
+
+/**
+ * A recipe's four main numbers per serving, as its page draws them (ADR
+ * 0132's tiles): its own where it states one, as it states it; worked out
+ * (`worked`, already per serving) for the rest, rounded as Today rounds them,
+ * since an estimate is not exact to a tenth of a gram. Worked-out numbers
+ * only ever fill what the recipe leaves out, as everywhere else they count.
+ */
+export function nutritionTiles(
+  own: FoodNutrition | null | undefined,
+  worked: FoodNutrition | null | undefined,
+): { tiles: NutritionTile[]; source: TilesSource } {
+  const tiles = MAIN_KEYS.map((key): NutritionTile => {
+    const label = TILE_LABELS[key];
+    const stated = own?.[key];
+    if (typeof stated === "number") {
+      const n = (Math.round(stated * 100) / 100).toLocaleString("en-US");
+      return { key, label, from: "own", value: key === "calories" ? n : `${n} g` };
+    }
+    const estimate = worked?.[key];
+    if (typeof estimate === "number") {
+      return { key, label, from: "worked", value: key === "calories" ? Math.round(estimate).toLocaleString("en-US") : gramWords(estimate) };
+    }
+    return { key, label, from: null, value: null };
+  });
+  const owned = tiles.filter((tile) => tile.from === "own").length;
+  const estimated = tiles.filter((tile) => tile.from === "worked").length;
+  const source: TilesSource =
+    owned === tiles.length ? "own" : estimated > 0 ? (owned > 0 ? "mixed" : "worked") : owned > 0 ? "partial" : "none";
+  return { tiles, source };
 }
 
 /* -- a line's grams ------------------------------------------------------- */

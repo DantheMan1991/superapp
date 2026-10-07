@@ -142,7 +142,7 @@ d("food (db)", () => {
       expect(loaded?.photoPathname).toBe(fakePhoto().pathname);
 
       const second = await withTenant(tenant.id, (tx) =>
-        insertRecipe(tx, ctx, { ...oats(), title: "apple crumble", tags: ["Dessert"], sourceUrl: null }, null),
+        insertRecipe(tx, ctx, { ...oats(), title: "apple crumble", tags: ["Dessert"], sourceUrl: null, nutrition: null }, null),
       );
       const list = await withTenant(tenant.id, (tx) => listRecipes(tx, tenant.id));
       expect(list.map((r) => r.title)).toEqual(["apple crumble", "Overnight oats"]);
@@ -150,6 +150,9 @@ d("food (db)", () => {
       expect(listed?.minutes).toBe(5);
       expect(listed?.photoUrl).toMatch(new RegExp(`^/personal/m/food/recipes/${id}/photo\\?v=`));
       expect(listed?.search).toContain("rolled oats");
+      // A serving's calories and protein for the card (ADR 0132), none for a recipe that states none.
+      expect(listed?.perServing).toEqual({ calories: 320, proteinG: 11 });
+      expect(list.find((r) => r.id === second)?.perServing).toBeNull();
       expect(await withTenant(tenant.id, (tx) => knownTags(tx, tenant.id))).toEqual(["Breakfast", "Dessert", "Quick"]);
 
       const kept = await withTenant(tenant.id, (tx) =>

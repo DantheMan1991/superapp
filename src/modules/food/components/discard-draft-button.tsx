@@ -20,10 +20,13 @@ export function DiscardDraftButton({
   importId,
   variant = "ghost",
   size = "default",
+  className,
 }: {
   importId: string;
   variant?: "ghost" | "outline";
   size?: "default" | "sm";
+  /** The trigger's own look, where a screen draws its buttons its own way (Food's skin). */
+  className?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -46,7 +49,7 @@ export function DiscardDraftButton({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant={variant} size={size}>
+        <Button variant={variant} size={size} className={className}>
           Discard draft
         </Button>
       </DialogTrigger>

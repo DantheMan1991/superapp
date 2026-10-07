@@ -4,7 +4,7 @@
 > **Route:** /personal/m/food/new, /personal/m/food/drafts/*, /personal/m/food/recipes/*/edit
 > **Order:** 20
 
-You reach this screen three ways. After {button:Read it|primary} on Add a recipe, or {button:Check it|primary} on a draft, it opens on what was read, titled `Check the recipe`, with a yellow note such as `Read from recipes.example. Check it, then Save recipe. Nothing is saved yet.` From **Type it in**, it opens empty, titled `Type a recipe in`. From {button:Edit|outline|pencil} on a recipe, it opens on that recipe, titled `Edit the recipe` with the recipe's name under it. Whichever way you came, change what you need and click {button:Save recipe|primary}.
+You reach this screen three ways. After {button:Read it|primary} on Add a recipe, or {button:Check it|food} on a draft, it opens on what was read, titled `Check the recipe`, with a yellow note such as `Read from recipes.example. Check it, then Save recipe. Nothing is saved yet.` From **Type it in**, it opens empty, titled `Type a recipe in`. From the {button:|outline|pencil} (Edit) at the top of a recipe, it opens on that recipe, titled `Edit the recipe` with the recipe's name under it. Whichever way you came, change what you need and click {button:Save recipe|primary}.
 
 ## What you see
 

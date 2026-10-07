@@ -4,14 +4,14 @@
 > **Route:** /personal/m/food/week/add
 > **Order:** 4
 
-Click {button:Put on the week|primary|plus} on Food's `Week`, or {button:|ghost|plus} beside a meal there. You also get here from {button:Add to the week|outline|calendar-plus} on a recipe, which opens with that recipe chosen.
+Click {button:Put on the week|food|plus} on Food's `Week`, or {button:|food-soft|plus} beside a meal there. You also get here from {button:Add to the week|food-soft|calendar-plus} on a recipe, which opens with that recipe chosen.
 
 ## What you see
 
 - **{button:Week|ghost|arrow-left}.** Back to the week, with nothing put on.
 - **`Put on the week`**, the title, with {icon:circle-question-mark} beside it, which opens this guide beside the page.
 - **The day**: `Today`, then each day after it up to next Sunday, such as `Thu, Oct 8`. It starts on the day you came from.
-- **The meal buttons**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`. The one lit up is the meal it goes on. From {button:Put on the week|primary|plus}, it starts on the meal the time of day suggests (dinner on a later day); from a meal's {button:|ghost|plus}, on that meal.
+- **The meal buttons**: `Breakfast`, `Lunch`, `Dinner` and `Snacks`. The one lit up is the meal it goes on. From {button:Put on the week|food|plus} on the week, it starts on the meal the time of day suggests (dinner on a later day); from a meal's {button:|food-soft|plus}, on that meal.
 - **The search box**, `Search your recipes or foods`. Type a few letters: your recipes whose names have every word come first, under `Your recipes`, then foods on USDA's list under `Foods`, each with its kind, such as `Bananas`. The {icon:x} in the box clears it. While it looks, it says `Searching…`; with nothing found, `Nothing found for “quinoa bake”. Try fewer words, or other ones.`
 - **Before you type**: `Your recipes`, the ones you cooked most lately first, and `Foods you had lately`, with the amount you last had. Click one to choose it.
 - **What you chose**, in a card: its name ({icon:chef-hat} before a recipe), and under it, for a recipe, what it makes and its nutrition, such as `Makes 6 servings · 520 kcal and 44 g protein a serving`, or `no nutrition yet`. A recipe's nutrition is its own, then what was worked out from its ingredients. For a food, its kind.

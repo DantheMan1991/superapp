@@ -7,7 +7,7 @@
 > scaled to any number of servings, a recipe's nutrition worked out from its
 > ingredients on USDA's list when it states none (D4); and the week's meals, a
 > recipe cooked once and eaten again (D2), and the shopping list made from it
-> (D3). Drawn in its own "Fresh Market" skin since UI1 (ADR 0132). The
+> (D3). Drawn in its own "Fresh Market" skin, every screen since UI2 (ADR 0132). The
 > founder's goal for it (2026-10-01) is part of a larger one: to track his
 > progress from what he does, workouts, eating, cold plunges and sleep among
 > it, which [Health](health.md) shows. Lives in a personal space beside
@@ -21,6 +21,100 @@ Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
 Older entries (D1c, D1b and D1) are in [food-build-log.md](food-build-log.md).
+
+### 2026-10-07 — The Fresh Market redesign, the rest: the week, the recipes, a recipe and the list (`claude/food-ui2`)
+
+UI1 left these four in the old look under the new tabs. He saw an interactive
+mockup of all four, on a phone and a computer (scratchpad `ui2-widget.html`,
+never the repo), and made three calls, each the recommended option: **the week
+on a phone is ONE DAY AT A TIME** (a strip of the seven days, opening on
+today); **the week on a computer is A BOARD** (the days across, the meals
+down); **the recipes are PHOTO CARDS** (the time on the photo, what it makes,
+made N times, a serving's calories and protein). The rest of the mockup was
+not questioned: a bar a day against the calorie target, the list's `N to buy`
+with a bar, and a recipe page with the photo first, Cook as the big button,
+the nutrition as four tiles, tick circles and the servings beside the
+ingredients, numbered steps.
+
+- **Shared pieces**, so the four draw alike: `food-header.tsx` (`FoodHeader`:
+  the eyebrow, Food's face, the line under it, the actions; `FoodPager`: the
+  day's or the week's arrows, a pill on a computer), `food-sheet.tsx`
+  (`FoodSheet`: a bottom sheet on a phone, a card in the middle from `sm`; the
+  amount sheet moved onto it), `food-styles.ts` (the buttons, sizes, round
+  button, field, card and chip as class strings), `food-tick.tsx` (the tick
+  circle), `recipeTone` in `food-thumb.tsx` (a recipe with no photo keeps one
+  meal's tint wherever it is drawn, by its id). Today's header is now
+  `FoodHeader`, drawn as before.
+- **The week** (`week-plan.tsx`, its page): the week's name is the title
+  (`weekName`), the arrows `FoodPager`, Put on the week in the header on a
+  computer and in the numbers' card on a phone. The numbers' card: the two
+  averages with their bars, a bar a day (`DayBars`, full at the target, or at
+  the fullest day without one), Shopping list with what is left to buy
+  (`useLeftToBuy`, the tab's count), Repeat a week. A phone shows a strip of
+  the seven days (`openingDay`: today in this week, else Monday) and the day's
+  card; a computer (`@4xl`) the board, a card per planned meal, a dashed + per
+  meal from today on, each day's totals under it. A planned meal opens in
+  `FoodSheet`: the editor restyled, with − and + either side of each number.
+- **The recipes** (`recipe-list.tsx`, its page): the search and the tags as
+  chips, cards two across, three from `@2xl`, four from `@5xl`.
+  `RecipeSummary.perServing` is a serving's calories and protein by
+  `effectiveNutrition` (its own first, worked out for the rest), so the card
+  agrees with Today and the week; `No nutrition yet` without either. The
+  drafts are a card with Check it and Discard draft in Food's buttons
+  (`DiscardDraftButton` takes a `className`).
+- **A recipe** (`recipe-view.tsx`, its page): back, help, Edit and Delete
+  along the top (`DeleteRecipeButton` is now the round bin); the photo, or a
+  band with the chef's hat on its card's tint; the title, the times and what
+  it makes as pills, made, from and tags on one line (drawn by the page and
+  handed to the view as `intro`); Cook full width, Add to the week and Log it;
+  the nutrition as four tiles (`nutritionTiles`, `core/nutrition.ts`: whose
+  each number is, and the card's words for all its own, all worked out, some
+  of each with the worked-out tiles dashed, some and nothing for the rest, or
+  none); the ingredients with the servings, tick circles and amounts in bold;
+  the steps numbered in tinted circles; the notes. From `@3xl` the photo sits
+  beside the title and the ingredients beside the steps. Work it out and
+  Check it again are Food's soft button now: Cook is the screen's one orange.
+- **The list** (`shopping-list.tsx`, its page): the component draws the
+  header and the tabs too, since the days are the phone's (`Food · Oct 7 to
+  13`). The top card: `N to buy` by `leftToBuy` (the tab's own number), the
+  plan and what is ticked, a bar, Change days. A card per aisle with its
+  picture, rows with tick circles and the name in bold; the staples with Have
+  it and Always have under the name on a phone and beside it from `@2xl`; your
+  items with the box first. From `@4xl` the cards flow down two columns
+  (`columns-2`, none split). With nothing planned, the card says so and offers
+  Go to the week (the separate empty card is gone).
+- **A tap never moves the rows under the finger** (found driving, fixed): the
+  recipe's `Made for 6 servings.` is always there, Reset joining it once
+  scaled (pressing + inserted the line and the next tap ticked the wrong
+  ingredient); the list's ticked count is a line of its own, `Nothing ticked
+  yet.` before the first tick (it joined the sentence above and could re-wrap
+  it: the first fix, the longer words on the same line, wrapped it at 311 px
+  where `1 thing ticked.` did not, measured); a ticked staple hides its two
+  buttons instead of dropping them; a ticked row keeps its sources line.
+- **Guides**: `week.md`, `recipes.md`, `recipe.md` and `list.md` rewritten for
+  the screens, per control (`recipes.md` loses the stale "Working out
+  nutrition… Not built"); the looks of these screens' buttons follow in
+  `add.md`, `cook.md`, `editor.md`, `log.md`, `week-add.md` and
+  `recipe-nutrition.md`.
+- **Tests**: `food-week.test.ts` gains `weekName` and `openingDay`;
+  `food-nutrition.test.ts` the tiles in all five cases; `food-ops.test.ts` and
+  `food-nutrition-ops.test.ts` a recipe card's serving (its own, worked out,
+  and none) through `listRecipes`, on dev.
+- **Driven** on a production build against dev (six invented recipes in every
+  nutrition state, a week planned with cooks, leftovers and a food; scratchpad
+  `ui2-dev-seed.mjs`, removed after), at 375 and 1280 px: the day strip, a
+  day's card, a planned meal opened and its servings saved, the board and its
+  sheet as a card; the cards, a tag and a search together; a recipe in all
+  five nutrition states, + and a tick, an invented dish photo added through
+  the editor and shown on the page, the card and Up next, then the recipe
+  deleted through the bin (its photo gone from the store, checked); the
+  Drafts card with a failed paste and a link being read, and Discard draft;
+  the list sorted by Claude (23 to buy before, 17 after, the tab the same), a
+  tick moving the number, the bar and the tab together, Have it, Always have
+  and Put back, an item of my own, Change days, the empty days with Go to the
+  week, two columns. The three fixes measured after the rebuild: no row moves
+  (the card 172 px ticked or not). Today unchanged at both widths.
+- **No migration, no seed.**
 
 ### 2026-10-06 — The Fresh Market redesign: Today and Log food (`claude/food-ui`)
 
@@ -480,7 +574,7 @@ snacks.
 | D3 | **The shopping list** | Built from the week, buying once per cook's batch, the same food added up across recipes (`core/amounts.ts` reads every line; Claude names each line's item and aisle, the app adds the amounts: his call), staples asked about once and then remembered (his call), ticked off in the shop on a phone (ADR 0130). **Built** |
 | D4a | **Eating, logged** | What was eaten, from USDA's food list, a saved recipe or a photo of the plate, in breakfast, lunch, dinner or snacks; calories and the three macros a day against calorie and protein targets; in Health's progress (his calls, 2026-10-03; ADR 0126). **Built** |
 | UI1 | **The Fresh Market look, Today and Log food** | His pick from a Claude Design handoff: Food's own skin and face, the tabs as pills with the list's count, Today's search bar, rings, Up next and meal cards, the phone's floating bar, Log food's sheet and one-tap recent; a food's picture an icon for its kind (his call), the tell box's dictation in the search (his call) (ADR 0132). **Built** |
-| UI2 | **The rest of Food in the same look** | The week, the recipes, a recipe and the list, from a mockup he approves first (his call). Not started |
+| UI2 | **The rest of Food in the same look** | The week (one day at a time on a phone, a board on a computer: his calls), the recipes as photo cards (his call), a recipe with the photo first and its nutrition as tiles, and the list with how much is left to buy, from a mockup he approved (ADR 0132). **Built** |
 | D4 | **Nutrition of a recipe** | Worked out from its ingredients when asked: each line matched on USDA's ingredient list (SR Legacy, his call) and weighed, every line checked, the whole recipe kept and a serving read from what it makes; the recipe's own numbers first (his call), counted wherever a recipe is, past logs filled in (his call) (ADR 0131). **Built** |
 
 **His health goal (2026-10-01)**, in his words: "track progress based on things
@@ -588,6 +682,12 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   `core/today.ts` (greeting, up next, the line, the split), `core/food-icons.ts`,
   `core/choice.ts`, `core/photo-url.ts`; `src/app/api/food/transcribe/route.ts`
   over `src/lib/speech/transcribe-route.ts`.
+- The rest of the look (UI2): `food-header.tsx` (`FoodHeader`, `FoodPager`),
+  `food-sheet.tsx` (`FoodSheet`), `food-styles.ts` (the controls as classes),
+  `food-tick.tsx`, `recipeTone` in `food-thumb.tsx`; `week-plan.tsx`,
+  `recipe-list.tsx`, `recipe-view.tsx`, `shopping-list.tsx` and their pages;
+  `weekName` and `openingDay` in `core/week.ts`, `nutritionTiles` in
+  `core/nutrition.ts`, `RecipeSummary.perServing` in `recipe-ops.ts`.
 - The food lists: `scripts/build-usda-foods.ts` (FNDDS, pinned download,
   readable names) and `scripts/build-usda-ingredients.ts` (SR Legacy, D4),
   `scripts/data/usda-foods.json` and `usda-ingredients.json` (committed),
@@ -755,6 +855,18 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
   Neither keeps the audio or the words.
 - **A guide draws Food's buttons with `food` and `food-soft`**, not `primary`,
   which is navy.
+- **A new Food screen is built from the shared pieces** (UI2): `FoodPage`,
+  `FoodHeader`, `FoodSheet`, the `FOOD_*` classes, `FoodTick`, `FoodThumb`.
+  One orange button a screen (`FOOD_PRIMARY`); everything beside it is soft.
+- **A tap never moves the rows under the finger** (UI2's drive): anything a
+  tap shows or hides above a list keeps its space (the recipe's `Made for`
+  line, the list's ticked sentence, a ticked staple's buttons). The list's
+  ticked rows already stayed put (D3); this is the same rule, wider.
+- **The list draws its own header and tabs**: the days it covers are the
+  phone's, so the server cannot name them.
+- **A card's numbers are the counted numbers**: `RecipeSummary.perServing` is
+  `effectiveNutrition`'s, the recipe's own first, so the card says what Today
+  and the week will count.
 
 ## Open items
 
@@ -812,16 +924,23 @@ know was eaten, and progress shown across them. Built as [Health](health.md)
 - **Only the four main numbers are shown** worked out; fiber, sugar and sodium
   are kept, and are 0 where SR Legacy lists none, so they can read low.
 - **Amounts in steps** do not scale; the recipe page says so.
-- **Recipe photos are not cropped.** The list shows them square and the page
-  as they are, at most 28rem high.
+- **Recipe photos are cropped to their box** (UI2): 4:3 on a card and on a
+  recipe's page on a computer, 16:10 on a phone, the middle kept. A photo
+  whose subject is off-centre loses an edge; there is no way to choose the
+  crop.
 - **No per-space budget for Claude reads**, as Workouts' recorded voice has
   none: one read at a time bounds a runaway client, not a day's total. Before
   Food opens to everyone, a daily read budget per space.
 - **Sharing a recipe** (a link, a household) is not built, and would raise the
   copyright of a page's text and photo (ADR 0123).
-- **UI2: the week, the recipes, a recipe and the list** keep their old look
-  under the new tabs until he approves a mockup of them (his call,
-  2026-10-06).
+- **Have it moves a staple, and the page can move under the next tap** (found
+  in UI2's drive, the same since D3): the staple leaves its card for the `At
+  home:` line, and with the page scrolled to the bottom the browser pulls
+  everything down a row, so the next tap lands on the row above. Keeping the
+  row where it is, marked at home with Need it, would fix it; not changed
+  without his call, since D3's `At home:` line was his.
+- **The week's sheet on a phone** puts the unit word (`servings`) on a line of
+  its own under Cook and You eat; the two steppers fill the width.
 - **The redesign has not met his phone.** Driven in a pane at 375 px: the
   floating bar over Android's gesture bar, the sheet sliding up, the
   microphone inside the app (the WebView's recording permission) and the

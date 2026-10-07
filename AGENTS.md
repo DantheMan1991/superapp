@@ -189,3 +189,9 @@ and skipped by the build-docs walker:
   `tests/db-backed-files.test.ts` fails, a suite changed which side it belongs
   on — update the list in `tests/db-backed-files.ts`. See
   [docs/modules/ci-and-tests.md](docs/modules/ci-and-tests.md).
+- **An issue labelled `date-bomb` is a test that will fail on a date**, on every
+  branch at once. The daily Date bombs workflow (`.github/workflows/date-bombs.yml`)
+  found it by running each test file on the dates it writes, with the tests'
+  clock and Postgres's both moved. Fix it with
+  [docs/runbooks/date-bombs.md](docs/runbooks/date-bombs.md), and never write
+  a fixed "future" date beside the real clock (`docs/conventions.md` §7).

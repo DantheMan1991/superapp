@@ -1,0 +1,47 @@
+# Postgres 18 and Neon's WebSocket proxy, with a clock the Date bombs guard can
+# move. The same two containers the suite's CI job runs as services (ci.yml),
+# except that Postgres reads its clock offset from $DATE_BOMB_CLOCK_DIR/offset.
+#
+# .github/workflows/date-bombs.yml starts them with this file, and so can you
+# (docs/runbooks/date-bombs.md has the whole local run):
+#
+#   mkdir -p /tmp/date-bomb-clock && echo +0 > /tmp/date-bomb-clock/offset
+#   export DATE_BOMB_CLOCK_DIR=/tmp/date-bomb-clock
+#   docker compose -f docker/postgres-faketime/compose.yml up -d --build --wait
+#   docker compose -f docker/postgres-faketime/compose.yml down -v
+#
+# Create the directory yourself before `up`. Docker would create a missing one
+# as root, and the guard, running as you, could then not write the clock.
+#
+# Ports are bound to 127.0.0.1: a throwaway database with a password written in
+# a public repository has no business on the local network.
+
+services:
+  postgres:
+    build: .
+    environment:
+      POSTGRES_PASSWORD: ci-owner-not-a-real-secret
+      POSTGRES_DB: superapp_test
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${DATE_BOMB_CLOCK_DIR:?set DATE_BOMB_CLOCK_DIR to the directory that holds the clock offset}:/etc/faketime:ro
+    healthcheck:
+      # Over TCP. The image's first start runs a temporary server on the socket
+      # alone while it initialises, and that one must not count as ready.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  wsproxy:
+    image: ghcr.io/neondatabase/wsproxy:latest
+    environment:
+      APPEND_PORT: "postgres:5432"
+      ALLOW_ADDR_REGEX: ".*"
+      LOG_TRAFFIC: "false"
+    ports:
+      - "127.0.0.1:5433:80"
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -72,6 +72,8 @@ screenshot does:
   {button:New bill|primary}            a button. Looks: primary, outline (the
   {button:Void|outline|trash}          default), ghost, destructive, secondary,
                                        link. An icon name may follow the look.
+                                       Food's guides also have food (its orange
+                                       fill) and food-soft (its cream button).
   {button:|ghost|x}                    a button drawn as its icon alone (no
                                        words before the first bar); it needs
                                        the icon, and the panel cannot ring it.

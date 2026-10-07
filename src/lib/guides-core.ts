@@ -494,7 +494,12 @@ export function guideIndexFor<T extends GuideMeta>(
 export const CONTROL_KINDS = ["button", "badge", "icon", "kbd"] as const;
 export type ControlKind = (typeof CONTROL_KINDS)[number];
 
-/** `primary` is the Button's `default`; the rest are the Button's own names. */
+/**
+ * `primary` is the Button's `default`; the rest are the Button's own names,
+ * except `food` and `food-soft`: Food's own filled and soft buttons (its
+ * "Fresh Market" skin, ADR 0132), so its guides draw the orange and the
+ * cream the screen does rather than the navy.
+ */
 export const BUTTON_VARIANTS = [
   "primary",
   "outline",
@@ -502,6 +507,8 @@ export const BUTTON_VARIANTS = [
   "destructive",
   "secondary",
   "link",
+  "food",
+  "food-soft",
 ] as const;
 
 /** `success` and `warning` are the app's class-tinted badges, named for authors. */

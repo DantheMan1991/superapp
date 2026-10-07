@@ -96,6 +96,49 @@
    */
   --container-content: 100rem;
   --container-measure: 80ch;
+
+  /*
+   * FOOD'S OWN SKIN (the "Fresh Market" redesign, ADR 0132): the values are
+   * the `--food-*` properties on `:root` below, drawn only inside Food. The
+   * display face is Bricolage Grotesque, loaded by Food's pages alone
+   * (`src/modules/food/components/food-display.ts`), so anywhere else
+   * `font-food-display` falls back to the body face.
+   */
+  --font-food-display: var(--font-bricolage, var(--font-geist-sans));
+  --color-food-bg: var(--food-bg);
+  --color-food-accent: var(--food-accent);
+  --color-food-accent-hover: var(--food-accent-hover);
+  --color-food-accent-ink: var(--food-accent-ink);
+  --color-food-tint: var(--food-tint);
+  --color-food-ring-track: var(--food-ring-track);
+  --color-food-protein: var(--food-protein);
+  --color-food-protein-track: var(--food-protein-track);
+  --color-food-carbs: var(--food-carbs);
+  --color-food-fat: var(--food-fat);
+  --color-food-field: var(--food-field);
+  --color-food-soft: var(--food-soft);
+  --color-food-tabs-track: var(--food-tabs-track);
+  --color-food-chip-ring: var(--food-chip-ring);
+  --color-food-success-tint: var(--food-success-tint);
+  --color-food-success-ink: var(--food-success-ink);
+  --color-food-planned: var(--food-planned);
+  --color-food-planned-edge: var(--food-planned-edge);
+  --color-food-breakfast: var(--food-breakfast);
+  --color-food-breakfast-ink: var(--food-breakfast-ink);
+  --color-food-lunch: var(--food-lunch);
+  --color-food-lunch-ink: var(--food-lunch-ink);
+  --color-food-dinner: var(--food-dinner);
+  --color-food-dinner-ink: var(--food-dinner-ink);
+  --color-food-snack: var(--food-snack);
+  --color-food-snack-ink: var(--food-snack-ink);
+  --shadow-food-card: var(--food-shadow-card);
+  --shadow-food-bar: var(--food-shadow-bar);
+  --shadow-food-meal: var(--food-shadow-meal);
+  --shadow-food-tab: var(--food-shadow-tab);
+  --shadow-food-float: var(--food-shadow-float);
+  --shadow-food-camera: var(--food-shadow-camera);
+  --shadow-food-sheet: var(--food-shadow-sheet);
+  --shadow-food-focus: var(--food-shadow-focus);
 }
 
 /*
@@ -290,6 +333,54 @@
   --accent-fitness: oklch(0.53 0.12 185);
   --accent-food: oklch(0.56 0.14 45);
   --accent-health: oklch(0.55 0.15 345);
+
+  /*
+   * FOOD'S OWN SKIN, "Fresh Market" (the founder's pick from a Claude Design
+   * handoff, 2026-10-06; ADR 0132). Warmer than the product's neutrals, with
+   * the accent above as its primary. On `:root` rather than Food's wrapper so
+   * a dialog, portalled out of the page, wears it too; nothing outside Food
+   * draws with these. Measured: white on the accent 4.93:1 (6.38 on hover),
+   * the ink on the tint 5.90:1, the success ink on its tint 7.60:1, each
+   * meal's ink on its tint above 5.2:1. The search placeholder is
+   * `--muted-foreground`, not the design's subtle tier, which measured 4.42:1
+   * on the field. The fat segment of the energy bar is 2.16:1 on white and is
+   * not the only telling: its grams are written under it.
+   */
+  --food-bg: oklch(0.982 0.008 75);
+  --food-accent: var(--accent-food);
+  --food-accent-hover: oklch(0.5 0.14 43);
+  --food-accent-ink: oklch(0.48 0.13 42);
+  --food-tint: oklch(0.95 0.035 55);
+  --food-ring-track: oklch(0.95 0.02 60);
+  --food-protein: oklch(0.62 0.15 25);
+  --food-protein-track: oklch(0.95 0.015 30);
+  --food-carbs: oklch(0.62 0.11 145);
+  --food-fat: oklch(0.76 0.12 85);
+  --food-field: oklch(0.975 0.008 75);
+  --food-soft: oklch(0.96 0.01 75);
+  --food-tabs-track: oklch(0.94 0.012 70);
+  --food-chip-ring: oklch(0.9 0.01 75);
+  --food-success-tint: oklch(0.95 0.05 150);
+  --food-success-ink: oklch(0.4 0.12 150);
+  --food-planned: oklch(0.985 0.012 60);
+  --food-planned-edge: oklch(0.85 0.05 55);
+  --food-breakfast: oklch(0.95 0.06 90);
+  --food-breakfast-ink: oklch(0.5 0.11 80);
+  --food-lunch: oklch(0.95 0.05 145);
+  --food-lunch-ink: oklch(0.48 0.11 150);
+  --food-dinner: oklch(0.95 0.035 55);
+  --food-dinner-ink: oklch(0.5 0.13 42);
+  --food-snack: oklch(0.95 0.035 350);
+  --food-snack-ink: oklch(0.5 0.13 350);
+  /* A warmer twin of `--elevation-1`, at the design's three strengths. */
+  --food-shadow-card: 0 0 0 1px rgb(0 0 0 / 0.03), 0 8px 24px rgb(80 40 0 / 0.06);
+  --food-shadow-bar: 0 0 0 1px rgb(0 0 0 / 0.03), 0 8px 24px rgb(80 40 0 / 0.07);
+  --food-shadow-meal: 0 0 0 1px rgb(0 0 0 / 0.03), 0 8px 24px rgb(80 40 0 / 0.05);
+  --food-shadow-tab: 0 1px 3px rgb(0 0 0 / 0.08);
+  --food-shadow-float: 0 0 0 1px rgb(0 0 0 / 0.05), 0 10px 30px rgb(60 30 0 / 0.18);
+  --food-shadow-camera: 0 10px 30px rgb(160 70 0 / 0.35);
+  --food-shadow-sheet: 0 -10px 40px rgb(60 30 0 / 0.16);
+  --food-shadow-focus: 0 4px 14px rgb(160 70 0 / 0.12);
 
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
@@ -534,6 +625,31 @@
 }
 [data-app-main] p.text-center {
   margin-inline: auto;
+}
+
+/*
+ * Food's pages sit on its own warmer page (ADR 0132). The shell's <main> is
+ * the box with the colour, and a page cannot reach it, so the page says it is
+ * Food's (`data-food-page`, on `FoodPage`) and this paints the whole pane.
+ */
+[data-app-main]:has([data-food-page]) {
+  background-color: var(--food-bg);
+}
+
+/*
+ * Today's rings and its energy bar grow from nothing as the page arrives;
+ * a later change (Ate it) slides by a transition instead. Both are switched
+ * off with `motion-reduce:` where they are used.
+ */
+@keyframes food-ring-in {
+  from {
+    stroke-dashoffset: var(--food-ring-from);
+  }
+}
+@keyframes food-grow-in {
+  from {
+    flex-grow: 0;
+  }
 }
 
 /*

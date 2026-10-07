@@ -31,3 +31,5 @@ export const Source_Sans_3 = font("source-sans-3");
 export const Poppins = font("poppins");
 export const Cormorant_Garamond = font("cormorant-garamond");
 export const Montserrat = font("montserrat");
+// Food's display face (ADR 0132), reached through the module registry.
+export const Bricolage_Grotesque = font("bricolage-grotesque");

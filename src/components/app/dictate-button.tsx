@@ -6,6 +6,7 @@ import { warmUpSpeech } from "@/lib/speech/say";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { isNativeAppUserAgent } from "@/lib/native-app-core";
+import { cn } from "@/lib/utils";
 import {
   isSupportedAudioType,
   pickSpeechRoute,
@@ -206,6 +207,9 @@ export function DictateButton({
   disabled,
   serverConfigured,
   startOnMount = false,
+  endpoint = "/api/tell/transcribe",
+  look = "labelled",
+  className,
 }: {
   onText: (text: string) => void;
   disabled?: boolean;
@@ -218,6 +222,21 @@ export function DictateButton({
    * the tap ADR 0050 removed.
    */
   startOnMount?: boolean;
+  /**
+   * Where a browser's recording goes. The tell box's route answers a business
+   * workspace only; a personal tool has its own door (Food's search,
+   * `/api/food/transcribe`), and the handler behind both is one
+   * (`src/lib/speech/transcribe-route.ts`).
+   */
+  endpoint?: string;
+  /**
+   * `icon` is a bare microphone for inside a search field (Food's): no words
+   * on it, and nothing at all where this browser cannot listen, since a
+   * search box has no room for the reason and typing still works.
+   */
+  look?: "labelled" | "icon";
+  /** The icon look's size and colours, from the field it sits in. */
+  className?: string;
 }) {
   // WHAT THIS BROWSER CAN DO IS NOT A PIECE OF STATE, it is a fact this
   // machine already knows — so it is read through `useSyncExternalStore` with
@@ -271,7 +290,7 @@ export function DictateButton({
   async function send(blob: Blob) {
     setWorking(true);
     try {
-      const response = await fetch("/api/tell/transcribe", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": blob.type || "audio/webm" },
         body: blob,
@@ -402,10 +421,40 @@ export function DictateButton({
   if (route === null) return null;
 
   if (route === "none") {
+    if (look === "icon") return null;
     return (
       <p className="text-xs text-muted-foreground">
         {whyNoSpeech(probeCapabilities(serverConfigured))}
       </p>
+    );
+  }
+
+  if (look === "icon") {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={disabled || working}
+        aria-pressed={listening}
+        aria-label={
+          working
+            ? "Writing it down"
+            : listening
+              ? left <= 10
+                ? `Listening, ${left} seconds left. Press to finish now`
+                : "Listening. Press to finish now"
+              : "Say it instead of typing"
+        }
+        className={cn("flex shrink-0 items-center justify-center disabled:opacity-60", className)}
+      >
+        {working ? (
+          <Loader2 className="size-5 animate-spin" aria-hidden />
+        ) : listening ? (
+          <Square className="size-4 animate-pulse fill-current" aria-hidden />
+        ) : (
+          <Mic className="size-5" aria-hidden />
+        )}
+      </button>
     );
   }
 

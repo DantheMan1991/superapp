@@ -5,8 +5,11 @@ import type { FoodRecipe } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { cookCounts } from "./cook-ops";
 import { FoodError } from "./core/errors";
+import { photoVersion, recipePhotoUrl } from "./core/photo-url";
 import { timeOf, type RecipeInput } from "./core/recipe";
-import { photoVersion, type StoredPhoto } from "./photo-ops";
+import type { StoredPhoto } from "./photo-ops";
+
+export { recipePhotoUrl };
 
 /**
  * RECIPES: the person's own copies (src/db/schema/food.ts). Saved whole: a
@@ -29,10 +32,6 @@ export function weekHref(monday: string | null): string {
 
 export function recipeHref(recipeId: string): string {
   return `${FOOD_HOME}/recipes/${recipeId}`;
-}
-
-export function recipePhotoUrl(recipeId: string, pathname: string): string {
-  return `${recipeHref(recipeId)}/photo?v=${photoVersion(pathname)}`;
 }
 
 export function draftPhotoUrl(importId: string, pathname: string): string {

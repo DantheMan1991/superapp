@@ -14,6 +14,15 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-10-06 — Food is redrawn in its own skin (`claude/food-ui`)
+
+Food's UI1 ([food.md](food.md), ADR 0132): Today and Log food in the founder's
+"Fresh Market" pick, Food's own colours and face on a warmer page, the tabs as
+pills with the shopping list's count, and the tell box's dictation in Food's
+search behind a personal space's door (`/api/food/transcribe`). The container
+is unchanged: the shell, the rail and the space's home look as they did. A
+personal tool may now carry a skin of its own; Workouts and Health do not.
+
 ### 2026-10-03 — Food works out a recipe's nutrition (`claude/food-d4`)
 
 Food's D4 ([food.md](food.md), ADR 0131): a recipe that states no nutrition

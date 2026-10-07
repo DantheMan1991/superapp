@@ -27,6 +27,7 @@ import {
 } from "./core/week";
 import { checkDay, getFood, insertEatenFood, insertEatenRecipe } from "./eating-ops";
 import { effectiveNutrition } from "./core/nutrition";
+import { recipePhotoOrNull } from "./core/photo-url";
 
 /**
  * THE WEEK, KEPT (D2, docs/modules/food.md, ADR 0129): what is planned, put on
@@ -83,7 +84,9 @@ export async function planBetween(tx: Tx, tenantId: string, from: string, to: st
       yieldAmount: r.yieldAmount,
       nutrition: r.nutrition,
       worked: r.workedNutrition,
+      photo: r.photoPathname,
       fdcId: f.fdcId,
+      category: f.category,
       portions: f.portions,
       calories: f.calories,
       proteinG: f.proteinG,
@@ -152,6 +155,8 @@ export async function planBetween(tx: Tx, tenantId: string, from: string, to: st
     eatenId: row.eatenId,
     cookSlot: row.kind === "leftover" && row.cookOn && row.cookMeal ? { day: row.cookOn, meal: row.cookMeal } : null,
     leftovers: row.kind === "cook" ? (byCook.get(row.id) ?? []) : [],
+    photoUrl: row.kind === "food" ? null : recipePhotoOrNull(row.recipeId, row.photo),
+    category: row.kind === "food" ? (row.category ?? null) : null,
   }));
 }
 

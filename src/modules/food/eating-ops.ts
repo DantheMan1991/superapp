@@ -6,6 +6,7 @@ import type { TenantContext } from "@/lib/auth";
 import { addDays, todayInTimezone } from "@/lib/timezone";
 import { FoodError } from "./core/errors";
 import { effectiveNutrition } from "./core/nutrition";
+import { recipePhotoOrNull } from "./core/photo-url";
 import {
   LOG_BACK_DAYS,
   MEALS,
@@ -181,12 +182,17 @@ export async function searchRecipes(tx: Tx, tenantId: string, q: string, limit =
       worked: t.workedNutrition,
       yieldAmount: t.yieldAmount,
       yieldUnit: t.yieldUnit,
+      photo: t.photoPathname,
     })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), ...words.map((w) => ilike(t.title, `%${w}%`))))
     .orderBy(sql`${lastCooked} desc nulls last`, asc(t.title))
     .limit(limit);
-  return rows.map(({ own, worked, ...r }) => ({ ...r, perServing: effectiveNutrition(own, worked, r.yieldAmount) }));
+  return rows.map(({ own, worked, photo, ...r }) => ({
+    ...r,
+    perServing: effectiveNutrition(own, worked, r.yieldAmount),
+    photoUrl: recipePhotoOrNull(r.recipeId, photo),
+  }));
 }
 
 /* -- the log ---------------------------------------------------------- */
@@ -349,18 +355,25 @@ const mealOrder = sql`array_position(${sql.param([...MEALS])}::text[], ${schema.
 export interface DayEntry extends EatenRow {
   /** A food's own portions, for changing its amount; null for a recipe, or a food no longer on the list. */
   portions: FoodPortion[] | null;
+  /** A food's USDA category, for its icon (the redesign, ADR 0132); null for a recipe. */
+  category: string | null;
+  /** A recipe's photo, or null. */
+  photoUrl: string | null;
 }
 
 /** A day's log, meal by meal, in the order things were logged. */
 export async function dayEaten(tx: Tx, tenantId: string, day: string): Promise<DayEntry[]> {
   const t = schema.foodEaten;
   const f = schema.foodUsdaFoods;
-  return tx
-    .select({ ...eatenColumns, portions: f.portions })
+  const r = schema.foodRecipes;
+  const rows = await tx
+    .select({ ...eatenColumns, portions: f.portions, category: f.category, photo: r.photoPathname })
     .from(t)
     .leftJoin(f, eq(f.fdcId, t.fdcId))
+    .leftJoin(r, and(eq(r.tenantId, t.tenantId), eq(r.id, t.recipeId)))
     .where(and(eq(t.tenantId, tenantId), eq(t.eatenOn, day)))
     .orderBy(mealOrder, asc(t.createdAt));
+  return rows.map(({ photo, ...row }) => ({ ...row, photoUrl: recipePhotoOrNull(row.recipeId, photo) }));
 }
 
 /** One of the person's recipes, as the search gives it, for a Log food opened from the recipe. */
@@ -374,13 +387,14 @@ export async function recipeHit(tx: Tx, tenantId: string, recipeId: string): Pro
       worked: t.workedNutrition,
       yieldAmount: t.yieldAmount,
       yieldUnit: t.yieldUnit,
+      photo: t.photoPathname,
     })
     .from(t)
     .where(and(eq(t.tenantId, tenantId), eq(t.id, recipeId)))
     .limit(1);
   if (!row) return null;
-  const { own, worked, ...hit } = row;
-  return { ...hit, perServing: effectiveNutrition(own, worked, hit.yieldAmount) };
+  const { own, worked, photo, ...hit } = row;
+  return { ...hit, perServing: effectiveNutrition(own, worked, hit.yieldAmount), photoUrl: recipePhotoOrNull(hit.recipeId, photo) };
 }
 
 /** Every row in a run of days, both ends included: what Progress adds up. */
@@ -479,6 +493,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
       recipeWorked: r.workedNutrition,
       recipeYieldAmount: r.yieldAmount,
       recipeYieldUnit: r.yieldUnit,
+      recipePhoto: r.photoPathname,
     })
     .from(t)
     .leftJoin(f, eq(f.fdcId, t.fdcId))
@@ -517,6 +532,7 @@ export async function recentEaten(tx: Tx, tenantId: string, limit = 8): Promise<
           perServing: effectiveNutrition(row.recipeNutrition, row.recipeWorked, row.recipeYieldAmount),
           yieldAmount: row.recipeYieldAmount ?? null,
           yieldUnit: row.recipeYieldUnit ?? null,
+          photoUrl: recipePhotoOrNull(row.recipeId, row.recipePhoto),
         }
       : null;
     out.push({ key, amount: row.amount, portion: row.portion, food, recipe });

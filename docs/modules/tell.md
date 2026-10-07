@@ -131,6 +131,22 @@ screen.
 
 ## Build log
 
+### 2026-10-06 — The dictation handler is shared with Food's search (`claude/food-ui`)
+
+Food's redesign ([food.md](food.md), ADR 0132) put a microphone in its
+search, on the founder's call, as the tell box's dictation. The tell box's
+route answers a business workspace only (`resolveTenantContext` refuses a
+personal space, 401, checked in the drive), so Food has a door of its own,
+`/api/food/transcribe` (`resolvePersonalContext`, Food switched on). The part
+behind the door moved to `src/lib/speech/transcribe-route.ts`
+(`transcribeRequest`, `speechFail`): the size check, the vendor and every
+message are the tell box's, unchanged, and `/api/tell/transcribe` now keeps
+only its door (signed in, a business, not a support view). `DictateButton`
+gained `endpoint` (the tell box's by default) and `look: "icon"` (a bare
+microphone for inside a search field, which renders nothing where the browser
+cannot record instead of the reason). The tell box passes neither and is
+unchanged.
+
 ### 2026-09-27 — A cancelled line no longer silences the voice (`claude/fitness-f2b`)
 
 Found while building workout mode's coach voice

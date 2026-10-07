@@ -226,6 +226,10 @@ export interface PlanItem extends Slot {
   cookSlot: Slot | null;
   /** A cook's leftovers, wherever they are, earliest first. */
   leftovers: { id: string; day: string; meal: Meal; servings: number }[];
+  /** The recipe's photo, for Today's Up next and its rows (the redesign); null or absent without one. */
+  photoUrl?: string | null;
+  /** A food's USDA category, for its icon; null or absent for a recipe. */
+  category?: string | null;
 }
 
 /** What a planned meal comes to, worked out now: a recipe's servings, or a food's grams. */

@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ChevronDown, Minus, Plus } from "lucide-react";
-import { Dialog as SheetPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { MEALS, MEAL_LABELS, gramWords, typedAmount, type Meal } from "../core/eating";
 import { choiceNumbers, choiceStart, stepFor, stepped, unitsOf, type Choice } from "../core/choice";
-import { foodDisplay } from "./food-display";
+import { FoodSheet, FoodSheetDescription, FoodSheetTitle } from "./food-sheet";
 import { FoodThumb } from "./food-thumb";
 
 /** How much of a choice to add, as the sheet hands it back. */
@@ -50,33 +49,21 @@ export function AmountSheet({
 }) {
   const key = choice ? (choice.kind === "food" ? `f:${choice.food.fdcId}` : `r:${choice.recipe.recipeId}`) : "none";
   return (
-    <SheetPrimitive.Root open={choice !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetPrimitive.Portal>
-        <SheetPrimitive.Overlay className="fixed inset-0 z-50 bg-black/25 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <SheetPrimitive.Content
-          className={cn(
-            foodDisplay.variable,
-            "fixed inset-x-0 bottom-0 z-50 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-t-3xl bg-card px-4 pt-2.5 pb-[calc(1rem+env(safe-area-inset-bottom))] text-foreground shadow-food-sheet outline-none",
-            "data-open:animate-in data-open:slide-in-from-bottom-10 data-closed:animate-out data-closed:fade-out-0 data-closed:slide-out-to-bottom-10",
-            "sm:inset-x-auto sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl sm:p-6 sm:shadow-elevation-3",
-          )}
-        >
-          {choice && (
-            <SheetBody
-              key={key}
-              choice={choice}
-              meal={meal}
-              onMealChange={onMealChange}
-              initial={initial}
-              planned={planned}
-              pending={pending}
-              onAdd={onAdd}
-              onClose={onClose}
-            />
-          )}
-        </SheetPrimitive.Content>
-      </SheetPrimitive.Portal>
-    </SheetPrimitive.Root>
+    <FoodSheet open={choice !== null} onClose={onClose}>
+      {choice && (
+        <SheetBody
+          key={key}
+          choice={choice}
+          meal={meal}
+          onMealChange={onMealChange}
+          initial={initial}
+          planned={planned}
+          pending={pending}
+          onAdd={onAdd}
+          onClose={onClose}
+        />
+      )}
+    </FoodSheet>
   );
 }
 
@@ -123,7 +110,6 @@ function SheetBody({
 
   return (
     <div className="space-y-4">
-      <div className="mx-auto h-[5px] w-10 rounded-full bg-food-chip-ring sm:hidden" aria-hidden />
       <div className="flex items-center gap-3">
         <FoodThumb
           photoUrl={choice.kind === "recipe" ? (choice.recipe.photoUrl ?? null) : null}
@@ -133,10 +119,10 @@ function SheetBody({
           className="size-[52px] rounded-xl"
         />
         <div className="min-w-0 flex-1">
-          <SheetPrimitive.Title className="line-clamp-2 text-base font-semibold">{name}</SheetPrimitive.Title>
-          <SheetPrimitive.Description className="truncate text-[13px] text-muted-foreground">
+          <FoodSheetTitle className="line-clamp-2 text-base font-semibold">{name}</FoodSheetTitle>
+          <FoodSheetDescription className="truncate text-[13px] text-muted-foreground">
             {choice.kind === "food" ? choice.food.category : "Your recipe"}
-          </SheetPrimitive.Description>
+          </FoodSheetDescription>
         </div>
         <button
           type="button"

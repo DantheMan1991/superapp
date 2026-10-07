@@ -10,7 +10,7 @@ import { logRecipe, recipeHit, searchRecipes, usdaByName } from "../src/modules/
 import { perServingOf } from "../src/modules/food/core/nutrition";
 import { pastWithoutNumbers, saveWorked, workOut } from "../src/modules/food/nutrition-ops";
 import { planBetween, planCook } from "../src/modules/food/plan-ops";
-import { insertRecipe } from "../src/modules/food/recipe-ops";
+import { insertRecipe, listRecipes } from "../src/modules/food/recipe-ops";
 
 /**
  * A recipe's nutrition worked out, against a real database (docs/modules/food.md,
@@ -188,6 +188,8 @@ d("food: a recipe's nutrition, worked out (db)", () => {
     const calories = perServingOf(worked!.whole, 4).calories as number;
     expect((await inTenant((tx) => recipeHit(tx, tenant.id, id)))?.perServing?.calories).toBe(calories);
     expect((await inTenant((tx) => searchRecipes(tx, tenant.id, "chili")))[0].perServing?.calories).toBe(calories);
+    // The recipe card on Recipes shows the same serving (ADR 0132).
+    expect((await inTenant((tx) => listRecipes(tx, tenant.id))).find((r) => r.id === id)?.perServing?.calories).toBe(calories);
     const eatenId = randomUUID();
     await inTenant((tx) => logRecipe(tx, ctx, { id: eatenId, day: TODAY, meal: "dinner", recipeId: id, servings: 2 }, NOW));
     const [eaten] = await withSystem((tx) => tx.select({ calories: schema.foodEaten.calories }).from(schema.foodEaten).where(eq(schema.foodEaten.id, eatenId)));
@@ -222,6 +224,8 @@ d("food: a recipe's nutrition, worked out (db)", () => {
     expect(hit?.perServing?.calories).toBe(520);
     expect(hit?.perServing?.proteinG).toBe(44);
     expect(hit?.perServing?.fatG).toBeGreaterThan(0);
+    const card = (await inTenant((tx) => listRecipes(tx, tenant.id))).find((r) => r.id === id);
+    expect(card?.perServing).toEqual({ calories: 520, proteinG: 44 });
   });
 
   it("fills in what past logs lacked, and never a number already logged", async () => {

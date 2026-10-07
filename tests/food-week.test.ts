@@ -13,6 +13,7 @@ import {
   leftoverCount,
   leftoverServings,
   mondayOf,
+  openingDay,
   planAmountWords,
   planCookSchema,
   planNumbers,
@@ -25,6 +26,7 @@ import {
   weekAverage,
   weekDays,
   weekInReach,
+  weekName,
   weekWords,
   type PlanItem,
   type PlanRowLike,
@@ -109,6 +111,19 @@ describe("weeks", () => {
     expect(weekWords("2026-09-21", TODAY)).toBe("Sep 21 to 27");
     expect(rangeWords("2026-08-31")).toBe("Aug 31 to Sep 6");
     expect(dayTitle("2026-10-05")).toBe("Mon, Oct 5");
+    // The name alone is the week's title; a week with none is titled by its dates (ADR 0132).
+    expect(weekName("2026-10-05", TODAY)).toBe("This week");
+    expect(weekName("2026-10-12", TODAY)).toBe("Next week");
+    expect(weekName("2026-09-28", TODAY)).toBe("Last week");
+    expect(weekName("2026-09-21", TODAY)).toBeNull();
+  });
+
+  it("open on today on a phone, and on the Monday of any other week", () => {
+    expect(openingDay("2026-10-05", TODAY)).toBe(TODAY);
+    expect(openingDay("2026-10-05", "2026-10-05")).toBe("2026-10-05");
+    expect(openingDay("2026-10-05", "2026-10-11")).toBe("2026-10-11");
+    expect(openingDay("2026-10-12", TODAY)).toBe("2026-10-12");
+    expect(openingDay("2026-09-28", TODAY)).toBe("2026-09-28");
   });
 });
 

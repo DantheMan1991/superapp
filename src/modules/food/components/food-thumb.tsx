@@ -111,6 +111,15 @@ export const TONE_CLASS: Record<ThumbTone, string> = {
   neutral: "bg-food-tint text-food-accent-ink",
 };
 
+const RECIPE_TONES: readonly ThumbTone[] = ["dinner", "lunch", "breakfast", "snack"];
+
+/** A recipe with no photo keeps the same tint everywhere it is drawn: one of the meals', by its id. */
+export function recipeTone(id: string): ThumbTone {
+  let sum = 0;
+  for (let i = 0; i < id.length; i += 1) sum += id.charCodeAt(i);
+  return RECIPE_TONES[sum % RECIPE_TONES.length];
+}
+
 /**
  * THE PICTURE BESIDE A FOOD OR A RECIPE (ADR 0132): a recipe's own photo, a
  * chef's hat without one, and a food on USDA's list as the icon for its kind

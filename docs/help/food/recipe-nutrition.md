@@ -4,7 +4,7 @@
 > **Route:** /personal/m/food/recipes/*/nutrition
 > **Order:** 35
 
-Open a recipe and click {button:Work it out from the ingredients|primary|calculator}, or {button:Work out its nutrition|outline} on a meal that shows `no nutrition` on Today or `no numbers` on the week. Check each line, then click {button:Save as worked out|primary}.
+Open a recipe and click {button:Work it out from the ingredients|food-soft|calculator}, or {button:Work out its nutrition|food-soft} on a meal that shows `no nutrition` on Today or `no numbers` on the week. Check each line, then click {button:Save as worked out|primary}.
 
 Claude only finds each line's food on USDA's list and estimates a weight where neither the line nor USDA gives one. The numbers are USDA's, for the grams you check.
 
@@ -35,11 +35,11 @@ Claude only finds each line's food on USDA's list and estimates a weight where n
 - **The recipe's own first.** A recipe that states its calories or protein keeps them; the worked-out numbers count for what it does not state.
 - **Everywhere a recipe counts**: Log food, Today's Ate it, and the week's numbers.
 - **What the recipe makes** divides it. Change it in the recipe's editor and a serving follows, with nothing to check again: the whole recipe is kept, not a serving.
-- **Change the recipe's ingredients** later, and the recipe says it was worked out from an earlier version, with {button:Check it again|outline}. Its numbers still count until you do.
+- **Change the recipe's ingredients** later, and the recipe says it was worked out from an earlier version, with {button:Check it again|food-soft}. Its numbers still count until you do.
 
 ## How to work out a recipe
 
-1. Open the recipe and click {button:Work it out from the ingredients|primary|calculator}.
+1. Open the recipe and click {button:Work it out from the ingredients|food-soft|calculator}.
 2. Wait a few seconds while the lines are matched.
 3. Read down the lines. Where a food is wrong, click {button:Change food|outline} and choose the right one. Where a weight is off, type the grams.
 4. Check the totals per serving. If the recipe makes more or fewer than it says, change that in its editor: the totals follow.

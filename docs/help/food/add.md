@@ -4,7 +4,7 @@
 > **Route:** /personal/m/food/add
 > **Order:** 10
 
-Click {button:Add a recipe|primary|plus} on Food's `Recipes`. Pick how the recipe comes in, fill in its box, and click {button:Read it|primary}. When it has been read, the editor opens on it so you can check it and save it. See [Typing in and editing a recipe](editor.md).
+Click {button:Add a recipe|food|plus} on Food's `Recipes`. Pick how the recipe comes in, fill in its box, and click {button:Read it|primary}. When it has been read, the editor opens on it so you can check it and save it. See [Typing in and editing a recipe](editor.md).
 
 ## What you see
 

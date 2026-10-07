@@ -42,7 +42,8 @@ const TABS: readonly Tab[] = [
   { href: "/personal/m/food/list", label: "List", icon: ShoppingCart },
 ];
 
-function useLeftToBuy(input: ListBadgeInput | null): number | null {
+/** What is still to buy, by the list's rule and this phone's ticks; null without the list's inputs. */
+export function useLeftToBuy(input: ListBadgeInput | null): number | null {
   const state = useShopping(input?.tenantId ?? "");
   if (!input) return null;
   const range = state.range && rangeOk(state.range, input.today) ? state.range : defaultRange(input.today);

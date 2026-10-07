@@ -886,7 +886,9 @@ None. No tables, no migrations.
   nothing reaches the database at build time. If this step ever starts needing a
   secret, something now runs at module scope that should not.
 - **Date bombs are hunted on the dates the tests write, and at a horizon.** A
-  test that collides with today on one written day fails on that day only, so
+  written date is a `YYYY-MM-DD` string, or a `new Date(Y, M, D…)` or
+  `Date.UTC(Y, M, D…)` whose parts are literal numbers (the suite writes both).
+  A test that collides with today on one written day fails on that day only, so
   only a run on that day meets it; paste-targets' was written 22 days ahead,
   and no run "60 days ahead" would ever have seen it. A test that breaks from
   some date on is met by any run past it, so one whole-suite run at +60 days
@@ -997,6 +999,9 @@ None. No tables, no migrations.
   - **Dates written in `src/`.** Only `tests/` is read for dates, so a rule
     with a date in it (a tax year, an offer's end) meets only the horizon run,
     and one that misbehaves on a single day would pass it.
+  - **A day the test computes** (`new Date(2026, 9, day)`, a helper adding
+    days to a fixed start) is not read; only literal days are. Such a test is
+    run on its days only if it also writes them, or by the horizon run.
   - **Other hours.** A written day runs at noon UTC only. A test whose answer
     depends on a far zone's local date could pass at noon UTC and fail near
     midnight.

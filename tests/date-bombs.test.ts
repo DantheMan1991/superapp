@@ -46,6 +46,17 @@ describe("date bombs: the dates the tests write", () => {
     expect(datesIn(text).sort()).toEqual(["2031-03-01", "2031-03-05"]);
   });
 
+  it("finds a day built from literal numbers, its month counted from 0", () => {
+    const text = `
+      const local = new Date(2031, 2, 7, 9, 30);   // 7 March
+      const utc = Date.UTC(2031, 0, 31);           // 31 January
+      const nope = new Date(2031, 1, 30);          // not a day
+      const each = new Date(2031, 3, day, 10);     // a day the source cannot know
+      const sum = Date.UTC(2031, 3, 1 + d);        // nor this one
+    `;
+    expect(datesIn(text).sort()).toEqual(["2031-01-31", "2031-03-07"]);
+  });
+
   it("keeps the days after today up to the horizon, each with the files that write it", () => {
     const { dates, unrun } = writtenDates(
       [

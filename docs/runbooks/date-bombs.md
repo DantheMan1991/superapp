@@ -17,8 +17,10 @@ The **Date bombs** workflow (`.github/workflows/date-bombs.yml`) looks for the
 next one every day at 05:23 UTC. It runs:
 
 - **every test file on every date it writes** in the next 60 days, with the
-  clock at noon UTC on that day. A collision like 2026-10-01's fails on that
-  day only, so this is the run that meets it.
+  clock at noon UTC on that day: a `"2026-10-01"` string, or a
+  `new Date(2026, 9, 1)` or `Date.UTC(2026, 9, 1)` written in literal numbers.
+  A collision like 2026-10-01's fails on that day only, so this is the run
+  that meets it.
 - **the whole suite 60 days ahead**, for a test that breaks from some date on
   and stays broken. That one is then bisected to the first day it fails.
 

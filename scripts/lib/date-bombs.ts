@@ -59,14 +59,24 @@ export type Bomb = {
 export const isTestFile = (path: string) => path.endsWith(".test.ts");
 
 const WRITTEN = /(?<!\d)(20\d{2}-[01]\d-[0-3]\d)(?!\d)/g;
+/** `new Date(2026, 9, 1…)` and `Date.UTC(2026, 9, 1…)`: months from 0, every part a literal. */
+const CONSTRUCTED = /(?:new Date|Date\.UTC)\(\s*(20\d{2})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*[,)]/g;
 
-/** Every real day written in `text` as YYYY-MM-DD, once each. */
+/**
+ * Every real day written in `text`, as YYYY-MM-DD, once each: written as a
+ * string, or built from literal numbers. A day computed (`day`, `1 + d`) is
+ * not something a reading of the source can know.
+ */
 export function datesIn(text: string): string[] {
   const days = new Set<string>();
-  for (const [, day] of text.matchAll(WRITTEN)) {
+  const add = (day: string) => {
     const ms = Date.parse(`${day}T00:00:00Z`);
     // 2026-02-31 matches the pattern and is not a day.
     if (Number.isFinite(ms) && new Date(ms).toISOString().startsWith(day)) days.add(day);
+  };
+  for (const [, day] of text.matchAll(WRITTEN)) add(day);
+  for (const [, year, month, day] of text.matchAll(CONSTRUCTED)) {
+    add(`${year}-${String(Number(month) + 1).padStart(2, "0")}-${day.padStart(2, "0")}`);
   }
   return [...days];
 }

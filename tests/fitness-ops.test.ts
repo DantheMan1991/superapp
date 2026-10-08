@@ -522,7 +522,11 @@ d("workouts: programs and imports", () => {
       await expect(
         inTenant((tx) => saveSession(tx, tenant.id, { ...doc, programId: b.id, revision: 5 })),
       ).rejects.toMatchObject({ code: "INVALID" });
-      const ahead = { ...beginSession(sessionPlan(a, 0), { id: randomUUID(), now: new Date(), feelBefore: null }), localDay: "2099-01-01" };
+      // Three days past the session's own day is ahead of any today, whenever the
+      // suite runs: saveSession allows a day and a half. A fixed 2099-01-01 would
+      // have been saved from 2098-12-30 on.
+      const fresh = beginSession(sessionPlan(a, 0), { id: randomUUID(), now: new Date(), feelBefore: null });
+      const ahead = { ...fresh, localDay: shiftDay(fresh.localDay, 3) };
       await expect(inTenant((tx) => saveSession(tx, tenant.id, ahead))).rejects.toMatchObject({ code: "INVALID" });
     });
 

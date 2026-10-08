@@ -289,6 +289,14 @@ reads to infer intent. The existing standard, which is worth keeping:
   physically cannot reach production. Without it suites **skip** — a skipped
   isolation run is not a passing one.
 - `core/` logic is tested without a database. Prefer pushing logic there.
+- **A written date and the real clock must never meet.** Pass `today` or `now`
+  in, as nearly every test here does, or write the date relative to the run
+  (`new Date(Date.now() + 30 * 86_400_000)`). A fixed "future" date beside the
+  real clock is a date bomb: on its day it fails on every branch at once, as
+  `tests/paste-targets-db.test.ts` did on 2026-10-01. The Date bombs workflow
+  runs every test file on each date it writes in the next 60 days and opens a
+  `date-bomb` issue for one that fails; [runbooks/date-bombs.md](runbooks/date-bombs.md)
+  is the fix.
 - `live-*.test.ts` hit real provider APIs and are not part of the default gate.
 - **Two vitest projects.** `pure` runs files in parallel; `db` runs them
   sequentially, because those suites share one database and several assert

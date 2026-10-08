@@ -1,8 +1,9 @@
 # CI and the test loop
 
-> Platform-level (Layer 0) machinery: the GitHub Actions workflow, and how the
-> vitest suite is partitioned. Not a sellable module — it is what stops every
-> check from running on somebody's laptop and blocking them for twenty minutes.
+> Platform-level (Layer 0) machinery: the GitHub Actions workflows, how the
+> vitest suite is partitioned, and the daily guard that runs it on the dates its
+> tests write. Not a sellable module — it is what stops every check from running
+> on somebody's laptop and blocking them for twenty minutes.
 > Status: live · Scope: `platform`
 
 ## Running the database suite with no Neon branch
@@ -50,6 +51,63 @@ one, and it is why slice dossiers keep carrying "not driven in a browser" as an
 open item while every test passes.
 
 ## Build log
+
+### 2026-10-07 — A daily guard runs each test on the dates it writes, with the database's clock moved too (branch `claude/elastic-fermi-eed357`)
+
+**The Date bombs workflow** (`.github/workflows/date-bombs.yml`) is #705's
+sweep made permanent. The founder's calls, asked before any of it was built
+(2026-10-07): the written dates as well as a horizon, every day rather than
+weekly, and a GitHub issue per bomb with the run itself staying green.
+
+**A single "60 days ahead" run would not have caught the bomb that started
+this.** That was the brief's shape. But `tests/paste-targets-db.test.ts`
+wrote "2026-10-01" on 2026-09-09, 22 days before the date, and failed on that
+one day only (#688): no run at "today + 60" ever lands on it. So the guard
+runs every test file on every date it writes in the next 60 days, at noon UTC
+that day: 43 dates in 45 files on 2026-10-07, 19 of them db files. Then the
+whole suite 60 days ahead, for a test that breaks from some date on, bisected
+to its first day. #705 had run the pure files on their written dates, but the
+db files only at 2027-02-15; until this, no db file had run on its own dates.
+
+**Both clocks move, by one string.** `tests/setup/time-shift.ts`, #705's
+harness now committed and loaded on every run, does nothing unless `FAKE_NOW`
+is set, and reads it the way libfaketime does: `+5184000` or `+60d`. The guard
+hands the same string to Postgres through libfaketime
+(`docker/postgres-faketime`), so both read real time plus the same offset, to
+the second, and the 12 db tests that failed under #705's JS-only shift (a row
+stamped by `now()` read against a moved JS clock) have nothing to fail on. A
+date still works for a sweep by hand (`FAKE_NOW=2031-06-15T12:00:00Z`) and
+moves only the tests' clock; `tests/time-shift-db.test.ts` then fails and says
+so.
+
+**Proven on a local copy first** (Docker Desktop, the same compose file):
+
+| What | Result |
+| --- | --- |
+| `now()` with the offset file at `+60d`, `+3600`, `+0` | 2026-12-06, one hour on, the real time; each within 2 s, no restart |
+| A scratch file with three bombs, `--only` it, 60 days | Found all three: **on 2026-11-06** (the JS clock's date beside a written one), **on 2026-11-13** (the database's `now()` beside one), **from 2026-11-20** ("still in the future"), the last bisected past the probes that landed on the other two |
+| The same file, only the JS clock moved to 2026-11-13 | The database bomb passed unnoticed, and the db canary failed: "The database reads 2026-10-07 … and the tests read 2026-11-13" |
+| `food-week` and `food-week-ops`, written dates for 5 days | 6 runs, clean, both canaries passed in each |
+| The whole guard, from the laptop | 2026-10-08 to 10-13 clean, six dates, db files included; stopped at 10-14 (`jobs-ops` takes 168 s through Docker Desktop against 26 s in CI) |
+| Three deliberate breaks: retries following the file, a `FAKE_NOW` of "1" read as a date, `+60d` read as seconds | Each failed exactly the unit test written for it |
+
+**Then in CI, on the pull request, with the scratch file in** (run
+37604991665, 27 minutes): 46 runs, 45 written dates and then the whole suite
+60 days ahead, 448 files and 8,509 tests. The scratch file was the only
+failure in any of them, so the 12 db tests that failed under #705's JS-only
+shift all passed with both clocks moved. Each of its three failures failed
+again on its own clock and passed on the real one, bisection settled on
+2026-11-20 past the two probes that hit the other bombs, and the run opened
+#709 for the file and stayed green. #709 was closed and the scratch reverted
+before the merge.
+
+**The container never started, at first, and logged nothing.** libfaketime
+shares a semaphore from the first process to its children, named by its pid,
+and exports `FAKETIME_SHARED` to say so. The postgres image's entrypoint runs
+as root in pid 1, then `gosu` execs it again as `postgres` in the same pid 1,
+which then waits on root's semaphore forever: a futex wait in `env`, before
+bash starts. `FAKETIME_DISABLE_SHM=1` turns the sharing off; a relative offset
+read from one file needs none of it. The Dockerfile says so where the line is.
 
 ### 2026-10-06 — The suite swept for date bombs (branch `claude/test-date-bombs`)
 
@@ -763,6 +821,13 @@ None. No tables, no migrations.
 | `scripts/lib/neon-local.ts` | Points the Neon driver at a local Postgres through `wsproxy`. **No-op unless `NEON_LOCAL_PROXY` is set** |
 | `scripts/lib/app-role.ts` | The `app_user` grants, shared by the interactive and CI paths so they cannot drift |
 | `scripts/ci-provision-db.ts` | Creates `app_user` in the runner and refuses to continue if it can bypass RLS |
+| `.github/workflows/date-bombs.yml` | The Date bombs guard: daily at 05:23 UTC, on a pull request that changes the guard, and by hand. Starts the libfaketime Postgres, builds and seeds it, runs `scripts/date-bombs.ts` |
+| `scripts/date-bombs.ts` | Runs the guard: per run a fresh clone of the seeded database and both clocks moved, then the retries, the bisection, the issues and the summary. `--plan` and `--only` for running it by hand |
+| `scripts/lib/date-bombs.ts` | The guard's reasoning, tested in `tests/date-bombs.test.ts`: the written dates, the runs, a vitest report read, what counts as a bomb, the issue and the summary |
+| `docker/postgres-faketime/` | Postgres 18 with libfaketime reading its offset from a mounted file, and the compose file that starts it beside Neon's proxy, in CI and on a laptop |
+| `tests/setup/time-shift.ts` | Moves the tests' clock when `FAKE_NOW` is set, and does nothing otherwise |
+| `tests/time-shift.test.ts`, `tests/time-shift-db.test.ts` | The moved `Date`, and the two canaries every guard run must pass in full: this run's clock reads `FAKE_NOW`, and the database's clock agrees with it |
+| `docs/runbooks/date-bombs.md` | Fixing a `date-bomb` issue, and running the guard on a laptop |
 
 ## Decisions & gotchas
 
@@ -830,6 +895,56 @@ None. No tables, no migrations.
   `sitemap.xml` and `icon.png` are static, every real page is dynamic, so
   nothing reaches the database at build time. If this step ever starts needing a
   secret, something now runs at module scope that should not.
+- **Date bombs are hunted on the dates the tests write, and at a horizon.** A
+  written date is a `YYYY-MM-DD` string, or a `new Date(Y, M, D…)` or
+  `Date.UTC(Y, M, D…)` whose parts are literal numbers (the suite writes both).
+  A test that collides with today on one written day fails on that day only, so
+  only a run on that day meets it; paste-targets' was written 22 days ahead,
+  and no run "60 days ahead" would ever have seen it. A test that breaks from
+  some date on is met by any run past it, so one whole-suite run at +60 days
+  covers that kind, and bisection finds its first day. The clock sits at noon
+  UTC on a written day: the same date from UTC-11 to UTC+11.
+- **Both clocks move, by one RELATIVE offset string.** `FAKE_NOW=+5184000` for
+  the tests and the same `+5184000` in libfaketime's offset file for Postgres:
+  real time plus the same seconds, so the two agree to the second however long
+  a run takes. Two absolute dates would not: each would be set at a different
+  moment, minutes apart by the end of a run, and the livestock advisor's cap
+  counts questions in the last minute. Moving only the JS clock is what failed
+  12 db tests in #705's sweep.
+- **`FAKETIME_DISABLE_SHM=1` is load-bearing.** Without it the Postgres
+  container never starts and logs nothing: libfaketime's shared semaphore is
+  named by pid, and the entrypoint's `gosu` re-exec as `postgres` in pid 1
+  waits on the one root made there. The Dockerfile's comment has the details.
+- **Every guard run gets a fresh database**, `create database date_bomb_run
+  template superapp_test`, cloned from the migrated and seeded one. Runs on
+  different days must not read each other's rows, and the retries below must
+  start from what the first try started from. A clone keeps everything inside
+  the database; it loses only `ALTER DATABASE … SET`, and nothing in the
+  migration chain or the scripts uses one (checked 2026-10-07).
+- **A failure is a bomb only if it fails again on the same clock and passes on
+  the real clock**, each try on its own fresh clone. Anything else is listed in
+  the summary as what it was: failing on the real clock too, or flaky. The
+  retries and the bisection follow the tests that failed, not the file, so a
+  file holding two bombs does not have one stop the search for the other.
+- **Bombs are reported, never red.** One issue per test file, labelled
+  `date-bomb`, marked with an HTML comment naming the file so a second is never
+  opened while the first is open; a warning on the file; a table in the run's
+  summary. The run goes red only when the guard itself broke (a clock did not
+  move, a canary failed, vitest died, `gh` failed), because a scheduled run's
+  checks land on main's newest commit, and red there reads as "main is broken"
+  when main is fine today. The founder's call, 2026-10-07.
+- **Two canaries, in every run, passed in full.** `tests/time-shift.test.ts`
+  proves this run's JS clock reads `FAKE_NOW`, against `performance`'s
+  untouched clock, and `tests/time-shift-db.test.ts` proves the database's
+  agrees with it. A canary skipped or missing is a broken run, not a clean one.
+  The db canary also runs in the ordinary suite, where it asserts the two
+  clocks agree to within 30 seconds, which every rate-cap test already assumes.
+- **Daily at 05:23 UTC**, the founder's call: tests here often write dates
+  only days ahead, and a weekly run can miss a fuse under a week. Also on a pull
+  request that changes the guard's own files, and by hand.
+- **On Windows the offset file sometimes cannot be replaced while Docker
+  Desktop reads it** (EPERM on rename). The guard retries, then writes in place;
+  Linux never refuses.
 
 ## Open items
 
@@ -890,3 +1005,23 @@ None. No tables, no migrations.
   the lockfile was authored with — CI pins 24 to match development, but that is
   a convention held in one YAML file. Adding `engines` would make it explicit;
   check what Vercel builds with before doing so.
+- **What the Date bombs guard cannot see** (2026-10-07):
+  - **Dates written in `src/`.** Only `tests/` is read for dates, so a rule
+    with a date in it (a tax year, an offer's end) meets only the horizon run,
+    and one that misbehaves on a single day would pass it.
+  - **A day the test computes** (`new Date(2026, 9, day)`, a helper adding
+    days to a fixed start) is not read; only literal days are. Such a test is
+    run on its days only if it also writes them, or by the horizon run.
+  - **Other hours.** A written day runs at noon UTC only. A test whose answer
+    depends on a far zone's local date could pass at noon UTC and fail near
+    midnight.
+  - **A fuse shorter than a day.** A test merged after 05:23 UTC that collides
+    with tomorrow goes off before the next run. Catching that needs the guard
+    on the pull request that adds the date: the changed test files only, on
+    the dates they write. Not built; it would put a job on more pull requests.
+  - **Clock readings below JavaScript**: `Intl.DateTimeFormat().format()` with
+    no date and `Temporal.Now` keep the real time, as do `performance` and
+    timers. The seed also runs on the real clock, before the first offset.
+- **Not yet watched happening:** a scheduled run (the first is the 05:23 UTC
+  after the merge, since a schedule runs only from `main`), and an issue for a
+  real bomb. The issue path itself was watched on the pull request: #709.

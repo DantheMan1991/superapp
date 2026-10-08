@@ -1,0 +1,155 @@
+name: Date bombs
+
+# A DATE BOMB is a test that passes on every run until a particular day, then
+# fails on every branch at once. tests/paste-targets-db.test.ts was one: it
+# pasted a price "from 2026-10-01" beside one "from today", and on 2026-10-01
+# the two collided and CI failed all day (fixed in #688). #705 swept the suite
+# by hand and found one more (fitness-ops' 2099). This job is that sweep, every
+# day, so the next one is found weeks before its day instead of on it.
+#
+# WHAT IT RUNS (scripts/date-bombs.ts; the reasoning is in
+# scripts/lib/date-bombs.ts):
+#
+#   - every test file on every date it writes in the next 60 days, with the
+#     clock at noon UTC that day. A same-day collision fails on that one day
+#     only, so a run "60 days ahead" never meets it: 2026-10-01's was written
+#     22 days before its date.
+#   - the whole suite with the clock 60 days ahead, for a test that breaks from
+#     some date on, bisected to the first day it fails.
+#
+# BOTH CLOCKS MOVE, by the same offset: the tests' (tests/setup/time-shift.ts)
+# and Postgres's, through libfaketime (docker/postgres-faketime). Moving only
+# the first failed 12 db tests in #705's sweep for no reason: rows the database
+# stamps with its own now() were read against a moved JS clock. Every run gets
+# a fresh copy of the migrated, seeded database, and two canaries,
+# tests/time-shift.test.ts and tests/time-shift-db.test.ts, must pass in every
+# run, or the run is not trusted.
+#
+# WHAT IT SAYS. A bomb is a file that fails with the clock moved, fails again on
+# a second try, and passes on the real clock. Each one gets a GitHub issue
+# labelled `date-bomb`, one per test file and never duplicated, plus a warning
+# and a table in this run's summary. THE RUN STAYS GREEN when it finds one: a
+# scheduled run's checks land on main's newest commit, and a red X there would
+# read as "main is broken" when main is fine today. It goes red only when the
+# guard itself broke: a clock did not move, a canary failed, vitest died, or an
+# issue could not be opened. The founder's calls, 2026-10-07, as is the cadence.
+#
+# WHEN. Every day. Tests here often write dates only days ahead (the food week
+# writes 2026-10-07 to 10-19), and a weekly run could miss a fuse shorter than
+# a week. Minutes are free on a public repository, and a run that finds nothing
+# says nothing. Also on a pull request that changes the guard itself, which is
+# how a change to it proves itself, and by hand from the Actions tab.
+#
+# NEVER POINTED AT A REAL DATABASE. Like the suite's own CI job, it builds
+# Postgres inside its runner, and the URLs below are not secrets.
+# scripts/date-bombs.ts creates and drops databases, and refuses any URL that is
+# not on this machine.
+
+on:
+  schedule:
+    # 05:23 UTC daily. Off the hour on purpose: GitHub queues scheduled runs,
+    # and the ones on the hour wait longest.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      horizon_days:
+        description: How many days ahead to look
+        required: false
+        default: "60"
+  pull_request:
+    paths:
+      - ".github/workflows/date-bombs.yml"
+      - "docker/postgres-faketime/**"
+      - "scripts/date-bombs.ts"
+      - "scripts/lib/date-bombs.ts"
+      - "tests/setup/time-shift.ts"
+      - "tests/time-shift.test.ts"
+      - "tests/time-shift-db.test.ts"
+      - "tests/date-bombs.test.ts"
+      - "vitest.config.ts"
+
+permissions:
+  contents: read
+  # The issues it opens, and the `date-bomb` label it makes the first time.
+  issues: write
+
+# A newer push to a pull request supersedes its run. On main, runs queue rather
+# than overlap, so two cannot open the same issue at once.
+concurrency:
+  group: date-bombs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  guard:
+    name: Date bombs
+    runs-on: ubuntu-latest
+    # About 35 minutes. Twice that means something hung.
+    timeout-minutes: 90
+    env:
+      # The same throwaway database as ci.yml's `tests` job, with the same
+      # not-secret values, built by the compose file below instead of as
+      # services, because Postgres here is our own image.
+      NEON_LOCAL_PROXY: localhost:5433
+      CI_POSTGRES_OWNER_URL: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+      CI_APP_USER_PASSWORD: ci-app-user-not-a-real-secret
+      TEST_DATABASE_URL_OWNER: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+      TEST_DATABASE_URL: postgres://app_user:ci-app-user-not-a-real-secret@localhost:5432/superapp_test
+      # Where the guard writes Postgres's clock offset; mounted at /etc/faketime.
+      DATE_BOMB_CLOCK_DIR: /tmp/date-bomb-clock
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The directory first, as this user: docker would make a missing one as
+      # root, and the guard could not then write the clock.
+      - name: Start Postgres 18 with a clock this job can move
+        run: |
+          mkdir -p "$DATE_BOMB_CLOCK_DIR"
+          echo "+0" > "$DATE_BOMB_CLOCK_DIR/offset"
+          docker compose -f docker/postgres-faketime/compose.yml up -d --build --wait
+
+      - name: Build the schema from zero
+        run: npm run db:migrate -- --dev
+
+      - name: Provision app_user, and prove it cannot bypass RLS
+        run: npx tsx scripts/ci-provision-db.ts
+
+      - name: Seed the module registry
+        env:
+          DATABASE_URL: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+        run: npm run db:seed
+
+      - name: Run the suite on the dates it writes, and 60 days ahead
+        env:
+          # The suite's three non-database values, as in ci.yml: any value of
+          # the right shape, and deliberately not repo secrets.
+          APP_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+          SHARE_SECRET: ci-test-share-secret-deterministic-not-real-000
+          INTERVIEW_IP_SALT: ci-test-interview-salt
+          DATE_BOMB_HORIZON_DAYS: ${{ inputs.horizon_days || '60' }}
+          DATE_BOMB_REPORT_DIR: ${{ runner.temp }}/date-bombs
+          # A pull request from a fork gets a read-only token, so it reports in
+          # its summary and opens nothing.
+          DATE_BOMB_OPEN_ISSUES: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '1' || '0' }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: npx tsx scripts/date-bombs.ts
+
+      - name: Keep every run's report for a week
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: date-bomb-reports
+          path: ${{ runner.temp }}/date-bombs
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Postgres's log, when the guard broke
+        if: failure()
+        run: docker compose -f docker/postgres-faketime/compose.yml logs --tail 200 postgres

@@ -20,10 +20,14 @@ import { DB_BACKED_TESTS } from "./tests/db-backed-files";
  * test added to a previously-pure file cannot silently start racing.
  */
 const shared = {
-  // Runs before anything imports src/db. Points DB-backed suites at a
-  // separate database, or removes DATABASE_URL so they skip — these tests
+  // database-guard runs before anything imports src/db. Points DB-backed suites
+  // at a separate database, or removes DATABASE_URL so they skip — these tests
   // create and delete tenants under withSystem, where RLS is not watching.
-  setupFiles: ["tests/setup/database-guard.ts"],
+  //
+  // time-shift moves the clock the tests read when FAKE_NOW is set, and does
+  // nothing otherwise. It is how the Date bombs workflow runs the suite on the
+  // dates the tests write (.github/workflows/date-bombs.yml).
+  setupFiles: ["tests/setup/database-guard.ts", "tests/setup/time-shift.ts"],
   testTimeout: 30_000,
   hookTimeout: 30_000,
 };

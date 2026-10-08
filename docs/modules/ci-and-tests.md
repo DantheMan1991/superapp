@@ -91,6 +91,16 @@ so.
 | The whole guard, from the laptop | 2026-10-08 to 10-13 clean, six dates, db files included; stopped at 10-14 (`jobs-ops` takes 168 s through Docker Desktop against 26 s in CI) |
 | Three deliberate breaks: retries following the file, a `FAKE_NOW` of "1" read as a date, `+60d` read as seconds | Each failed exactly the unit test written for it |
 
+**Then in CI, on the pull request, with the scratch file in** (run
+37604991665, 27 minutes): 46 runs, 45 written dates and then the whole suite
+60 days ahead, 448 files and 8,509 tests. The scratch file was the only
+failure in any of them, so the 12 db tests that failed under #705's JS-only
+shift all passed with both clocks moved. Each of its three failures failed
+again on its own clock and passed on the real one, bisection settled on
+2026-11-20 past the two probes that hit the other bombs, and the run opened
+#709 for the file and stayed green. #709 was closed and the scratch reverted
+before the merge.
+
 **The container never started, at first, and logged nothing.** libfaketime
 shares a semaphore from the first process to its children, named by its pid,
 and exports `FAKETIME_SHARED` to say so. The postgres image's entrypoint runs
@@ -1012,5 +1022,6 @@ None. No tables, no migrations.
   - **Clock readings below JavaScript**: `Intl.DateTimeFormat().format()` with
     no date and `Temporal.Now` keep the real time, as do `performance` and
     timers. The seed also runs on the real clock, before the first offset.
-- **Not yet watched happening:** a scheduled run (the first is 05:23 UTC on
-  2026-10-08), and an issue for a real bomb.
+- **Not yet watched happening:** a scheduled run (the first is the 05:23 UTC
+  after the merge, since a schedule runs only from `main`), and an issue for a
+  real bomb. The issue path itself was watched on the pull request: #709.
